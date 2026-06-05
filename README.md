@@ -6,7 +6,7 @@ An AI-first Food &amp; Beverage location intelligence platform that transforms F
 1. Create a backend environment file:
 
    ```powershell
-   Copy-Item backend\.env.example backend\.env
+   backend\.env.example backend\.env
    ```
 
 2. Update `backend\.env` with your Gemini API key:
