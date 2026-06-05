@@ -1,0 +1,15 @@
+node_modules/
+frontend/node_modules/
+backend/venv/
+backend/.venv/
+.vscode/
+
+frontend/dist/
+
+.env
+.env.local
+backend/.env
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
