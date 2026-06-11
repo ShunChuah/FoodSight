@@ -222,7 +222,7 @@
   flex-shrink: 0;
 }
 
-.send-btn-wrapper.is-empty:hover::after {
+.send-btn-wrapper.has-tooltip:hover::after {
   content: attr(data-tooltip);
   position: absolute;
   right: 0;

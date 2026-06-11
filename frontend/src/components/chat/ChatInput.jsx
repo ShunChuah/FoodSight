@@ -4,6 +4,9 @@ import "../../styles/chat.css";
 import { quickQueries } from "../../../data/quickQueriesTemplate";
 import GeneralDialog from "../modals/GeneralDialog";
 
+const MAX_MESSAGE_WORDS = 1000;
+const MAX_MESSAGE_CHARACTERS = 5000;
+
 function ChatInput({
   onPrepareQuery,
   onSendQuery,
@@ -18,7 +21,11 @@ function ChatInput({
   const [isResolvingLocation, setIsResolvingLocation] = useState(false);
   const textareaRef = useRef(null);
   const isMessageEmpty = !input.trim();
-  const sendDisabled = disabled || isResolvingLocation || isMessageEmpty;
+  const wordCount = input.trim() ? input.trim().split(/\s+/).length : 0;
+  const isMessageTooLong =
+    wordCount > MAX_MESSAGE_WORDS || input.length > MAX_MESSAGE_CHARACTERS;
+  const sendDisabled =
+    disabled || isResolvingLocation || isMessageEmpty || isMessageTooLong;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -144,7 +151,14 @@ function ChatInput({
 
   const handleSend = async () => {
     // Prevent empty sends and duplicate sends while the backend is processing.
-    if (!input.trim() || disabled || isResolvingLocation) return;
+    if (
+      !input.trim()
+      || disabled
+      || isResolvingLocation
+      || isMessageTooLong
+    ) {
+      return;
+    }
 
     const query = input.trim();
     setIsResolvingLocation(true);
@@ -217,8 +231,12 @@ function ChatInput({
           </button>
 
           <span
-            className={`send-btn-wrapper ${isMessageEmpty ? "is-empty" : ""}`}
-            data-tooltip="Message is empty"
+            className={`send-btn-wrapper ${
+              isMessageEmpty || isMessageTooLong ? "has-tooltip" : ""
+            }`}
+            data-tooltip={
+              isMessageTooLong ? "Text is too long" : "Message is empty"
+            }
           >
             <button
               className="send-btn"
@@ -226,9 +244,11 @@ function ChatInput({
               title={
                 isResolvingLocation
                   ? "Getting location"
-                  : isMessageEmpty
-                    ? ""
-                    : "Send"
+                  : isMessageTooLong
+                    ? "Text too long"
+                    : isMessageEmpty
+                      ? ""
+                      : "Send"
               }
               onClick={handleSend}
               disabled={sendDisabled}
