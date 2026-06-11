@@ -1,5 +1,7 @@
 # Chat API routes: list, save, rename, pin, and delete chat histories.
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import os
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -11,31 +13,63 @@ from ..schemas import (
     ChatCreate,
     ChatListResponse,
     ChatPinRequest,
+    ChatPreflightRequest,
+    ChatPreflightResponse,
     ChatRead,
     ChatRenameRequest,
     ChatSendRequest,
     ChatSendResponse,
     DeleteChatResponse,
 )
-from ..services.openai_service import generate_assistant_response, generate_chat_title
+from ..services.chat_service import (
+    assess_fnb_query,
+    assess_location_requirement,
+    generate_assistant_response,
+    has_deterministic_fnb_signal,
+)
+from ..services.llm_service import generate_chat_title
 
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
-def create_chat_title(message: str) -> str:
-    # Delegates title generation to OpenAI, with fallback handled in the service.
-    return generate_chat_title(message)
+def get_display_timezone():
+    configured_timezone = os.getenv("APP_TIMEZONE", "Asia/Kuala_Lumpur").strip()
+    try:
+        return ZoneInfo(configured_timezone)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Asia/Kuala_Lumpur")
+
+
+def to_display_time(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(get_display_timezone())
+
+
+def create_chat_title(message: str, use_llm: bool = True) -> str:
+    title = ""
+    if use_llm:
+        try:
+            title = generate_chat_title(message).strip()
+        except Exception as exc:
+            print(f"Chat title generation failed: {exc}", flush=True)
+
+    if title:
+        return title[:160]
+
+    clean_message = " ".join(message.strip().split())
+    return f"{clean_message[:35]}..." if len(clean_message) > 35 else clean_message
 
 
 def format_date(value: datetime) -> str:
     # Format used by the sidebar history item.
-    return value.strftime("%d %b %Y")
+    return to_display_time(value).strftime("%d %b %Y")
 
 
 def format_time(value: datetime) -> str:
     # Remove leading zero so the UI shows "9:30 AM" instead of "09:30 AM".
-    return value.strftime("%I:%M %p").lstrip("0")
+    return to_display_time(value).strftime("%I:%M %p").lstrip("0")
 
 
 def serialize_message(message: ChatMessage):
@@ -56,16 +90,30 @@ def serialize_message(message: ChatMessage):
     }
 
 
+def get_ordered_messages(chat: ChatHistory) -> list[ChatMessage]:
+    # Older user/assistant pairs can share the same timestamp. Their IDs preserve
+    # insertion order, so use ID as a deterministic tie-breaker everywhere.
+    return sorted(
+        chat.messages,
+        key=lambda message: (message.created_at, message.id),
+    )
+
+
 def get_session_timestamp(chat: ChatHistory) -> datetime:
     # The sidebar timestamp represents when the session started: the first user query.
     first_user_message = next(
-        (message for message in chat.messages if message.role == "user"),
+        (
+            message
+            for message in get_ordered_messages(chat)
+            if message.role == "user"
+        ),
         None,
     )
     if first_user_message:
         return first_user_message.created_at
 
-    first_message = chat.messages[0] if chat.messages else None
+    ordered_messages = get_ordered_messages(chat)
+    first_message = ordered_messages[0] if ordered_messages else None
     return first_message.created_at if first_message else chat.created_at
 
 
@@ -81,7 +129,10 @@ def serialize_chat(chat: ChatHistory) -> ChatRead:
         pinned=chat.pinned,
         createdAt=chat.created_at,
         updatedAt=updated_at,
-        messages=[serialize_message(message) for message in chat.messages],
+        messages=[
+            serialize_message(message)
+            for message in get_ordered_messages(chat)
+        ],
     )
 
 
@@ -100,11 +151,11 @@ def get_chat_or_404(db: Session, chat_id: int) -> ChatHistory:
     return chat
 
 
-def build_openai_messages(chat: ChatHistory, user_text: str) -> list[dict[str, str]]:
-    # Rebuild prior turns so OpenAI receives context for the selected chat only.
+def build_llm_messages(chat: ChatHistory, user_text: str) -> list[dict[str, str]]:
+    # Rebuild prior turns so the LLM receives context for this chat only.
     messages = []
 
-    for message in chat.messages:
+    for message in get_ordered_messages(chat):
         messages.append(
             {
                 "role": "assistant" if message.role == "assistant" else "user",
@@ -114,6 +165,17 @@ def build_openai_messages(chat: ChatHistory, user_text: str) -> list[dict[str, s
 
     messages.append({"role": "user", "content": user_text})
     return messages
+
+
+def build_location_context(payload: ChatSendRequest) -> str:
+    if payload.location_name:
+        return f"User location area: {payload.location_name.strip()}"
+    if payload.latitude is not None and payload.longitude is not None:
+        return (
+            "User browser coordinates: "
+            f"latitude {payload.latitude:.6f}, longitude {payload.longitude:.6f}"
+        )
+    return "No location context provided."
 
 
 @router.get("", response_model=ChatListResponse)
@@ -154,6 +216,44 @@ def create_chat_history(
     return serialize_chat(chat)
 
 
+@router.post("/preflight", response_model=ChatPreflightResponse)
+def preflight_message(
+    payload: ChatPreflightRequest,
+    db: Session = Depends(get_db),
+) -> ChatPreflightResponse:
+    user_text = payload.message.strip()
+    if not user_text:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Message cannot be empty",
+        )
+
+    chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
+    prior_messages = build_llm_messages(chat, "")[:-1] if chat else []
+    context_lines = []
+    for message in prior_messages[-8:]:
+        role = "Assistant" if message["role"] == "assistant" else "User"
+        content = " ".join(message["content"].strip().split())
+        context_lines.append(f"{role}: {content[:1200]}")
+    conversation_context = (
+        "\n".join(context_lines) if context_lines else "No previous conversation."
+    )
+
+    is_fnb, _ = assess_fnb_query(user_text, conversation_context)
+    if not is_fnb:
+        return ChatPreflightResponse(isFnb=False, locationRequired=False)
+
+    location_required, detected_location = assess_location_requirement(
+        user_text,
+        conversation_context,
+    )
+    return ChatPreflightResponse(
+        isFnb=True,
+        locationRequired=location_required,
+        detectedLocation=detected_location,
+    )
+
+
 @router.get("/{chat_id}", response_model=ChatRead)
 def get_chat_history(chat_id: int, db: Session = Depends(get_db)) -> ChatRead:
     # Returns one full conversation when a history item is opened/refreshed.
@@ -177,16 +277,22 @@ def send_message(
         # Existing chat: append the new turn to that session only.
         chat = get_chat_or_404(db, payload.chat_id)
         if not chat.messages:
-            chat.title = create_chat_title(user_text)
+            chat.title = create_chat_title(
+                user_text,
+                use_llm=has_deterministic_fnb_signal(user_text),
+            )
     else:
         # New draft chat: persist the session only when the first query is sent.
-        chat = ChatHistory(title=create_chat_title(user_text))
+        chat = ChatHistory(
+            title=create_chat_title(
+                user_text,
+                use_llm=has_deterministic_fnb_signal(user_text),
+            )
+        )
         db.add(chat)
         db.flush()
 
-    answer, map_image = generate_assistant_response(
-        build_openai_messages(chat, user_text)
-    )
+    llm_messages = build_llm_messages(chat, user_text)
     now = datetime.now(timezone.utc)
 
     user_message = ChatMessage(
@@ -195,17 +301,45 @@ def send_message(
         content=user_text,
         created_at=now,
     )
+
+    # Persist the chat title and user query before any downstream AI/KG work.
+    # This keeps the new session visible even when response generation fails.
+    chat.updated_at = now
+    db.add(user_message)
+    db.commit()
+    db.refresh(chat)
+    db.refresh(user_message)
+
+    try:
+        answer, map_image = generate_assistant_response(
+            llm_messages,
+            build_location_context(payload),
+            payload.location_permission_denied,
+        )
+    except Exception as exc:
+        print(f"Assistant response generation failed: {exc}", flush=True)
+        answer = (
+            "I could not process this request right now. Your question and chat "
+            "title were saved, so you can retry in this conversation."
+        )
+        map_image = None
+
+    assistant_created_at = max(
+        datetime.now(timezone.utc),
+        user_message.created_at + timedelta(microseconds=1),
+    )
     assistant_message = ChatMessage(
         chat_id=chat.id,
         role="assistant",
         content=answer,
         map_image=map_image,
-        created_at=now,
+        created_at=assistant_created_at,
     )
 
-    chat.updated_at = now
-    db.add_all([user_message, assistant_message])
+    chat.updated_at = assistant_created_at
+    db.add(assistant_message)
     db.commit()
+    db.refresh(assistant_message)
 
     chat = get_chat_or_404(db, chat.id)
     return ChatSendResponse(

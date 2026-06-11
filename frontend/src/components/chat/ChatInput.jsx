@@ -1,14 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Send, ExternalLink } from "lucide-react";
+import { AudioLines, ExternalLink, Send } from "lucide-react";
 import "../../styles/chat.css";
-import { quickQueries } from "../../../data/mockQuickQueries";
+import { quickQueries } from "../../../data/quickQueriesTemplate";
+import GeneralDialog from "../modals/GeneralDialog";
 
-function ChatInput({ onSendQuery, showSuggestions, disabled = false }) {
+function ChatInput({
+  onPrepareQuery,
+  onSendQuery,
+  showSuggestions,
+  disabled = false,
+}) {
+  const GEOLOCATION_PERMISSION_DENIED = 1;
   const queries = quickQueries;
   const [input, setInput] = useState("");
+  const [locationDialog, setLocationDialog] = useState(null);
+  const [pendingLocationQuery, setPendingLocationQuery] = useState("");
+  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
   const textareaRef = useRef(null);
   const isMessageEmpty = !input.trim();
-  const sendDisabled = disabled || isMessageEmpty;
+  const sendDisabled = disabled || isResolvingLocation || isMessageEmpty;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -18,17 +28,144 @@ function ChatInput({ onSendQuery, showSuggestions, disabled = false }) {
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [input]);
 
+  useEffect(() => {
+    // The completed backend response is authoritative. Clear any stale local
+    // geolocation lock left by browser permission callbacks or component timing.
+    if (!disabled) {
+      setIsResolvingLocation(false);
+    }
+  }, [disabled]);
+
   const handleSuggestionClick = (query) => {
     // Put a quick query into the textarea so the user can edit before sending.
     setInput(query);
   };
 
-  const handleSend = () => {
-    // Prevent empty sends and duplicate sends while the backend is processing.
-    if (!input.trim() || disabled) return;
-
-    onSendQuery(input);
+  const submitQuery = async (
+    query,
+    location,
+    locationPermissionDenied = false,
+  ) => {
+    // Location preparation is complete once the message is ready to submit.
+    // The parent `disabled` prop exclusively owns the backend-generation lock.
+    setIsResolvingLocation(false);
     setInput("");
+    setLocationDialog(null);
+    setPendingLocationQuery("");
+    await onSendQuery(query, location, locationPermissionDenied);
+  };
+
+  const requestBrowserLocation = async (queryOverride = "") => {
+    const query = (queryOverride || pendingLocationQuery).trim();
+    if (!query) {
+      setIsResolvingLocation(false);
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      await submitQuery(query, null, true);
+      return;
+    }
+
+    setLocationDialog(null);
+    setIsResolvingLocation(true);
+    let position;
+    try {
+      position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 30000,
+          maximumAge: 300000,
+        });
+      });
+    } catch (error) {
+      console.error("Failed to get browser location", error);
+      setIsResolvingLocation(false);
+      await submitQuery(
+        query,
+        null,
+        error?.code === GEOLOCATION_PERMISSION_DENIED,
+      );
+      return;
+    }
+
+    setIsResolvingLocation(false);
+    await submitQuery(query, {
+      source: "browser",
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+    });
+  };
+
+  const resolveLocationPermission = async (query) => {
+    if (!navigator.geolocation) {
+      await submitQuery(query, null, true);
+      return;
+    }
+
+    if (!navigator.permissions?.query) {
+      setPendingLocationQuery(query);
+      setLocationDialog("permission");
+      return;
+    }
+
+    try {
+      const permission = await navigator.permissions.query({
+        name: "geolocation",
+      });
+
+      if (permission.state === "granted") {
+        await requestBrowserLocation(query);
+        return;
+      }
+
+      if (permission.state === "denied") {
+        await submitQuery(query, null, true);
+        return;
+      }
+    } catch (error) {
+      console.error("Failed to check location permission", error);
+    }
+
+    setPendingLocationQuery(query);
+    setLocationDialog("permission");
+  };
+
+  const cancelLocationPermission = async () => {
+    const query = pendingLocationQuery.trim();
+    setLocationDialog(null);
+    setPendingLocationQuery("");
+    setIsResolvingLocation(false);
+
+    if (query) {
+      await submitQuery(query, null, true);
+    }
+  };
+
+  const handleSend = async () => {
+    // Prevent empty sends and duplicate sends while the backend is processing.
+    if (!input.trim() || disabled || isResolvingLocation) return;
+
+    const query = input.trim();
+    setIsResolvingLocation(true);
+    try {
+      const preflight = await onPrepareQuery(query);
+      if (!preflight.isFnb || !preflight.locationRequired) {
+        const location = preflight.detectedLocation
+          ? { source: "query", name: preflight.detectedLocation }
+          : null;
+        setIsResolvingLocation(false);
+        await submitQuery(query, location);
+        return;
+      }
+
+      await resolveLocationPermission(query);
+    } catch (error) {
+      console.error("Failed to prepare chat query", error);
+      await resolveLocationPermission(query);
+    } finally {
+      setIsResolvingLocation(false);
+    }
   };
 
   return (
@@ -60,7 +197,6 @@ function ChatInput({ onSendQuery, showSuggestions, disabled = false }) {
           rows={1}
           placeholder="Ask me about F&B related questions..."
           value={input}
-          disabled={disabled}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -87,7 +223,13 @@ function ChatInput({ onSendQuery, showSuggestions, disabled = false }) {
             <button
               className="send-btn"
               type="button"
-              title={isMessageEmpty ? "" : "Send"}
+              title={
+                isResolvingLocation
+                  ? "Getting location"
+                  : isMessageEmpty
+                    ? ""
+                    : "Send"
+              }
               onClick={handleSend}
               disabled={sendDisabled}
             >
@@ -96,6 +238,18 @@ function ChatInput({ onSendQuery, showSuggestions, disabled = false }) {
           </span>
         </div>
       </div>
+
+      {locationDialog && (
+        <GeneralDialog
+          title="Enable Location Permission"
+          description="Foodsight will need your location to give you better experience."
+          secondaryLabel="Cancel"
+          primaryLabel="Use Current Location"
+          onSecondary={cancelLocationPermission}
+          onPrimary={() => requestBrowserLocation()}
+          onClose={cancelLocationPermission}
+        />
+      )}
     </div>
   );
 }

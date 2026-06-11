@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
 import {
   deleteChatHistory,
   fetchChatHistories,
+  preflightChatMessage,
   renameChatHistory,
   sendChatMessage,
   updateChatPin,
@@ -20,6 +21,7 @@ function DashboardPage() {
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
+  const isSendingRef = useRef(false);
 
   // Match backend ordering: pinned chats first, then first-query time descending.
   const getChatSortTime = (chat) => {
@@ -71,10 +73,21 @@ function DashboardPage() {
     };
   }, []);
 
-  const handleSendQuery = async (query) => {
-    // Sends the query to the backend, which saves user and assistant messages.
-    if (!query.trim()) return;
+  const handlePrepareQuery = async (query) =>
+    preflightChatMessage({
+      chatId: selectedChatId,
+      message: query,
+    });
 
+  const handleSendQuery = async (
+    query,
+    location = null,
+    locationPermissionDenied = false,
+  ) => {
+    // Sends the query to the backend, which saves user and assistant messages.
+    if (!query.trim() || isSendingRef.current) return;
+
+    isSendingRef.current = true;
     setIsSending(true);
     setPendingQuery(query);
     try {
@@ -82,6 +95,8 @@ function DashboardPage() {
         // Null selectedChatId means "create a new session from this first query".
         chatId: selectedChatId,
         message: query,
+        location,
+        locationPermissionDenied,
       });
 
       replaceChat(savedChat);
@@ -89,6 +104,7 @@ function DashboardPage() {
     } catch (error) {
       console.error("Failed to save chat message", error);
     } finally {
+      isSendingRef.current = false;
       setIsSending(false);
       setPendingQuery("");
     }
@@ -178,6 +194,7 @@ function DashboardPage() {
       <ChatArea
         key={selectedChat?.id ?? "new-chat"}
         selectedChat={selectedChat}
+        onPrepareQuery={handlePrepareQuery}
         onSendQuery={handleSendQuery}
         isSending={isSending}
         pendingQuery={pendingQuery}

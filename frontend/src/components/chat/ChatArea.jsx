@@ -9,6 +9,7 @@ import "../../styles/chat.css";
 
 function ChatArea({
   selectedChat,
+  onPrepareQuery,
   onSendQuery,
   isSending = false,
   pendingQuery = "",
@@ -73,6 +74,7 @@ function ChatArea({
         )}
 
         <ChatInput
+          onPrepareQuery={onPrepareQuery}
           onSendQuery={onSendQuery}
           showSuggestions={showWelcome}
           disabled={isSending}

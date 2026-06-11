@@ -3,6 +3,7 @@ import { PanelLeft, Plus, Search } from "lucide-react";
 import Logo from "../../assets/foodsightLogo.png";
 import ChatHistoryItem from "./ChatHistoryItem";
 import ChatHistoryItemSkeleton from "./ChatHistoryItemSkeleton";
+import GeneralDialog from "../modals/GeneralDialog";
 import SidebarFooter from "./SidebarFooter";
 import "../../styles/sidebar.css";
 
@@ -23,6 +24,7 @@ function Sidebar({
 }) {
   const [openMenuId, setOpenMenuId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [chatPendingDeletion, setChatPendingDeletion] = useState(null);
 
   const searchInputRef = useRef(null);
   // Search filters by title only.
@@ -128,8 +130,7 @@ function Sidebar({
                   setOpenMenuId(null);
                 }}
                 onDelete={() => {
-                  // Backend delete also removes the chat messages.
-                  onDeleteChat?.(chat.id);
+                  setChatPendingDeletion(chat);
                   setOpenMenuId(null);
                 }}
               />
@@ -137,6 +138,22 @@ function Sidebar({
       </div>
 
       <SidebarFooter darkMode={darkMode} setDarkMode={setDarkMode} />
+
+      {chatPendingDeletion && (
+        <GeneralDialog
+          title="Delete Chat"
+          description="Are you sure you want to delete this chat session? This action cannot be undone."
+          secondaryLabel="Cancel"
+          primaryLabel="Delete"
+          onSecondary={() => setChatPendingDeletion(null)}
+          onPrimary={() => {
+            onDeleteChat?.(chatPendingDeletion.id);
+            setChatPendingDeletion(null);
+          }}
+          onClose={() => setChatPendingDeletion(null)}
+          destructive
+        />
+      )}
     </aside>
   );
 }

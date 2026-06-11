@@ -14,6 +14,21 @@ class ChatSendRequest(BaseModel):
     # chat_id is null for a draft new chat; backend creates the session on send.
     message: str = Field(..., min_length=1)
     chat_id: int | None = None
+    location_name: str | None = Field(default=None, max_length=160)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    location_permission_denied: bool = False
+
+
+class ChatPreflightRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    chat_id: int | None = None
+
+
+class ChatPreflightResponse(BaseModel):
+    isFnb: bool
+    locationRequired: bool
+    detectedLocation: str | None = None
 
 
 class ChatRenameRequest(BaseModel):

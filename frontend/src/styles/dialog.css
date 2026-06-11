@@ -1,0 +1,152 @@
+.general-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(9, 9, 11, 0.48);
+}
+
+.general-dialog {
+  position: relative;
+  width: min(400px, 100%);
+  padding: 28px;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 20px 45px rgba(9, 9, 11, 0.22);
+  color: #09090b;
+  text-align: center;
+}
+
+.general-dialog h2 {
+  margin: 18px 0 10px;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: 0;
+}
+
+.general-dialog-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #09090b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.general-dialog-close:hover {
+  color: #ff6129;
+}
+
+.general-dialog-close svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 2.5;
+}
+
+.general-dialog-description {
+  margin: 0;
+  color: #344054;
+  font-size: 14px;
+  line-height: 21px;
+  overflow-wrap: anywhere;
+}
+
+.general-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.general-dialog-actions.single {
+  grid-template-columns: 1fr;
+}
+
+.general-dialog-primary,
+.general-dialog-secondary {
+  height: 42px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.general-dialog-secondary {
+  border: 1px solid #d4d4d8;
+  background: #ffffff;
+  color: #27272a;
+}
+
+.general-dialog-secondary:hover {
+  background: #f4f4f5;
+}
+
+.general-dialog-primary {
+  border: 1px solid #ff6129;
+  background: #ff6129;
+  color: #ffffff;
+}
+
+.general-dialog-primary:hover {
+  border-color: #e54d17;
+  background: #e54d17;
+}
+
+.general-dialog-primary.destructive {
+  border-color: #ff3b3b;
+  background: #ff3b3b;
+}
+
+.general-dialog-primary.destructive:hover {
+  border-color: #b91c1c;
+  background: #b91c1c;
+}
+
+.general-dialog-primary:focus-visible,
+.general-dialog-secondary:focus-visible,
+.general-dialog-close:focus-visible {
+  outline: 3px solid rgba(255, 97, 41, 0.3);
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .general-dialog {
+  border-color: #3f3f46;
+  background: #18181b;
+  color: #fafafa;
+}
+
+[data-theme="dark"] .general-dialog-secondary:hover {
+  background: #27272a;
+  color: #fafafa;
+}
+
+[data-theme="dark"] .general-dialog-close {
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .general-dialog-close:hover {
+  background: #27272a;
+  color: #ff6129;
+}
+
+[data-theme="dark"] .general-dialog-description {
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .general-dialog-secondary {
+  border-color: #52525b;
+  background: #18181b;
+  color: #f4f4f5;
+}

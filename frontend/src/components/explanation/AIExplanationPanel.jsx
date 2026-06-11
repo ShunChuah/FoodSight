@@ -4,13 +4,17 @@ import KnowledgeGraphEvidence from "./KnowledgeGraphEvidence";
 import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
 import "../../styles/explanation.css";
 
+const SAMPLE_MAP_IMAGE_URL =
+  "https://docs.maptiler.com/leaflet/examples/nextjs/map.png";
+
 function AIExplanationPanel({ mapImage, onClose }) {
   const [activeTab, setActiveTab] = useState("map");
-  const [isMapLoading, setIsMapLoading] = useState(Boolean(mapImage));
+  const displayedMapImage = mapImage || SAMPLE_MAP_IMAGE_URL;
+  const [isMapLoading, setIsMapLoading] = useState(true);
 
   useEffect(() => {
-    setIsMapLoading(Boolean(mapImage));
-  }, [mapImage]);
+    setIsMapLoading(true);
+  }, [displayedMapImage]);
 
   return (
     <aside className="ai-explanation-panel">
@@ -53,17 +57,14 @@ function AIExplanationPanel({ mapImage, onClose }) {
         {activeTab === "map" ? (
           <section className="map-evidence-section" role="tabpanel">
             <div className="explanation-map-frame">
-              {(!mapImage || isMapLoading) && <ExplanationMapSkeleton />}
-
-              {mapImage && (
-                <img
-                  className={isMapLoading ? "is-loading" : ""}
-                  src={mapImage}
-                  alt="Map evidence"
-                  onLoad={() => setIsMapLoading(false)}
-                  onError={() => setIsMapLoading(false)}
-                />
-              )}
+              {isMapLoading && <ExplanationMapSkeleton />}
+              <img
+                className={isMapLoading ? "is-loading" : ""}
+                src={displayedMapImage}
+                alt="Map evidence"
+                onLoad={() => setIsMapLoading(false)}
+                onError={() => setIsMapLoading(false)}
+              />
             </div>
 
             <div className="cinematic-action-row">

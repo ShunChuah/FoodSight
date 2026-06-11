@@ -288,6 +288,8 @@
   line-height: 1.5;
   letter-spacing: 0.15px;
   color: #09090b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .ai-recommendation {
@@ -353,7 +355,7 @@
 }
 
 .skeleton-line-long {
-  width: 90%;
+  width: 100%;
 }
 
 .skeleton-actions {

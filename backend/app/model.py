@@ -36,8 +36,8 @@ class ChatHistory(Base):
         # Deleting a chat should remove its full user/assistant conversation.
         cascade="all, delete-orphan",
         passive_deletes=True,
-        # Messages are always returned in conversation order.
-        order_by="ChatMessage.created_at",
+        # ID resolves ties for older user/assistant pairs that share a timestamp.
+        order_by=lambda: (ChatMessage.created_at, ChatMessage.id),
     )
 
 
