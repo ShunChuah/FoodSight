@@ -12,11 +12,16 @@ function ChatArea({
   onPrepareQuery,
   onSendQuery,
   isSending = false,
+  darkMode = false,
   pendingQuery = "",
 }) {
   // No selected chat means the user is starting an unsaved draft conversation.
   const hasPendingQuery = Boolean(pendingQuery.trim());
   const messages = selectedChat?.messages ?? [];
+  const hasSavedPendingUserMessage = messages.some(
+    (message) =>
+      message.type === "user" && message.text.trim() === pendingQuery.trim(),
+  );
   const showWelcome =
     !hasPendingQuery && (!selectedChat || messages.length === 0);
   const resultRef = useRef(null);
@@ -41,7 +46,7 @@ function ChatArea({
     >
       <section className="chat-card">
         {showWelcome ? (
-          <WelcomeScreen />
+          <WelcomeScreen darkMode={darkMode} />
         ) : (
           <div className="chat-result-area" ref={resultRef}>
             {messages.map((message) =>
@@ -66,8 +71,10 @@ function ChatArea({
 
             {hasPendingQuery && (
               <>
-                <UserQuestionBubble text={pendingQuery} />
-                <AIResponseSkeleton />
+                {!hasSavedPendingUserMessage && (
+                  <UserQuestionBubble text={pendingQuery} />
+                )}
+                {isSending && <AIResponseSkeleton />}
               </>
             )}
           </div>

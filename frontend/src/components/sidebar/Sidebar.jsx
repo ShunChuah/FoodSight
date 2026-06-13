@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { PanelLeft, Plus, Search } from "lucide-react";
 import Logo from "../../assets/foodsightLogo.png";
+import DarkModeLogo from "../../assets/foodsightLogoDarkMode.png";
 import ChatHistoryItem from "./ChatHistoryItem";
 import ChatHistoryItemSkeleton from "./ChatHistoryItemSkeleton";
 import GeneralDialog from "../modals/GeneralDialog";
@@ -61,7 +62,11 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <img src={Logo} alt="FoodSight Logo" className="sidebar-logo" />
+        <img
+          src={darkMode ? DarkModeLogo : Logo}
+          alt="FoodSight Logo"
+          className="sidebar-logo"
+        />
 
         <button
           className="close-sidebar-btn"

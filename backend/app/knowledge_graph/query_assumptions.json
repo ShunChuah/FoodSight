@@ -1,11 +1,4 @@
 {
-  "defaults": [
-    {
-      "name": "default result count",
-      "triggers": ["recommend", "suggest", "show", "find", "list", "places", "restaurants", "cafes", "breakfast", "brunch", "lunch", "dinner", "supper"],
-      "instruction": "Return 3 options by default unless the user explicitly asks for a different number."
-    }
-  ],
   "price_terms": [
     {
       "name": "affordable budget range",
@@ -35,13 +28,6 @@
       "name": "high rating",
       "triggers": ["high rating", "high ratings", "high rated", "highly rated", "best", "good", "top rated", "rating", "ratings"],
       "instruction": "Treat high rating, high rated, highly rated, best, good, and top rated as Restaurant.average_rating >= 4.0 when available, and order by Restaurant.average_rating DESC then Restaurant.review_count DESC."
-    }
-  ],
-  "venue_terms": [
-    {
-      "name": "cafe venue",
-      "triggers": ["cafe", "cafes", "coffee shop", "coffee shops"],
-      "instruction": "Treat cafe, cafes, coffee shop, and coffee shops as Restaurant.venue_type containing cafe when Restaurant.venue_type is available."
     }
   ]
 }

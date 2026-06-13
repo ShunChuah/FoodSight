@@ -2,6 +2,7 @@ import os
 import json
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -60,6 +61,9 @@ IGNORED_CONTEXT_VALUES = {
     "no previous conversation.",
     "no location context provided.",
 }
+IGNORED_SCHEMA_PROPERTY_TERMS = {
+    "id", "name", "type", "category", "price",
+}
 
 SELF_RELATIONSHIP_TERMS = {
     "NEAR_TO": {"similar restaurant", "near another restaurant"},
@@ -107,6 +111,7 @@ def get_query_assumptions_path() -> Path:
     return assumptions_path
 
 
+@lru_cache(maxsize=1)
 def load_graph_schema() -> GraphSchema:
     schema_path = get_schema_path()
     try:
@@ -152,6 +157,7 @@ def load_graph_schema() -> GraphSchema:
     return GraphSchema(nodes=nodes, relationships=relationships)
 
 
+@lru_cache(maxsize=1)
 def load_query_assumptions() -> dict:
     assumptions_path = get_query_assumptions_path()
     try:
@@ -199,20 +205,27 @@ def retrieve_relevant_schema(
     user_query: str,
     conversation_context: str = "",
     location_context: str = "",
+    query_understanding: dict | None = None,
 ) -> GraphSchema:
     search_text = " ".join(
         part.strip().lower()
-        for part in (user_query, conversation_context, location_context)
+        for part in (
+            user_query,
+            conversation_context,
+            location_context,
+            _understanding_search_text(query_understanding),
+        )
         if part.strip() and part.strip().lower() not in IGNORED_CONTEXT_VALUES
     )
     selected_labels = {"Restaurant"} if "Restaurant" in schema.nodes else set()
+    selected_labels.update(_labels_from_understanding(query_understanding))
 
     for label, properties in schema.nodes.items():
         aliases = SCHEMA_TERM_ALIASES.get(label, set())
         property_terms = {
             property_name.lower().replace("_", " ")
             for property_name in properties
-            if property_name not in {"id", "name", "type", "category"}
+            if property_name not in IGNORED_SCHEMA_PROPERTY_TERMS
         }
         if any(_contains_term(search_text, alias) for alias in aliases):
             selected_labels.add(label)
@@ -268,10 +281,16 @@ def retrieve_relevant_assumptions(
     user_query: str,
     conversation_context: str = "",
     location_context: str = "",
+    query_understanding: dict | None = None,
 ) -> list[dict]:
     search_text = " ".join(
         part.strip().lower()
-        for part in (user_query, conversation_context, location_context)
+        for part in (
+            user_query,
+            conversation_context,
+            location_context,
+            _understanding_search_text(query_understanding),
+        )
         if part.strip() and part.strip().lower() not in IGNORED_CONTEXT_VALUES
     )
     matched_assumptions = []
@@ -306,6 +325,119 @@ def _contains_term(text: str, term: str) -> bool:
             text,
         )
     )
+
+
+def _understanding_search_text(query_understanding: dict | None) -> str:
+    if not query_understanding:
+        return ""
+
+    parts = []
+    for key in ("intent", "scope"):
+        value = query_understanding.get(key)
+        if isinstance(value, str):
+            parts.append(value.replace("_", " "))
+
+    analysis = query_understanding.get("analysis") or {}
+    if isinstance(analysis, dict):
+        parts.extend(value for value in analysis.values() if isinstance(value, str))
+
+    filters = query_understanding.get("filters") or {}
+    if isinstance(filters, dict):
+        parts.extend(_filter_search_terms(filters))
+
+    location = query_understanding.get("location") or {}
+    if isinstance(location, dict):
+        for value in location.values():
+            if isinstance(value, str):
+                parts.append(value)
+            elif value is True:
+                parts.append("near me nearby location")
+
+    sort = query_understanding.get("sort") or {}
+    if isinstance(sort, dict):
+        parts.extend(value for value in sort.values() if isinstance(value, str))
+
+    return " ".join(parts)
+
+
+def _labels_from_understanding(query_understanding: dict | None) -> set[str]:
+    if not query_understanding:
+        return set()
+
+    labels = set()
+    intent = query_understanding.get("intent")
+    filters = query_understanding.get("filters") or {}
+    location = query_understanding.get("location") or {}
+    sort = query_understanding.get("sort") or {}
+    analysis = query_understanding.get("analysis") or {}
+
+    if isinstance(location, dict) and (
+        location.get("value")
+        or location.get("requires_browser_location")
+        or location.get("type") == "browser_coordinates"
+    ):
+        labels.update({"Location", "Area"})
+    if isinstance(filters, dict):
+        labels.update(
+            label
+            for label, values in filters.items()
+            if label in SCHEMA_TERM_ALIASES and _has_filter_value(values)
+        )
+    if (
+        isinstance(sort, dict)
+        and sort.get("label") == "Restaurant"
+        and sort.get("property") == "average_rating"
+    ):
+        labels.add("Restaurant")
+    if intent in {"area_analysis", "market_gap_analysis"}:
+        labels.update({"Area", "City", "Cluster"})
+    if isinstance(analysis, dict) and analysis.get("mode") in {
+        "area_opportunity",
+        "competitor_density",
+        "market_gap",
+        "location_risk_analysis",
+    }:
+        labels.update({"Location", "Area", "City", "Cluster"})
+    if isinstance(analysis, dict) and analysis.get("mode") in {
+        "pricing_analysis",
+        "menu_gap_analysis",
+    }:
+        labels.update({"Dish", "PriceRange", "Cuisine"})
+    if isinstance(analysis, dict) and analysis.get("mode") == "customer_segment_analysis":
+        labels.update({"BusinessProfile", "Area", "Location"})
+    if intent == "competitor_analysis":
+        labels.add("Restaurant")
+    return labels
+
+
+def _filter_search_terms(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, list):
+        terms = []
+        for item in value:
+            terms.extend(_filter_search_terms(item))
+        return terms
+    if isinstance(value, dict):
+        terms = []
+        for item in value.values():
+            terms.extend(_filter_search_terms(item))
+        return terms
+    return []
+
+
+def _has_filter_value(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (int, float, bool)):
+        return True
+    if isinstance(value, list):
+        return any(_has_filter_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_filter_value(item) for item in value.values())
+    return False
 
 
 def _shortest_schema_path(

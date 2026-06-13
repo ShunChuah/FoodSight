@@ -200,8 +200,12 @@
 }
 
 .voice-btn {
-  background: #e4e4e7;
+  background: transparent;
   color: #09090b;
+}
+
+.voice-btn.recording {
+  background: #e4e4e7;
 }
 
 .send-btn {
@@ -216,19 +220,21 @@
   stroke-width: 2.5;
 }
 
+.voice-btn-wrapper,
 .send-btn-wrapper {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
 }
 
+.voice-btn-wrapper.has-tooltip:hover::after,
 .send-btn-wrapper.has-tooltip:hover::after {
   content: attr(data-tooltip);
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
   width: max-content;
-  max-width: 160px;
+  max-width: 180px;
   padding: 6px 8px;
   background: #09090b;
   color: #ffffff;
@@ -430,4 +436,68 @@
 .speak-action.selected {
   border: 1px solid #344054;
 }
+
+/* DARK MODE */
+[data-theme="dark"] .welcome-screen h1,
+[data-theme="dark"] .suggestion-btn span,
+[data-theme="dark"] .suggestion-btn svg,
+[data-theme="dark"] .chat-input-box textarea,
+[data-theme="dark"] .voice-btn,
+[data-theme="dark"] .user-question-bubble,
+[data-theme="dark"] .ai-response-summary,
+[data-theme="dark"] .ai-recommendation h3,
+[data-theme="dark"] .ai-response-section h3 {
+  color: var(--dark-text);
+}
+
+[data-theme="dark"] .speak-action {
+  background: var(--dark-border);
+  color: var(--dark-text);
+
+}
+
+[data-theme="dark"] .suggestion-btn {
+  background: var(--dark-bg);
+  border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .suggestion-btn:hover {
+  background: #ff6129;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .suggestion-box p,
+[data-theme="dark"] .chat-input-box textarea::placeholder,
+[data-theme="dark"] .ai-recommendation p,
+[data-theme="dark"] .ai-response-section p {
+  color: var(--dark-muted);
+}
+
+[data-theme="dark"] .chat-card,
+[data-theme="dark"] .chat-input-box,
+[data-theme="dark"] .ai-response-card {
+  background: var(--dark-card);
+  border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .suggestion-box {
+  background: var(--dark-accent-bg);
+}
+
+[data-theme="dark"] .user-question-bubble,
+[data-theme="dark"] .ai-recommendation {
+  background: var(--dark-accent-bg);
+  border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .voice-btn.recording {
+  background: var(--dark-hover);
+}
+
+[data-theme="dark"] .voice-btn-wrapper.has-tooltip:hover::after,
+[data-theme="dark"] .send-btn-wrapper.has-tooltip:hover::after {
+  background: var(--dark-hover);
+  color: var(--dark-text);
+}
+
 

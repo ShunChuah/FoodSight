@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, ExternalLink, Send } from "lucide-react";
+import { CircleStop, ExternalLink, Mic, Send } from "lucide-react";
 import "../../styles/chat.css";
 import { quickQueries } from "../../../data/quickQueriesTemplate";
-import GeneralDialog from "../modals/GeneralDialog";
 
 const MAX_MESSAGE_WORDS = 1000;
 const MAX_MESSAGE_CHARACTERS = 5000;
@@ -16,16 +15,21 @@ function ChatInput({
   const GEOLOCATION_PERMISSION_DENIED = 1;
   const queries = quickQueries;
   const [input, setInput] = useState("");
-  const [locationDialog, setLocationDialog] = useState(null);
-  const [pendingLocationQuery, setPendingLocationQuery] = useState("");
   const [isResolvingLocation, setIsResolvingLocation] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [micPermissionTooltip, setMicPermissionTooltip] = useState("");
   const textareaRef = useRef(null);
+  const recognitionRef = useRef(null);
   const isMessageEmpty = !input.trim();
   const wordCount = input.trim() ? input.trim().split(/\s+/).length : 0;
   const isMessageTooLong =
     wordCount > MAX_MESSAGE_WORDS || input.length > MAX_MESSAGE_CHARACTERS;
   const sendDisabled =
-    disabled || isResolvingLocation || isMessageEmpty || isMessageTooLong;
+    disabled
+    || isResolvingLocation
+    || isRecording
+    || isMessageEmpty
+    || isMessageTooLong;
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -35,16 +39,79 @@ function ChatInput({
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [input]);
 
-  useEffect(() => {
-    // The completed backend response is authoritative. Clear any stale local
-    // geolocation lock left by browser permission callbacks or component timing.
-    if (!disabled) {
-      setIsResolvingLocation(false);
+  useEffect(
+    () => () => {
+      recognitionRef.current?.stop();
+    },
+    [],
+  );
+
+  const stopRecording = () => {
+    recognitionRef.current?.stop();
+    setIsRecording(false);
+  };
+
+  const handleSpeechToText = () => {
+    if (isRecording) {
+      stopRecording();
+      return;
     }
-  }, [disabled]);
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setMicPermissionTooltip(
+        "Speech recognition is not supported in this browser.",
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .slice(event.resultIndex)
+        .map((result) => result[0]?.transcript ?? "")
+        .join(" ")
+        .trim();
+
+      if (!transcript) return;
+      setInput((currentInput) =>
+        [currentInput.trim(), transcript].filter(Boolean).join(" "),
+      );
+    };
+    recognition.onerror = (event) => {
+      console.error("Speech recognition failed", event.error);
+      if (["not-allowed", "service-not-allowed"].includes(event.error)) {
+        setMicPermissionTooltip("Enable microphone permission to use voice input.");
+      }
+      setIsRecording(false);
+    };
+    recognition.onend = () => {
+      setIsRecording(false);
+      recognitionRef.current = null;
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setMicPermissionTooltip("");
+      setIsRecording(true);
+    } catch (error) {
+      console.error("Failed to start speech recognition", error);
+      setMicPermissionTooltip("Enable microphone permission to use voice input.");
+      recognitionRef.current = null;
+      setIsRecording(false);
+    }
+  };
 
   const handleSuggestionClick = (query) => {
     // Put a quick query into the textarea so the user can edit before sending.
+    stopRecording();
     setInput(query);
   };
 
@@ -57,13 +124,11 @@ function ChatInput({
     // The parent `disabled` prop exclusively owns the backend-generation lock.
     setIsResolvingLocation(false);
     setInput("");
-    setLocationDialog(null);
-    setPendingLocationQuery("");
     await onSendQuery(query, location, locationPermissionDenied);
   };
 
-  const requestBrowserLocation = async (queryOverride = "") => {
-    const query = (queryOverride || pendingLocationQuery).trim();
+  const requestBrowserLocation = async (queryOverride) => {
+    const query = queryOverride.trim();
     if (!query) {
       setIsResolvingLocation(false);
       return;
@@ -74,7 +139,6 @@ function ChatInput({
       return;
     }
 
-    setLocationDialog(null);
     setIsResolvingLocation(true);
     let position;
     try {
@@ -110,23 +174,11 @@ function ChatInput({
       return;
     }
 
-    if (!navigator.permissions?.query) {
-      setPendingLocationQuery(query);
-      setLocationDialog("permission");
-      return;
-    }
-
     try {
-      const permission = await navigator.permissions.query({
-        name: "geolocation",
-      });
-
-      if (permission.state === "granted") {
-        await requestBrowserLocation(query);
-        return;
-      }
-
-      if (permission.state === "denied") {
+      const permission = navigator.permissions?.query
+        ? await navigator.permissions.query({ name: "geolocation" })
+        : null;
+      if (permission?.state === "denied") {
         await submitQuery(query, null, true);
         return;
       }
@@ -134,19 +186,7 @@ function ChatInput({
       console.error("Failed to check location permission", error);
     }
 
-    setPendingLocationQuery(query);
-    setLocationDialog("permission");
-  };
-
-  const cancelLocationPermission = async () => {
-    const query = pendingLocationQuery.trim();
-    setLocationDialog(null);
-    setPendingLocationQuery("");
-    setIsResolvingLocation(false);
-
-    if (query) {
-      await submitQuery(query, null, true);
-    }
+    await requestBrowserLocation(query);
   };
 
   const handleSend = async () => {
@@ -155,12 +195,14 @@ function ChatInput({
       !input.trim()
       || disabled
       || isResolvingLocation
+      || isRecording
       || isMessageTooLong
     ) {
       return;
     }
 
     const query = input.trim();
+    setInput("");
     setIsResolvingLocation(true);
     try {
       const preflight = await onPrepareQuery(query);
@@ -209,7 +251,9 @@ function ChatInput({
         <textarea
           ref={textareaRef}
           rows={1}
-          placeholder="Ask me about F&B related questions..."
+          placeholder={
+            isRecording ? "Listening..." : "Ask me about F&B related questions..."
+          }
           value={input}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
@@ -221,14 +265,22 @@ function ChatInput({
         />
 
         <div className="chat-input-actions">
-          <button
-            className="voice-btn"
-            type="button"
-            title="Text-to-Speech"
-            disabled={disabled}
+          <span
+            className={`voice-btn-wrapper ${
+              micPermissionTooltip ? "has-tooltip" : ""
+            }`}
+            data-tooltip={micPermissionTooltip}
           >
-            <AudioLines />
-          </button>
+            <button
+              className={`voice-btn ${isRecording ? "recording" : ""}`}
+              type="button"
+              title={isRecording ? "Stop recording" : "Speech to text"}
+              disabled={disabled && !isRecording}
+              onClick={handleSpeechToText}
+            >
+              {isRecording ? <CircleStop /> : <Mic />}
+            </button>
+          </span>
 
           <span
             className={`send-btn-wrapper ${
@@ -258,18 +310,6 @@ function ChatInput({
           </span>
         </div>
       </div>
-
-      {locationDialog && (
-        <GeneralDialog
-          title="Enable Location Permission"
-          description="Foodsight will need your location to give you better experience."
-          secondaryLabel="Cancel"
-          primaryLabel="Use Current Location"
-          onSecondary={cancelLocationPermission}
-          onPrimary={() => requestBrowserLocation()}
-          onClose={cancelLocationPermission}
-        />
-      )}
     </div>
   );
 }

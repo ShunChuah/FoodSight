@@ -122,31 +122,31 @@
 }
 
 [data-theme="dark"] .general-dialog {
-  border-color: #3f3f46;
+  border-color: var(--dark-border);
   background: #18181b;
-  color: #fafafa;
+  color: var(--dark-text);
 }
 
 [data-theme="dark"] .general-dialog-secondary:hover {
-  background: #27272a;
-  color: #fafafa;
+  background: var(--dark-hover);
+  color: var(--dark-text);
 }
 
 [data-theme="dark"] .general-dialog-close {
-  color: #a1a1aa;
+  color: var(--dark-muted);
 }
 
 [data-theme="dark"] .general-dialog-close:hover {
-  background: #27272a;
+  background: var(--dark-hover);
   color: #ff6129;
 }
 
 [data-theme="dark"] .general-dialog-description {
-  color: #a1a1aa;
+  color: var(--dark-muted);
 }
 
 [data-theme="dark"] .general-dialog-secondary {
   border-color: #52525b;
   background: #18181b;
-  color: #f4f4f5;
+  color: var(--dark-text);
 }

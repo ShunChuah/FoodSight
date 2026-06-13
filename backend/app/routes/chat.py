@@ -1,13 +1,14 @@
 # Chat API routes: list, save, rename, pin, and delete chat histories.
 from datetime import datetime, timedelta, timezone
 import os
+from time import perf_counter
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..model import ChatHistory, ChatMessage
 from ..schemas import (
     ChatCreate,
@@ -22,15 +23,34 @@ from ..schemas import (
     DeleteChatResponse,
 )
 from ..services.chat_service import (
-    assess_fnb_query,
-    assess_location_requirement,
+    assess_query_guardrails,
     generate_assistant_response,
-    has_deterministic_fnb_signal,
 )
-from ..services.llm_service import generate_chat_title
+from ..services.chat_title_service import (
+    create_temporary_chat_title,
+    persist_chat_title_when_ready,
+    start_chat_title_generation,
+)
+from ..services.guardrail_token_service import (
+    create_guardrail_token,
+    verify_guardrail_token,
+)
 
 
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+
+def save_generated_chat_title(
+    chat_id: int,
+    temporary_title: str,
+    generated_title: str,
+) -> None:
+    with SessionLocal() as title_db:
+        chat = title_db.get(ChatHistory, chat_id)
+        if not chat or chat.title != temporary_title:
+            return
+        chat.title = generated_title
+        title_db.commit()
 
 
 def get_display_timezone():
@@ -45,21 +65,6 @@ def to_display_time(value: datetime) -> datetime:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(get_display_timezone())
-
-
-def create_chat_title(message: str, use_llm: bool = True) -> str:
-    title = ""
-    if use_llm:
-        try:
-            title = generate_chat_title(message).strip()
-        except Exception as exc:
-            print(f"Chat title generation failed: {exc}", flush=True)
-
-    if title:
-        return title[:160]
-
-    clean_message = " ".join(message.strip().split())
-    return f"{clean_message[:35]}..." if len(clean_message) > 35 else clean_message
 
 
 def format_date(value: datetime) -> str:
@@ -239,18 +244,22 @@ def preflight_message(
         "\n".join(context_lines) if context_lines else "No previous conversation."
     )
 
-    is_fnb, _ = assess_fnb_query(user_text, conversation_context)
-    if not is_fnb:
-        return ChatPreflightResponse(isFnb=False, locationRequired=False)
-
-    location_required, detected_location = assess_location_requirement(
+    decision = assess_query_guardrails(
         user_text,
         conversation_context,
     )
     return ChatPreflightResponse(
-        isFnb=True,
-        locationRequired=location_required,
-        detectedLocation=detected_location,
+        status=decision.status,
+        isFnb=decision.scope in {"fnb_customer", "fnb_analyst"},
+        scope=decision.scope,
+        message=decision.message,
+        locationRequired=decision.location_required,
+        detectedLocation=decision.detected_location,
+        decisionToken=create_guardrail_token(
+            user_text,
+            payload.chat_id,
+            decision,
+        ),
     )
 
 
@@ -265,7 +274,9 @@ def send_message(
     payload: ChatSendRequest,
     db: Session = Depends(get_db),
 ) -> ChatSendResponse:
-    # Saves both sides of one turn: user query first, then assistant reply.
+    # Generate the assistant reply first, then persist both sides of the turn.
+    send_started_at = perf_counter()
+    print("[TIMING] Chat send started. elapsed=0.00s total=0.00s", flush=True)
     user_text = payload.message.strip()
     if not user_text:
         raise HTTPException(
@@ -273,60 +284,102 @@ def send_message(
             detail="Message cannot be empty",
         )
 
+    preflight_decision = verify_guardrail_token(
+        payload.preflight_token,
+        user_text,
+        payload.chat_id,
+    )
+    if not preflight_decision:
+        prior_chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
+        prior_messages = build_llm_messages(prior_chat, "")[:-1] if prior_chat else []
+        conversation_context = "\n".join(
+            (
+                f"{'Assistant' if message['role'] == 'assistant' else 'User'}: "
+                f"{' '.join(message['content'].strip().split())[:1200]}"
+            )
+            for message in prior_messages[-8:]
+        ) or "No previous conversation."
+        preflight_decision = assess_query_guardrails(
+            user_text,
+            conversation_context,
+        )
+    guardrail_elapsed = perf_counter() - send_started_at
+    print(
+        f"[TIMING] Chat send checked guardrails. "
+        f"elapsed={guardrail_elapsed:.2f}s total={guardrail_elapsed:.2f}s",
+        flush=True,
+    )
+
+    title_future = None
+    temporary_title = None
+    should_generate_title = preflight_decision.status in {
+        "ready",
+        "clarification_required",
+    }
     if payload.chat_id:
         # Existing chat: append the new turn to that session only.
         chat = get_chat_or_404(db, payload.chat_id)
         if not chat.messages:
-            chat.title = create_chat_title(
-                user_text,
-                use_llm=has_deterministic_fnb_signal(user_text),
-            )
+            temporary_title = create_temporary_chat_title(user_text)
+            chat.title = temporary_title
+            if should_generate_title:
+                title_future = start_chat_title_generation(
+                    user_text,
+                    preflight_decision.status,
+                )
     else:
-        # New draft chat: persist the session only when the first query is sent.
-        chat = ChatHistory(
-            title=create_chat_title(
+        # New draft chat: keep it in memory until response generation finishes.
+        temporary_title = create_temporary_chat_title(user_text)
+        chat = ChatHistory(title=temporary_title)
+        if should_generate_title:
+            title_future = start_chat_title_generation(
                 user_text,
-                use_llm=has_deterministic_fnb_signal(user_text),
+                preflight_decision.status,
             )
-        )
-        db.add(chat)
-        db.flush()
 
     llm_messages = build_llm_messages(chat, user_text)
     now = datetime.now(timezone.utc)
+
+    generation_started_at = perf_counter()
+    try:
+        answer, map_image = generate_assistant_response(
+            llm_messages,
+            build_location_context(payload),
+            payload.location_permission_denied,
+            preflight_decision,
+        )
+    except Exception as exc:
+        print(f"Assistant response generation failed: {exc}", flush=True)
+        answer = (
+            "I could not process this request right now. Please try again."
+        )
+        map_image = None
+    generation_elapsed = perf_counter() - generation_started_at
+    generation_total = perf_counter() - send_started_at
+    print(
+        f"[TIMING] Chat send generated the assistant response. "
+        f"elapsed={generation_elapsed:.2f}s total={generation_total:.2f}s",
+        flush=True,
+    )
+
+    assistant_created_at = max(
+        datetime.now(timezone.utc),
+        now + timedelta(microseconds=1),
+    )
+
+    persist_started_at = perf_counter()
+    if temporary_title and not chat.messages:
+        chat.title = temporary_title
+
+    if not payload.chat_id:
+        db.add(chat)
+        db.flush()
 
     user_message = ChatMessage(
         chat_id=chat.id,
         role="user",
         content=user_text,
         created_at=now,
-    )
-
-    # Persist the chat title and user query before any downstream AI/KG work.
-    # This keeps the new session visible even when response generation fails.
-    chat.updated_at = now
-    db.add(user_message)
-    db.commit()
-    db.refresh(chat)
-    db.refresh(user_message)
-
-    try:
-        answer, map_image = generate_assistant_response(
-            llm_messages,
-            build_location_context(payload),
-            payload.location_permission_denied,
-        )
-    except Exception as exc:
-        print(f"Assistant response generation failed: {exc}", flush=True)
-        answer = (
-            "I could not process this request right now. Your question and chat "
-            "title were saved, so you can retry in this conversation."
-        )
-        map_image = None
-
-    assistant_created_at = max(
-        datetime.now(timezone.utc),
-        user_message.created_at + timedelta(microseconds=1),
     )
     assistant_message = ChatMessage(
         chat_id=chat.id,
@@ -337,16 +390,45 @@ def send_message(
     )
 
     chat.updated_at = assistant_created_at
+    db.add(user_message)
     db.add(assistant_message)
     db.commit()
+    db.refresh(chat)
+    db.refresh(user_message)
     db.refresh(assistant_message)
 
+    if title_future and temporary_title:
+        persist_chat_title_when_ready(
+            title_future,
+            lambda generated_title: save_generated_chat_title(
+                chat.id,
+                temporary_title,
+                generated_title,
+            ),
+        )
+
+    # A parallel title callback may have updated this chat in another session.
+    db.expire_all()
     chat = get_chat_or_404(db, chat.id)
-    return ChatSendResponse(
+    response = ChatSendResponse(
         chat=serialize_chat(chat),
         userMessage=serialize_message(user_message),
         assistantMessage=serialize_message(assistant_message),
     )
+    persist_elapsed = perf_counter() - persist_started_at
+    persist_total = perf_counter() - send_started_at
+    print(
+        f"[TIMING] Chat send saved the chat turn. "
+        f"elapsed={persist_elapsed:.2f}s total={persist_total:.2f}s",
+        flush=True,
+    )
+    total_elapsed = perf_counter() - send_started_at
+    print(
+        f"[TIMING] Chat send prepared the API response. "
+        f"elapsed={total_elapsed:.2f}s total={total_elapsed:.2f}s",
+        flush=True,
+    )
+    return response
 
 
 @router.patch("/{chat_id}/title", response_model=ChatRead)

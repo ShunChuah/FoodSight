@@ -3,7 +3,9 @@ import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
 import {
+  createChatHistory,
   deleteChatHistory,
+  fetchChatHistory,
   fetchChatHistories,
   preflightChatMessage,
   renameChatHistory,
@@ -21,7 +23,10 @@ function DashboardPage() {
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
+  const [pendingChatId, setPendingChatId] = useState(null);
   const isSendingRef = useRef(false);
+  const preflightRef = useRef(null);
+  const draftChatIdRef = useRef(null);
 
   // Match backend ordering: pinned chats first, then first-query time descending.
   const getChatSortTime = (chat) => {
@@ -45,6 +50,22 @@ function DashboardPage() {
         return getChatSortTime(b) - getChatSortTime(a);
       });
     });
+  };
+
+  const refreshGeneratedTitle = async (chatId, temporaryTitle) => {
+    // Poll independently from Cypher generation so the sidebar title changes
+    // within about one second of the background title being saved.
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        const refreshedChat = await fetchChatHistory(chatId);
+        replaceChat(refreshedChat);
+        if (refreshedChat.title !== temporaryTitle) return;
+      } catch (error) {
+        console.error("Failed to refresh generated chat title", error);
+        return;
+      }
+    }
   };
 
   useEffect(() => {
@@ -73,11 +94,29 @@ function DashboardPage() {
     };
   }, []);
 
-  const handlePrepareQuery = async (query) =>
-    preflightChatMessage({
-      chatId: selectedChatId,
+  const handlePrepareQuery = async (query) => {
+    setIsSending(true);
+    setPendingChatId(selectedChatId);
+    setPendingQuery(query);
+
+    let chatId = selectedChatId;
+    if (chatId === null) {
+      const draftChat = await createChatHistory("New Chat");
+      draftChatIdRef.current = draftChat.id;
+      chatId = draftChat.id;
+      replaceChat(draftChat);
+      setSelectedChatId(draftChat.id);
+    }
+
+    setPendingChatId(chatId);
+
+    const decision = await preflightChatMessage({
+      chatId,
       message: query,
     });
+    preflightRef.current = { query, decision, chatId };
+    return decision;
+  };
 
   const handleSendQuery = async (
     query,
@@ -89,24 +128,43 @@ function DashboardPage() {
 
     isSendingRef.current = true;
     setIsSending(true);
+    const chatId =
+      preflightRef.current?.chatId
+      ?? draftChatIdRef.current
+      ?? selectedChatId;
+    setPendingChatId(chatId);
     setPendingQuery(query);
+    const isNewChat = draftChatIdRef.current === chatId;
+    const temporaryTitle = isNewChat ? "New Chat" : "";
     try {
-      const savedChat = await sendChatMessage({
-        // Null selectedChatId means "create a new session from this first query".
-        chatId: selectedChatId,
+      const preflight =
+        preflightRef.current?.query === query
+          ? preflightRef.current.decision
+          : null;
+      const sendPromise = sendChatMessage({
+        chatId,
         message: query,
         location,
         locationPermissionDenied,
+        preflight,
       });
 
+      if (isNewChat) {
+        void refreshGeneratedTitle(chatId, temporaryTitle);
+      }
+
+      const savedChat = await sendPromise;
       replaceChat(savedChat);
       setSelectedChatId(savedChat.id);
     } catch (error) {
       console.error("Failed to save chat message", error);
     } finally {
+      preflightRef.current = null;
+      draftChatIdRef.current = null;
       isSendingRef.current = false;
       setIsSending(false);
       setPendingQuery("");
+      setPendingChatId(null);
     }
   };
 
@@ -161,6 +219,10 @@ function DashboardPage() {
 
   // Selected chat controls what conversation ChatArea renders.
   const selectedChat = chats.find((chat) => chat.id === selectedChatId);
+  const selectedOwnsPendingRequest =
+    pendingChatId === null
+      ? selectedChatId === null && Boolean(pendingQuery.trim())
+      : selectedChatId === pendingChatId;
 
   return (
     <div
@@ -197,7 +259,8 @@ function DashboardPage() {
         onPrepareQuery={handlePrepareQuery}
         onSendQuery={handleSendQuery}
         isSending={isSending}
-        pendingQuery={pendingQuery}
+        darkMode={darkMode}
+        pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
       />
     </div>
   );

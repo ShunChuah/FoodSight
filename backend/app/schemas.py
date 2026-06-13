@@ -2,7 +2,35 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+MAX_MESSAGE_WORDS = 1000
+MAX_MESSAGE_CHARACTERS = 5000
+ScopeType = Literal["fnb_customer", "fnb_analyst"]
+GuardrailStatus = Literal[
+    "ready",
+    "clarification_required",
+    "unsupported",
+    "out_of_scope",
+]
+
+
+class ChatMessageInput(BaseModel):
+    message: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_MESSAGE_CHARACTERS,
+    )
+
+    @field_validator("message")
+    @classmethod
+    def validate_message_words(cls, value: str) -> str:
+        if len(value.split()) > MAX_MESSAGE_WORDS:
+            raise ValueError(
+                f"Message cannot exceed {MAX_MESSAGE_WORDS} words."
+            )
+        return value
 
 
 class ChatCreate(BaseModel):
@@ -10,25 +38,28 @@ class ChatCreate(BaseModel):
     title: str | None = Field(default=None, max_length=160)
 
 
-class ChatSendRequest(BaseModel):
+class ChatSendRequest(ChatMessageInput):
     # chat_id is null for a draft new chat; backend creates the session on send.
-    message: str = Field(..., min_length=1)
     chat_id: int | None = None
     location_name: str | None = Field(default=None, max_length=160)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     location_permission_denied: bool = False
+    preflight_token: str | None = Field(default=None, max_length=12000)
 
 
-class ChatPreflightRequest(BaseModel):
-    message: str = Field(..., min_length=1)
+class ChatPreflightRequest(ChatMessageInput):
     chat_id: int | None = None
 
 
 class ChatPreflightResponse(BaseModel):
+    status: GuardrailStatus
     isFnb: bool
+    scope: ScopeType | None = None
+    message: str | None = None
     locationRequired: bool
     detectedLocation: str | None = None
+    decisionToken: str
 
 
 class ChatRenameRequest(BaseModel):

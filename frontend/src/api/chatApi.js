@@ -11,22 +11,32 @@ export async function fetchChatHistories() {
   return response.data.chats;
 }
 
+export async function fetchChatHistory(chatId) {
+  const response = await api.get(`/chats/${chatId}`);
+  return response.data;
+}
+
+export async function createChatHistory(title) {
+  const response = await api.post("/chats", { title });
+  return response.data;
+}
+
 export async function sendChatMessage({
   chatId,
   message,
   location,
   locationPermissionDenied = false,
+  preflight = null,
 }) {
   const payload = {
     chat_id: chatId ?? null,
     message,
-    location_name: location?.name ?? null,
-    latitude: location?.latitude ?? null,
-    longitude: location?.longitude ?? null,
+    location_name: locationPermissionDenied ? null : location?.name ?? null,
+    latitude: locationPermissionDenied ? null : location?.latitude ?? null,
+    longitude: locationPermissionDenied ? null : location?.longitude ?? null,
     location_permission_denied: locationPermissionDenied,
+    preflight_token: preflight?.decisionToken ?? null,
   };
-
-  console.debug("Sending chat payload", payload);
 
   // chatId is null for a new draft, so the backend creates the session on send.
   const response = await api.post("/chats/messages", payload);
