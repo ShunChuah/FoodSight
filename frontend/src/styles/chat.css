@@ -500,4 +500,15 @@
   color: var(--dark-text);
 }
 
+[data-theme="dark"] .skeleton-line,
+[data-theme="dark"] .skeleton-button {
+  background: linear-gradient(
+    90deg,
+    var(--dark-skeleton-start) 25%,
+    var(--dark-skeleton-mid) 50%,
+    var(--dark-skeleton-start) 75%
+  );
+  background-size: 200% 100%;
+}
+
 

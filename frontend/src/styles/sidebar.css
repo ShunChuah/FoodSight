@@ -332,7 +332,6 @@
   align-items: flex-start;
   padding: 6px 8px;
   background: #ffffff;
-  border: 1px solid #e4e4e7;
   border-radius: 10px;
   box-shadow:
     0px 8px 16px rgba(0, 0, 0, 0.14),
@@ -559,10 +558,24 @@
   color: var(--dark-text);
 }
 
+[data-theme="dark"] .chat-menu-item.delete {
+  color: #ff3b3b;
+}
+
+[data-theme="dark"] .chat-menu-item.delete:hover {
+  background: #543736;
+}
+
+[data-theme="dark"] .chat-menu {
+  background: var(--dark-bg);
+  box-shadow:
+    0px 8px 16px rgba(0, 0, 0, 0.45),
+    0px 0px 2px rgba(250, 250, 250, 0.08);
+}
+
 [data-theme="dark"] .sidebar,
 [data-theme="dark"] .closed-sidebar,
 [data-theme="dark"] .chat-history-item,
-[data-theme="dark"] .chat-menu,
 [data-theme="dark"] .footer-action-btn,
 [data-theme="dark"] .user-footer-card,
 [data-theme="dark"] .user-footer-card-profile {
@@ -610,7 +623,12 @@
 
 [data-theme="dark"] .history-skeleton-line,
 [data-theme="dark"] .history-skeleton-action {
-  background: linear-gradient(90deg, #262626 25%, #3f3f46 50%, #262626 75%);
+  background: linear-gradient(
+    90deg,
+    var(--dark-skeleton-start) 25%,
+    var(--dark-skeleton-mid) 50%,
+    var(--dark-skeleton-start) 75%
+  );
   background-size: 200% 100%;
 }
 

@@ -101,7 +101,10 @@ function Sidebar({
         />
       </div>
 
-      <div className="chat-history-list">
+      <div
+        className="chat-history-list"
+        onScroll={() => setOpenMenuId(null)}
+      >
         {isLoadingChats
           ? Array.from({ length: 6 }, (_, index) => (
               <ChatHistoryItemSkeleton key={index} />

@@ -6,6 +6,8 @@
   --dark-accent-bg: #2a1b16;
   --dark-text: #FAFAFA;
   --dark-muted: #a1a1a1;
+  --dark-skeleton-start: #262626;
+  --dark-skeleton-mid: #3f3f46;
   width: 100%;
   height: 100vh;
   display: flex;

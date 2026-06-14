@@ -58,15 +58,29 @@ PRICE_INTENT_TERMS = {
     "premium": {"expensive", "luxury", "premium", "high end"},
 }
 
-# Stop requests for data absent from the current graph.
-UNSUPPORTED_DATA_TERMS = {
-    "revenue": "revenue",
-    "profit": "profit",
-    "sales forecast": "sales forecasts",
-    "monthly sales": "monthly sales",
-    "operating cost": "operating costs",
-    "rental cost": "rental costs",
-}
+# Stop requests that need data or integrations absent from the current graph.
+UNSUPPORTED_CAPABILITY_PATTERNS = (
+    (r"\brevenue\b", "revenue"),
+    (r"\bprofit\b", "profit"),
+    (r"\bsales forecast\b", "sales forecasts"),
+    (r"\bmonthly sales\b", "monthly sales"),
+    (r"\bopening cost\b", "opening costs"),
+    (r"\boperating cost\b", "operating costs"),
+    (r"\brental cost\b", "rental costs"),
+    (r"\bstartup cost\b", "startup costs"),
+    (r"\bbudget\s+to\s+open\b", "startup budget"),
+    (r"\bcalculate\s+(?:the\s+)?budget\b", "startup budget"),
+    (r"\bhow\s+much\s+(?:budget|money|capital)\b", "startup budget"),
+    (r"\bstartup\s+budget\b", "startup budget"),
+    (r"\bstarting\s+budget\b", "startup budget"),
+    (r"\bmake\s+(?:an?\s+)?appointment\b", "restaurant booking integration"),
+    (
+        r"\bbook\s+(?:a\s+)?(?:table|reservation|seat|appointment)\b",
+        "restaurant booking integration",
+    ),
+    (r"\breserve\s+(?:a\s+)?(?:table|seat)\b", "restaurant booking integration"),
+    (r"\bmake\s+(?:a\s+)?reservation\b", "restaurant booking integration"),
+)
 
 
 @dataclass(frozen=True)
@@ -357,15 +371,15 @@ def assess_capability_support(user_query: str) -> str | None:
     normalized = " ".join(user_query.lower().strip().split())
     unsupported_fields = [
         label
-        for phrase, label in UNSUPPORTED_DATA_TERMS.items()
-        if phrase in normalized
+        for pattern, label in UNSUPPORTED_CAPABILITY_PATTERNS
+        if re.search(pattern, normalized)
     ]
     if not unsupported_fields:
         return None
     fields = ", ".join(sorted(set(unsupported_fields)))
     return (
-        f"FoodSight cannot answer this yet because the current knowledge graph "
-        f"does not contain {fields} data."
+        f"FoodSight does not currently have the capability to answer "
+        f"{fields} questions."
     )
 
 

@@ -333,3 +333,17 @@
   border-color: var(--dark-border);
   color: var(--dark-muted);
 }
+
+[data-theme="dark"] .explanation-map-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--dark-skeleton-start) 25%,
+    var(--dark-skeleton-mid) 50%,
+    var(--dark-skeleton-start) 75%
+  );
+  background-size: 200% 100%;
+}
+
+[data-theme="dark"] .explanation-map-loading-text {
+  color: var(--dark-muted);
+}
