@@ -302,6 +302,7 @@
 .ai-response-list {
   margin: 0;
   padding-left: 24px;
+  list-style: revert;
   font-size: 14px;
   line-height: 1.65;
   letter-spacing: 0;

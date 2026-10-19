@@ -116,3 +116,15 @@ class ChatSendResponse(BaseModel):
 class DeleteChatResponse(BaseModel):
     deleted: bool
     chatId: int
+
+
+ThemeName = Literal["light", "dark"]
+
+
+class PreferencesRead(BaseModel):
+    # None until the user has picked a theme; the browser keeps its current one.
+    theme: ThemeName | None = None
+
+
+class PreferencesUpdate(BaseModel):
+    theme: ThemeName

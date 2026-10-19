@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ..auth.backend import current_user
+from ..auth.models import User
 from ..database import get_db
 from ..model import ChatHistory, ChatMessage, ChatMessageGraph, ChatMessageMap, ChatMessageQuickReplies, ChatQueryState
 from ..schemas import (
@@ -40,6 +42,7 @@ from ..services.chatbot.titles import (
 from ..services.shared.diagnostics import log_request_timing, log_timing, timing_token_fields, trace_request
 from ..services.shared.messages import response as user_response
 
+# Every route needs a logged-in, verified user and only sees that user's chats.
 router = APIRouter(prefix="/chats", tags=["chats"])
 # Saved in the chat's state once a model title has been applied, so it happens only once.
 TITLE_GENERATED = "title_generated"
@@ -133,10 +136,11 @@ def serialize_chat(chat: ChatHistory) -> ChatRead:
     )
 
 
-def get_chat_or_404(db: Session, chat_id: int) -> ChatHistory:
+def get_chat_or_404(db: Session, chat_id: int, user_id: int) -> ChatHistory:
+    # Another user's chat is reported as not found, so chat ids reveal nothing.
     chat = db.scalar(
         select(ChatHistory)
-        .where(ChatHistory.id == chat_id)
+        .where(ChatHistory.id == chat_id, ChatHistory.user_id == user_id)
         .options(
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
@@ -202,7 +206,10 @@ def build_location_context(payload: ChatSendRequest) -> str:
 
 
 @router.get("", response_model=ChatListResponse)
-def list_chat_histories(db: Session = Depends(get_db)) -> ChatListResponse:
+def list_chat_histories(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> ChatListResponse:
     session_timestamp = (
         select(ChatMessage.created_at)
         .where(ChatMessage.chat_id == ChatHistory.id, ChatMessage.role == "user")
@@ -212,6 +219,7 @@ def list_chat_histories(db: Session = Depends(get_db)) -> ChatListResponse:
     )
     chats = db.scalars(
         select(ChatHistory)
+        .where(ChatHistory.user_id == user.id)
         .options(
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
@@ -230,9 +238,10 @@ def list_chat_histories(db: Session = Depends(get_db)) -> ChatListResponse:
 def create_chat_history(
     payload: ChatCreate,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> ChatRead:
     title = payload.title.strip() if payload.title else "New Chat"
-    chat = ChatHistory(title=title)
+    chat = ChatHistory(title=title, user_id=user.id)
 
     db.add(chat)
     db.commit()
@@ -248,6 +257,7 @@ def create_chat_history(
 def preflight_message(
     payload: ChatPreflightRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> ChatPreflightResponse:
     preflight_started_at = perf_counter()
     user_text = payload.message.strip()
@@ -257,7 +267,7 @@ def preflight_message(
             detail=user_response("interface.empty_message"),
         )
 
-    chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
+    chat = get_chat_or_404(db, payload.chat_id, user.id) if payload.chat_id else None
     prior_messages = build_llm_messages(chat) if chat else []
     decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
     response = ChatPreflightResponse(
@@ -279,8 +289,12 @@ def preflight_message(
 
 
 @router.get("/{chat_id}", response_model=ChatRead)
-def get_chat_history(chat_id: int, db: Session = Depends(get_db)) -> ChatRead:
-    return serialize_chat(get_chat_or_404(db, chat_id))
+def get_chat_history(
+    chat_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> ChatRead:
+    return serialize_chat(get_chat_or_404(db, chat_id, user.id))
 
 
 # Step 2: answer the message, then save both sides of the turn.
@@ -289,6 +303,7 @@ def get_chat_history(chat_id: int, db: Session = Depends(get_db)) -> ChatRead:
 def send_message(
     payload: ChatSendRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> ChatSendResponse:
     send_started_at = perf_counter()
     user_text = payload.message.strip()
@@ -300,7 +315,7 @@ def send_message(
 
     # Reuse the preflight decision when its token is valid; otherwise screen the message again.
     guardrail_started_at = perf_counter()
-    prior_chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
+    prior_chat = get_chat_or_404(db, payload.chat_id, user.id) if payload.chat_id else None
     preflight_decision = verify_guardrail_token(payload.preflight_token, user_text, payload.chat_id)
     guardrail_source = "token"
     if not preflight_decision:
@@ -323,7 +338,7 @@ def send_message(
         if not chat.messages:
             chat.title = session_title
     else:
-        chat = ChatHistory(title=session_title)
+        chat = ChatHistory(title=session_title, user_id=user.id)
     wants_title = title_needed(chat, first_turn)
 
     llm_messages = build_llm_messages(chat, user_text)
@@ -398,7 +413,7 @@ def send_message(
     db.refresh(user_message)
     db.refresh(assistant_message)
 
-    chat = get_chat_or_404(db, chat.id)
+    chat = get_chat_or_404(db, chat.id, user.id)
     response = ChatSendResponse(
         chat=serialize_chat(chat),
         userMessage=serialize_message(user_message),
@@ -423,6 +438,7 @@ def rename_chat_history(
     chat_id: int,
     payload: ChatRenameRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> ChatRead:
     title = payload.title.strip()
     if not title:
@@ -431,7 +447,7 @@ def rename_chat_history(
             detail=user_response("interface.empty_title"),
         )
 
-    chat = get_chat_or_404(db, chat_id)
+    chat = get_chat_or_404(db, chat_id, user.id)
     chat.title = title
     chat.updated_at = datetime.now(timezone.utc)
 
@@ -446,8 +462,9 @@ def update_chat_pin(
     chat_id: int,
     payload: ChatPinRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> ChatRead:
-    chat = get_chat_or_404(db, chat_id)
+    chat = get_chat_or_404(db, chat_id, user.id)
     chat.pinned = payload.pinned
     chat.updated_at = datetime.now(timezone.utc)
 
@@ -461,8 +478,9 @@ def update_chat_pin(
 def delete_chat_history(
     chat_id: int,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ) -> DeleteChatResponse:
-    chat = get_chat_or_404(db, chat_id)
+    chat = get_chat_or_404(db, chat_id, user.id)
 
     db.delete(chat)
     db.commit()

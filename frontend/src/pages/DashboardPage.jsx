@@ -14,10 +14,22 @@ import {
   sendChatMessage,
   updateChatPin,
 } from "../api/chatApi";
+import { fetchThemePreference, saveThemePreference } from "../api/preferencesApi";
+import { useTheme } from "../context/ThemeContext.jsx";
 import "../styles/dashboard.css";
 
 function DashboardPage() {
-  const [darkMode, setDarkMode] = useState(false);
+  // The theme is shared with the login pages (remembered in this browser) and saved to the account,
+  // so it comes back on the next login, on any browser.
+  const { theme, setTheme } = useTheme();
+  const darkMode = theme === "dark";
+  const themeChangedRef = useRef(false);
+  const setDarkMode = (next) => {
+    const nextTheme = (typeof next === "function" ? next(darkMode) : next) ? "dark" : "light";
+    themeChangedRef.current = true;
+    setTheme(nextTheme);
+    saveThemePreference(nextTheme).catch((error) => console.error("Failed to save theme", error));
+  };
   const [showGraphEvidence, setShowGraphEvidence] = useState(loadShowGraphEvidence);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -79,6 +91,21 @@ function DashboardPage() {
       ignore = true;
     };
   }, []);
+
+  // Apply the account's saved theme after login, unless the user already switched it on this page.
+  useEffect(() => {
+    let ignore = false;
+
+    fetchThemePreference()
+      .then((savedTheme) => {
+        if (!ignore && savedTheme && !themeChangedRef.current) setTheme(savedTheme);
+      })
+      .catch((error) => console.error("Failed to load theme", error));
+
+    return () => {
+      ignore = true;
+    };
+  }, [setTheme]);
 
   const handlePrepareQuery = async (query) => {
     setIsSending(true);

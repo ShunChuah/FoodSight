@@ -11,15 +11,20 @@ load_dotenv()
 
 from app import config  # noqa: E402  (reads the settings loaded above)
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/foodsight",
+# DATABASE_URL is optional; by default the chat tables use the same DB_* settings as the login tables.
+DATABASE_URL = os.getenv("DATABASE_URL") or URL.create(
+    "postgresql+psycopg2",
+    username=config.DB_USER,
+    password=config.DB_PASSWORD,
+    host=config.DB_HOST,
+    port=config.DB_PORT,
+    database=config.DB_NAME,
 )
 
 # Accept common PostgreSQL URL formats and convert them for psycopg2.
-if DATABASE_URL.startswith("postgres://"):
+if isinstance(DATABASE_URL, str) and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
+elif isinstance(DATABASE_URL, str) and DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 engine = create_engine(DATABASE_URL)

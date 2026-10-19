@@ -11,6 +11,7 @@ from .database import Base, auth_engine, engine
 from . import config
 from .auth.routes import router as auth_router
 from .routes.chat import router as chat_router
+from .routes.preferences import router as preferences_router
 from .services.shared.neo4j import warm_up
 
 
@@ -38,6 +39,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(preferences_router)
 
 # Login, registration and the current user live under /api/v1.
 router = APIRouter(prefix="/api/v1")

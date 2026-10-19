@@ -10,6 +10,9 @@ class ChatHistory(Base):
     __tablename__ = "chat_histories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Owner (auth.users.user_id). The foreign key is added by db/migrations/002_chat_owner.sql,
+    # because the auth tables belong to the login models, not to this Base.
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
@@ -116,3 +119,19 @@ class ChatMessageGraph(Base):
         ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
     )
     data: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class UserPreference(Base):
+    """Per-account settings that follow the user to any browser (theme: "light" or "dark")."""
+
+    __tablename__ = "user_preferences"
+
+    # auth.users.user_id; the foreign key is added by db/migrations/003_user_preferences.sql.
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    theme: Mapped[str] = mapped_column(String(10), nullable=False, default="light")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
