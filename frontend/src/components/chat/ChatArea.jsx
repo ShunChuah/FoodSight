@@ -5,6 +5,8 @@ import AIResponseCard from "./AIResponseCard";
 import AIResponseSkeleton from "./AIResponseSkeleton";
 import UserQuestionBubble from "./UserQuestionBubble";
 import AIExplanationPanel from "../explanation/AIExplanationPanel";
+import { submitChatQuery } from "../../services/submitChatQuery";
+import { detailTabs } from "../../services/detailsPresentation";
 import "../../styles/chat.css";
 
 function ChatArea({
@@ -13,11 +15,13 @@ function ChatArea({
   onSendQuery,
   isSending = false,
   darkMode = false,
+  showGraphEvidence = true,
   pendingQuery = "",
 }) {
   // No selected chat means the user is starting an unsaved draft conversation.
   const hasPendingQuery = Boolean(pendingQuery.trim());
   const messages = selectedChat?.messages ?? [];
+  const latestMessage = messages.at(-1);
   const hasSavedPendingUserMessage = messages.some(
     (message) =>
       message.type === "user" && message.text.trim() === pendingQuery.trim(),
@@ -26,13 +30,31 @@ function ChatArea({
     !hasPendingQuery && (!selectedChat || messages.length === 0);
   const resultRef = useRef(null);
   const [explanationContext, setExplanationContext] = useState(null);
+  const [sendError, setSendError] = useState("");
+  const tabsFor = (message) => detailTabs(message, { showKnowledgeGraph: showGraphEvidence });
+  // Re-checked on every render: turning graph evidence off can leave the open panel empty.
+  const explanationTabs = explanationContext ? tabsFor(explanationContext.message) : [];
+  const submissionInFlight = useRef(false);
 
-  // Scroll to bottom whenever the selected chat or its messages change
+  const handleSubmit = async (query) => {
+    if (!query.trim() || isSending || submissionInFlight.current) return false;
+    submissionInFlight.current = true;
+    setSendError("");
+    try {
+      await submitChatQuery(query, { prepare: onPrepareQuery, send: onSendQuery });
+      return true;
+    } catch {
+      setSendError("Your message couldn't be sent. Please try again.");
+      return false;
+    } finally {
+      submissionInFlight.current = false;
+    }
+  };
+
   useEffect(() => {
     const el = resultRef.current;
     if (!el) return;
 
-    // Wait for DOM to update then scroll
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
@@ -41,7 +63,7 @@ function ChatArea({
   return (
     <main
       className={`chat-area-with-panel ${
-        explanationContext ? "has-explanation" : ""
+        explanationTabs.length ? "has-explanation" : ""
       }`}
     >
       <section className="chat-card">
@@ -50,20 +72,16 @@ function ChatArea({
         ) : (
           <div className="chat-result-area" ref={resultRef}>
             {messages.map((message) =>
-              // User messages and assistant messages use different bubble/card UI.
               message.type === "user" ? (
                 <UserQuestionBubble key={message.id} text={message.text} />
               ) : (
                 <AIResponseCard
                   key={message.id}
                   answer={message.answer}
-                  mapImage={message.mapImage}
-                  isExplanationOpen={explanationContext?.messageId === message.id}
+                  hasDetails={tabsFor(message).length > 0}
+                  isExplanationOpen={explanationTabs.length > 0 && explanationContext?.messageId === message.id}
                   onShowExplanation={() =>
-                    setExplanationContext({
-                      messageId: message.id,
-                      mapImage: message.mapImage,
-                    })
+                    setExplanationContext({ messageId: message.id, message })
                   }
                 />
               ),
@@ -80,17 +98,23 @@ function ChatArea({
           </div>
         )}
 
+        {sendError && <p className="chat-send-error" role="alert">{sendError}</p>}
         <ChatInput
-          onPrepareQuery={onPrepareQuery}
-          onSendQuery={onSendQuery}
+          onSendQuery={handleSubmit}
+          quickReplies={latestMessage?.type === "assistant" ? latestMessage.quickReplies : []}
           showSuggestions={showWelcome}
-          disabled={isSending}
+          disabled={isSending || hasPendingQuery}
         />
       </section>
 
-      {explanationContext && (
+      {explanationTabs.length > 0 && (
         <AIExplanationPanel
-          mapImage={explanationContext.mapImage}
+          key={explanationContext.messageId}
+          tabs={explanationTabs}
+          mapImage={explanationContext.message.mapImage}
+          mapData={explanationContext.message.mapData}
+          graphData={explanationContext.message.graphData}
+          darkMode={darkMode}
           onClose={() => setExplanationContext(null)}
         />
       )}

@@ -1,67 +1,50 @@
 # FoodSight
 An AI-first Food &amp; Beverage location intelligence platform that transforms Food &amp; Beverage data into a knowledge graph, enabling conversational analytics and interactive map visualizations to help analysts find market opportunities and customers discover restaurants.
 
-## Docker Setup
+## Requirements
 
-1. Create a backend environment file:
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- An OpenAI API key
+
+## Setup
+
+1. Create the environment files:
 
    ```powershell
-   backend\.env.example backend\.env
+   copy backend\.env.example backend\.env
+   copy frontend\.env.example frontend\.env
    ```
 
-2. Update `backend\.env` with your LLM configuration:
+2. In `backend\.env`, set `LLM_API_KEY` (your OpenAI API key) and
+   `GUARDRAIL_TOKEN_SECRET` (any long random text).
 
-   ```env
-   LLM_API_STYLE=content
-   LLM_API_URL=https://your-llm-endpoint/v1/models/{model}:generateContent
-   LLM_API_KEY=your_llm_api_key_here
-   LLM_MODEL=your_llm_model
-   NEO4J_EXECUTE_QUERIES=false
+3. Load the graph data into Neo4j. Put the Neo4j 5 Community dump at
+   `neo4j\imports\neo4j.dump`, then run:
+
+   ```powershell
+   docker compose up -d neo4j
+   docker compose stop neo4j
+   docker run --rm --mount type=volume,source=foodsight_neo4j_data,target=/data --mount "type=bind,source=${PWD}\neo4j\imports,target=/backups,readonly" neo4j:5-community neo4j-admin database load --from-path=/backups --overwrite-destination=true neo4j
    ```
 
-   Supported `LLM_API_STYLE` values are `content`, `responses`, and `chat`.
-   Set the URL, key, model, and style required by your chosen LLM endpoint.
-
-   FoodSight now generates a schema-aware Neo4j Cypher query for every chat
-   message and displays it in the AI response so you can verify the query first.
-   Keep `NEO4J_EXECUTE_QUERIES=false` while your knowledge graph is still being
-   built. When the graph is ready, set:
-
-   ```env
-   NEO4J_URI=bolt://localhost:7687
-   NEO4J_USER=neo4j
-   NEO4J_PASSWORD=foodsight123
-   NEO4J_DATABASE=neo4j
-   NEO4J_SCHEMA_PATH=app/knowledge_graph/schema.txt
-   NEO4J_EXECUTE_QUERIES=true
-   ```
-
-
-   The graph schema is stored in
-   `backend/app/knowledge_graph/schema.txt`. Update that file whenever your
-   Neo4j labels, properties, or relationships change.
-
-3. Build and start the app:
+4. Build and start everything:
 
    ```powershell
    docker compose up --build
    ```
 
-4. Open the app:
+5. Open:
 
-   - Frontend: http://localhost:5173
-   - Backend health check: http://localhost:8000
-   - PostgreSQL: localhost:5432
-   - Neo4j Browser: http://localhost:7474
+   | Service | URL |
+   |---|---|
+   | Frontend | http://localhost:5173 |
+   | Backend | http://localhost:8000 |
+   | Neo4j Browser | http://localhost:7474 (neo4j / foodsight123) |
+   | PostgreSQL | localhost:5432 |
 
-To stop the containers:
-
-```powershell
-docker compose down
-```
-
-To also remove the PostgreSQL data volume:
+## Stopping
 
 ```powershell
-docker compose down -v
+docker compose down      # stop containers
+docker compose down -v   # also delete database volumes
 ```

@@ -397,6 +397,8 @@
 }
 
 .setting-footer-action {
+  border: none;
+  cursor: pointer;
   gap: 16px;
   font-size: 14px;
   font-weight: 400;
@@ -453,11 +455,16 @@
   width: 45px;
   height: 20px;
   border-radius: 999px;
-  background: #5a321f;
+  background: #e4e4e7;
   padding: 4px;
   cursor: pointer;
   display: flex;
   align-items: center;
+  transition: background 0.25s ease;
+}
+
+.dark-toggle:has(input:checked) {
+  background: #5a321f;
 }
 
 .dark-toggle input {

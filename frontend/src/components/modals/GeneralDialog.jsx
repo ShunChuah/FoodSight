@@ -11,13 +11,17 @@ function GeneralDialog({
   onSecondary,
   onClose,
   destructive = false,
+  // While the primary action runs, the dialog can't be dismissed and its buttons are disabled.
+  busy = false,
 }) {
   const preferredButtonRef = useRef(null);
-  const dismiss = onClose ?? onSecondary;
+  const dismiss = busy ? undefined : onClose ?? onSecondary;
 
   useEffect(() => {
     preferredButtonRef.current?.focus();
+  }, []);
 
+  useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
         dismiss?.();
@@ -44,13 +48,15 @@ function GeneralDialog({
         aria-modal="true"
         aria-labelledby="general-dialog-title"
         aria-describedby="general-dialog-description"
+        aria-busy={busy || undefined}
       >
-        {dismiss && (
+        {(onClose ?? onSecondary) && (
           <button
             className="general-dialog-close"
             type="button"
             title="Close dialog"
             aria-label="Close dialog"
+            disabled={busy}
             onClick={dismiss}
           >
             <X aria-hidden="true" />
@@ -70,6 +76,7 @@ function GeneralDialog({
               ref={preferredButtonRef}
               className="general-dialog-secondary"
               type="button"
+              disabled={busy}
               onClick={onSecondary}
             >
               {secondaryLabel}
@@ -79,6 +86,7 @@ function GeneralDialog({
             ref={secondaryLabel ? null : preferredButtonRef}
             className={`general-dialog-primary ${destructive ? "destructive" : ""}`}
             type="button"
+            disabled={busy}
             onClick={onPrimary}
           >
             {primaryLabel}

@@ -10,6 +10,17 @@ frontend/dist/
 .env.local
 backend/.env
 
+# Local graph imports and recovery archives
+neo4j/imports/
+neo4j/backups/
+
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Testing files (kept locally, never pushed)
+backend/tests/
+backend/scripts/
+backend/requirements-dev.txt
+docs/
+frontend/tests/

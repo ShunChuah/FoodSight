@@ -1,19 +1,15 @@
-# API request/response shapes shared by FastAPI routes and the React frontend.
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from .services.shared.messages import response
+
 
 MAX_MESSAGE_WORDS = 1000
 MAX_MESSAGE_CHARACTERS = 5000
 ScopeType = Literal["fnb_customer", "fnb_analyst"]
-GuardrailStatus = Literal[
-    "ready",
-    "clarification_required",
-    "unsupported",
-    "out_of_scope",
-]
+GuardrailStatus = Literal["ready", "unsupported", "out_of_scope"]
 
 
 class ChatMessageInput(BaseModel):
@@ -23,18 +19,23 @@ class ChatMessageInput(BaseModel):
         max_length=MAX_MESSAGE_CHARACTERS,
     )
 
-    @field_validator("message")
+    @field_validator("message", mode="before")
     @classmethod
     def validate_message_words(cls, value: str) -> str:
+        if not isinstance(value, str):
+            return value
+        if not value.strip():
+            raise ValueError(response("interface.empty_message"))
         if len(value.split()) > MAX_MESSAGE_WORDS:
             raise ValueError(
-                f"Message cannot exceed {MAX_MESSAGE_WORDS} words."
+                response("interface.message_limit", maximum=f"{MAX_MESSAGE_WORDS:,}")
             )
+        if len(value) > MAX_MESSAGE_CHARACTERS:
+            raise ValueError(f"Your message is too long. Please keep it under {MAX_MESSAGE_CHARACTERS:,} characters.")
         return value
 
 
 class ChatCreate(BaseModel):
-    # Optional title for manually creating an empty chat session.
     title: str | None = Field(default=None, max_length=160)
 
 
@@ -60,30 +61,38 @@ class ChatPreflightResponse(BaseModel):
     locationRequired: bool
     detectedLocation: str | None = None
     decisionToken: str
+    traceId: str | None = None
+    traceId: str | None = None
 
 
 class ChatRenameRequest(BaseModel):
-    # New sidebar title entered from inline rename.
     title: str = Field(..., min_length=1, max_length=160)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        if isinstance(value, str) and not value.strip():
+            raise ValueError(response("interface.empty_title"))
+        return value
 
 
 class ChatPinRequest(BaseModel):
-    # Stores whether the chat should stay at the top of history.
     pinned: bool
 
 
 class ChatMessageRead(BaseModel):
-    # Frontend-friendly message shape for rendering user and assistant bubbles.
     id: int
     type: Literal["user", "assistant"]
     text: str | None = None
     answer: str | None = None
     mapImage: str | None = None
+    mapData: dict | None = None
+    graphData: dict | None = None
+    quickReplies: list[str] = Field(default_factory=list)
     createdAt: datetime
 
 
 class ChatRead(BaseModel):
-    # Full chat session returned to the frontend after list/send/rename/pin.
     id: int
     title: str
     date: str
@@ -95,18 +104,15 @@ class ChatRead(BaseModel):
 
 
 class ChatListResponse(BaseModel):
-    # Wrapper used by GET /chats.
     chats: list[ChatRead]
 
 
 class ChatSendResponse(BaseModel):
-    # Returned after saving one user query and one assistant response.
     chat: ChatRead
     userMessage: ChatMessageRead
     assistantMessage: ChatMessageRead
 
 
 class DeleteChatResponse(BaseModel):
-    # Confirms which chat was removed.
     deleted: bool
     chatId: int

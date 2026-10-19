@@ -12,6 +12,7 @@ function ClosedSidebar({
   onOpenSidebar,
   onNewChat,
   onSearchOpen,
+  onSettingsOpen,
 }) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
@@ -49,6 +50,9 @@ function ClosedSidebar({
           className="closed-sidebar-icon-btn"
           type="button"
           title="Settings"
+          aria-label="Settings"
+          aria-haspopup="dialog"
+          onClick={onSettingsOpen}
         >
           <Settings />
         </button>

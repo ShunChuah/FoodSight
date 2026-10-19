@@ -45,7 +45,7 @@
   justify-content: center;
 }
 
-.general-dialog-close:hover {
+.general-dialog-close:not(:disabled):hover {
   color: #ff6129;
 }
 
@@ -89,7 +89,7 @@
   color: #27272a;
 }
 
-.general-dialog-secondary:hover {
+.general-dialog-secondary:not(:disabled):hover {
   background: #f4f4f5;
 }
 
@@ -99,7 +99,7 @@
   color: #ffffff;
 }
 
-.general-dialog-primary:hover {
+.general-dialog-primary:not(:disabled):hover {
   border-color: #e54d17;
   background: #e54d17;
 }
@@ -109,9 +109,14 @@
   background: #ff3b3b;
 }
 
-.general-dialog-primary.destructive:hover {
+.general-dialog-primary.destructive:not(:disabled):hover {
   border-color: #b91c1c;
   background: #b91c1c;
+}
+
+.general-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .general-dialog-primary:focus-visible,
@@ -127,7 +132,7 @@
   color: var(--dark-text);
 }
 
-[data-theme="dark"] .general-dialog-secondary:hover {
+[data-theme="dark"] .general-dialog-secondary:not(:disabled):hover {
   background: var(--dark-hover);
   color: var(--dark-text);
 }
@@ -136,7 +141,7 @@
   color: var(--dark-muted);
 }
 
-[data-theme="dark"] .general-dialog-close:hover {
+[data-theme="dark"] .general-dialog-close:not(:disabled):hover {
   background: var(--dark-hover);
   color: #ff6129;
 }

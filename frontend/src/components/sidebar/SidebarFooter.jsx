@@ -3,17 +3,22 @@ import { mockUser } from "../../../data/mockUser";
 import defaultProfile from "../../assets/defaultProfile.jpg";
 import "../../styles/sidebar.css";
 
-function SidebarFooter({ darkMode, setDarkMode }) {
+function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen }) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
   return (
     <div className="sidebar-footer">
       <h3>Others</h3>
 
-      <div className="footer-action-btn setting-footer-action">
+      <button
+        className="footer-action-btn setting-footer-action"
+        type="button"
+        aria-haspopup="dialog"
+        onClick={onSettingsOpen}
+      >
         <Settings />
         <span>Settings</span>
-      </div>
+      </button>
 
       <div className="footer-action-btn theme-footer-action">
         <Moon />

@@ -1,46 +1,47 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Waypoints, Map, PlayCircle, X } from "lucide-react";
 import KnowledgeGraphEvidence from "./KnowledgeGraphEvidence";
 import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
+import MapPreview from "../map/MapPreview";
+import { hasMapView } from "../../services/mapPresentation";
 import "../../styles/explanation.css";
 
-const SAMPLE_MAP_IMAGE_URL =
-  "https://docs.maptiler.com/leaflet/examples/nextjs/map.png";
-
-function AIExplanationPanel({ mapImage, onClose }) {
-  const [activeTab, setActiveTab] = useState("map");
-  const displayedMapImage = mapImage || SAMPLE_MAP_IMAGE_URL;
-  const [isMapLoading, setIsMapLoading] = useState(true);
-
-  useEffect(() => {
-    setIsMapLoading(true);
-  }, [displayedMapImage]);
+// `tabs` lists only the tabs with something to show (see detailTabs).
+function AIExplanationPanel({ tabs, mapImage, mapData, graphData, darkMode = false, onClose }) {
+  const showMap = tabs.includes("map");
+  const showKnowledge = tabs.includes("knowledge");
+  const [selectedTab, setSelectedTab] = useState(tabs[0]);
+  // A tab can disappear while open (graph evidence turned off in Settings).
+  const activeTab = tabs.includes(selectedTab) ? selectedTab : tabs[0];
+  const displayedMapImage = mapImage;
+  const [settledMapImage, setSettledMapImage] = useState(null);
+  const isMapLoading = Boolean(displayedMapImage) && settledMapImage !== displayedMapImage;
 
   return (
     <aside className="ai-explanation-panel">
       <div className="explanation-header">
         <div className="explanation-tabs" role="tablist" aria-label="Explanation evidence">
-          <button
+          {showMap && <button
             className={`explanation-tab ${activeTab === "map" ? "active" : ""}`}
             type="button"
             role="tab"
             aria-selected={activeTab === "map"}
-            onClick={() => setActiveTab("map")}
+            onClick={() => setSelectedTab("map")}
           >
             <Map />
             <span>Map</span>
-          </button>
+          </button>}
 
-          <button
+          {showKnowledge && <button
             className={`explanation-tab ${activeTab === "knowledge" ? "active" : ""}`}
             type="button"
             role="tab"
             aria-selected={activeTab === "knowledge"}
-            onClick={() => setActiveTab("knowledge")}
+            onClick={() => setSelectedTab("knowledge")}
           >
             <Waypoints />
             <span>Knowledge Graph Evidence</span>
-          </button>
+          </button>}
         </div>
 
         <button
@@ -56,27 +57,34 @@ function AIExplanationPanel({ mapImage, onClose }) {
       <div className="explanation-content">
         {activeTab === "map" ? (
           <section className="map-evidence-section" role="tabpanel">
-            <div className="explanation-map-frame">
-              {isMapLoading && <ExplanationMapSkeleton />}
-              <img
-                className={isMapLoading ? "is-loading" : ""}
-                src={displayedMapImage}
-                alt="Map evidence"
-                onLoad={() => setIsMapLoading(false)}
-                onError={() => setIsMapLoading(false)}
-              />
+            {hasMapView(mapData) ? <MapPreview mapData={mapData} /> : (
+            <div className={`explanation-map-frame${displayedMapImage ? "" : " is-empty"}`}>
+              {displayedMapImage && isMapLoading && <ExplanationMapSkeleton />}
+              {displayedMapImage ? (
+                <img
+                  key={displayedMapImage}
+                  className={isMapLoading ? "is-loading" : ""}
+                  src={displayedMapImage}
+                  alt="Map evidence"
+                  onLoad={() => setSettledMapImage(displayedMapImage)}
+                  onError={() => setSettledMapImage(displayedMapImage)}
+                />
+              ) : (
+                <p>{mapData?.message || "No map is available for this response."}</p>
+              )}
             </div>
+            )}
 
             <div className="cinematic-action-row">
-              <button className="play-cinematic-panel-btn" title="Play Cinematic AI" type="button">
+              <button className="play-cinematic-panel-btn" title="Cinematic playback isn’t available yet" type="button" disabled>
                 <PlayCircle />
                 <span>Play Cinematic AI</span>
               </button>
             </div>
           </section>
         ) : (
-          <div role="tabpanel">
-            <KnowledgeGraphEvidence />
+          <div className="kg-evidence-panel" role="tabpanel">
+            <KnowledgeGraphEvidence graphData={graphData} darkMode={darkMode} />
           </div>
         )}
       </div>

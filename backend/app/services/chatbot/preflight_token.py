@@ -1,3 +1,8 @@
+"""Signed token carrying the preflight decision, so the send request can reuse it.
+
+Preflight screens the message (and tells the browser whether to ask for GPS); send then trusts the token
+instead of screening again. The HMAC signature stops a client from editing the decision.
+"""
 import base64
 import hashlib
 import hmac
@@ -5,8 +10,8 @@ import json
 import os
 import time
 
-from .chat_service import GuardrailDecision
-
+from ...contracts import GuardrailDecision
+from ..shared.diagnostics import restore_request_timing, timing_token_fields
 
 TOKEN_TTL_SECONDS = 300
 
@@ -16,6 +21,7 @@ def create_guardrail_token(
     chat_id: int | None,
     decision: GuardrailDecision,
 ) -> str:
+    # The token is only valid for this exact message in this chat, for TOKEN_TTL_SECONDS.
     payload = {
         "message_hash": _message_hash(message),
         "chat_id": chat_id,
@@ -24,8 +30,8 @@ def create_guardrail_token(
         "message": decision.message,
         "location_required": decision.location_required,
         "detected_location": decision.detected_location,
-        "query_understanding": decision.query_understanding,
         "expires_at": int(time.time()) + TOKEN_TTL_SECONDS,
+        "timing": timing_token_fields(),
     }
     encoded_payload = _encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -45,6 +51,7 @@ def verify_guardrail_token(
 ) -> GuardrailDecision | None:
     if not token:
         return None
+    # Any problem (tampered, expired, other message or chat) returns None: the send route then screens again.
     try:
         encoded_payload, encoded_signature = token.split(".", maxsplit=1)
         supplied_signature = _decode(encoded_signature)
@@ -69,26 +76,17 @@ def verify_guardrail_token(
 
     status = payload.get("status")
     scope = payload.get("scope")
-    if status not in {
-        "ready",
-        "clarification_required",
-        "unsupported",
-        "out_of_scope",
-    }:
+    if status not in {"ready", "unsupported", "out_of_scope"}:
         return None
     if scope not in {None, "fnb_customer", "fnb_analyst"}:
         return None
+    restore_request_timing(payload.get("timing"))
     return GuardrailDecision(
         status=status,
         scope=scope,
         message=payload.get("message"),
         location_required=bool(payload.get("location_required")),
         detected_location=payload.get("detected_location"),
-        query_understanding=(
-            payload.get("query_understanding")
-            if isinstance(payload.get("query_understanding"), dict)
-            else None
-        ),
     )
 
 
@@ -98,6 +96,7 @@ def _message_hash(message: str) -> str:
 
 
 def _token_secret() -> bytes:
+    # Set GUARDRAIL_TOKEN_SECRET in production; the fallback is only for local development.
     configured = os.getenv("GUARDRAIL_TOKEN_SECRET", "").strip()
     if configured:
         return configured.encode("utf-8")

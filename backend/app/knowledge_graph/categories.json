@@ -1,0 +1,941 @@
+{
+  "description": "FoodSight category definitions. The single place where every column with a fixed set of values is defined: what the column means and every allowed value. Scrapers, cleaners, the profiler and the validator read their value lists from this file through src/categories.py. To add, rename or remove a value, edit this file only. PostgreSQL CHECK constraints cannot read it: when an 'active' list changes, add a migration in db/migrations/ to match.",
+  "legend": {
+    "meaning": "The one question this column answers.",
+    "rules": "Only where picking needs guidance: how to choose between values and how to combine them. The AI is given these together with the list.",
+    "filled_by": "Where the value comes from. osm = OpenStreetMap. google = Google Places. ai = picked by the AI profiler from the list here. lookup = not picked; it follows from another value (a cuisine's category follows from its name; a price tier follows from the average meal price).",
+    "pick": "one = exactly one value. many = several values per restaurant. Cuisines and facilities are stored one per row in their link table; target_segment and ambiance are stored in the same column as plain text, separated by a comma and a space (families, students).",
+    "max": "Only when pick is many: the most values allowed. At least one is always required.",
+    "status": "active = the pipeline already uses and enforces this list. planned = agreed but not enforced yet, because the stored data still holds the old free text.",
+    "values": "Every allowed value with its one-line definition. A value that is not listed is not accepted. Cuisine and facility values carry extra facts: category, origin_country (the single country the food comes from, or null when there is none) and includes (older or narrower labels that are folded into this value). Amenity type values carry osm: the OpenStreetMap labels, written key=value, that produce the value. Price tier values carry min_price: the lowest avg_meal_price, in RM, that belongs to the tier."
+  },
+  "columns": {
+    "restaurant.amenity_type": {
+      "meaning": "What kind of food and drink place OpenStreetMap says it is. Each value lists the OpenStreetMap labels (osm) that produce it, and the scraper collects exactly those labels. When a place carries more than one, a cuisine label wins, then an amenity label, then a shop label.",
+      "filled_by": "osm",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "restaurant": {
+          "definition": "Sit-down place that sells full meals.",
+          "osm": [
+            "amenity=restaurant"
+          ]
+        },
+        "cafe": {
+          "definition": "Place mainly for coffee, other drinks and light food.",
+          "osm": [
+            "amenity=cafe"
+          ]
+        },
+        "fast_food": {
+          "definition": "Place where food is ordered at a counter and served quickly.",
+          "osm": [
+            "amenity=fast_food"
+          ]
+        },
+        "food_court": {
+          "definition": "Shared seating area with several food stalls.",
+          "osm": [
+            "amenity=food_court"
+          ]
+        },
+        "bar": {
+          "definition": "Place mainly for alcoholic drinks, with little or no food.",
+          "osm": [
+            "amenity=bar"
+          ]
+        },
+        "pub": {
+          "definition": "Place for alcoholic drinks that usually also serves food.",
+          "osm": [
+            "amenity=pub"
+          ]
+        },
+        "ice_cream": {
+          "definition": "Shop that sells ice cream or other frozen desserts.",
+          "osm": [
+            "amenity=ice_cream"
+          ]
+        },
+        "canteen": {
+          "definition": "Dining hall inside a school, office or factory.",
+          "osm": [
+            "amenity=canteen"
+          ]
+        },
+        "bakery": {
+          "definition": "Shop that sells bread, cakes and pastries.",
+          "osm": [
+            "shop=bakery",
+            "shop=pastry"
+          ]
+        },
+        "beverage": {
+          "definition": "Shop that mainly sells non-alcoholic drinks such as bubble tea, tea or juice. The cuisine says which.",
+          "osm": [
+            "cuisine=bubble_tea",
+            "shop=beverages",
+            "shop=tea"
+          ]
+        }
+      }
+    },
+    "restaurant.business_status": {
+      "meaning": "Whether the place is trading, as reported by Google. A restaurant with no Google match is recorded as OPERATIONAL.",
+      "filled_by": "google",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "OPERATIONAL": "Open for business.",
+        "CLOSED_TEMPORARILY": "Closed for now and expected to reopen.",
+        "PERMANENTLY_CLOSED": "Closed for good."
+      }
+    },
+    "area.type": {
+      "meaning": "The kind of area. Every area is one of the city's official numbered sections (OpenStreetMap admin_level 10), so there is one value. The familiar places inside a section are listed in its name, such as PJU 6 (Bandar Utama, Damansara Residensi).",
+      "filled_by": "osm",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "quarter": "Numbered section of the city, such as SS2, PJS 5 or Seksyen 14."
+      }
+    },
+    "facility.name": {
+      "meaning": "A service or feature the restaurant offers, as reported by Google. A restaurant can have several; each one is a row in restaurant_facility.",
+      "filled_by": "google",
+      "pick": "many",
+      "status": "active",
+      "values": {
+        "Dine-in": {
+          "definition": "Customers can eat at the premises.",
+          "category": "service"
+        },
+        "Takeout": {
+          "definition": "Food can be ordered to take away.",
+          "category": "service"
+        },
+        "Delivery": {
+          "definition": "Food can be delivered.",
+          "category": "service"
+        },
+        "Curbside Pickup": {
+          "definition": "Orders can be collected from the car outside.",
+          "category": "service"
+        },
+        "Reservations": {
+          "definition": "A table can be booked ahead.",
+          "category": "service"
+        },
+        "Breakfast": {
+          "definition": "Serves breakfast.",
+          "category": "meal_type"
+        },
+        "Brunch": {
+          "definition": "Serves brunch.",
+          "category": "meal_type"
+        },
+        "Lunch": {
+          "definition": "Serves lunch.",
+          "category": "meal_type"
+        },
+        "Dinner": {
+          "definition": "Serves dinner.",
+          "category": "meal_type"
+        },
+        "Beer": {
+          "definition": "Serves beer.",
+          "category": "drinks"
+        },
+        "Wine": {
+          "definition": "Serves wine.",
+          "category": "drinks"
+        },
+        "Vegetarian Options": {
+          "definition": "Has vegetarian dishes on the menu.",
+          "category": "dietary"
+        },
+        "Wheelchair Accessible": {
+          "definition": "The entrance can be used by a wheelchair.",
+          "category": "accessibility"
+        }
+      }
+    },
+    "facility.category": {
+      "meaning": "The group a facility belongs to.",
+      "filled_by": "lookup",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "service": "How the customer can get the food.",
+        "meal_type": "Which meals of the day are served.",
+        "drinks": "Which alcoholic drinks are served.",
+        "dietary": "Which special diets are catered for.",
+        "accessibility": "Access for people with disabilities."
+      }
+    },
+    "cuisine.name": {
+      "meaning": "What food is served: a food tradition (Chinese, Malay, Thai) or, when one product is the whole business, that product (Pizza, Coffee, Seafood).",
+      "rules": [
+        "Pick 1 to 3 values, most important first.",
+        "Pick the most specific name, and do not add a broad one (Western, Malaysian, Fusion) that it already covers.",
+        "Product values (Pizza, Burgers, Fried Chicken, Sandwiches, Coffee, Bubble Tea, Tea & Juice, Alcohol, Desserts, Bakery, Snacks, Seafood, Healthy, Vegetarian, Hot Pot & BBQ) are used only when that product is the main business.",
+        "A product value already implies its usual tradition. Add a tradition next to it only when it differs from the usual one: KFC is Fried Chicken; Kyochon is Fried Chicken + Korean; Domino's is Pizza; a Korean BBQ place is Hot Pot & BBQ + Korean.",
+        "If a place serves two or three traditions side by side (Chinese and Thai dishes on one menu), list each one. A mix of local Malay, Chinese and Indian dishes is Malaysian, not three separate values. Use Fusion only when traditions are mixed inside the dishes, or the menu is pan-Asian or international.",
+        "Chinese food has four values, one per origin: Chinese (Malaysia), Chinese (China), Chinese (Hong Kong) and Chinese (Taiwan). Pick the most suitable one. When a Chinese place does not clearly fit one, use Chinese (Malaysia), because most Chinese places in Petaling Jaya serve local Chinese food.",
+        "An alias listed under two values means the place gets both values."
+      ],
+      "filled_by": "ai",
+      "pick": "many",
+      "max": 3,
+      "status": "planned",
+      "values": {
+        "Chinese (Malaysia)": {
+          "definition": "Local Malaysian Chinese food such as chicken rice, bak kut teh, wantan mee, economy rice, zi char and Hainanese kopitiam dishes. A traditional kopitiam whose stalls sell Chinese hawker dishes belongs here. Also use this when a Chinese place does not clearly fit one of the other three Chinese values.",
+          "category": "Southeast Asian",
+          "origin_country": "Malaysia",
+          "includes": [
+            "Chinese",
+            "Penang/Chinese",
+            "Chinese Muslim",
+            "Hainanese",
+            "Chicken Rice",
+            "Bak Kut Teh",
+            "Claypot",
+            "Zi Char",
+            "Tai Chow",
+            "Economy Rice",
+            "Chap Fan",
+            "Wantan Mee",
+            "Yong Tau Foo",
+            "Chinese Seafood",
+            "Chinese Vegetarian"
+          ]
+        },
+        "Chinese (China)": {
+          "definition": "Food of a region of mainland China, such as Sichuan, Hunan, Shanghainese, Xinjiang, Hakka, Teochew, Hokkien or Fuzhou cooking, and mala dishes.",
+          "category": "East Asian",
+          "origin_country": "China",
+          "includes": [
+            "Hakka",
+            "Teochew",
+            "Hokkien",
+            "Fuzhou",
+            "Hunan",
+            "Sichuan",
+            "Szechuan",
+            "Shanghainese",
+            "Xinjiang",
+            "Mala",
+            "Malatang"
+          ]
+        },
+        "Chinese (Hong Kong)": {
+          "definition": "Hong Kong and Cantonese food such as dim sum, roast meats and cha chaan teng dishes.",
+          "category": "East Asian",
+          "origin_country": "Hong Kong",
+          "includes": [
+            "Hong Kong style",
+            "Cha Chaan Teng",
+            "Cantonese",
+            "Dim Sum"
+          ]
+        },
+        "Chinese (Taiwan)": {
+          "definition": "Taiwanese food such as beef noodles, lu rou fan and Taiwanese fried chicken. A bubble tea shop is Bubble Tea.",
+          "category": "East Asian",
+          "origin_country": "Taiwan",
+          "includes": [
+            "Taiwanese",
+            "Taiwan",
+            "Taiwanese Street Food"
+          ]
+        },
+        "Japanese": {
+          "definition": "Japanese food such as sushi, ramen, udon, donburi, katsu and izakaya dishes.",
+          "category": "East Asian",
+          "origin_country": "Japan",
+          "includes": [
+            "Sushi",
+            "Ramen",
+            "Udon",
+            "Donburi",
+            "Izakaya",
+            "Tonkatsu",
+            "Japanese Curry",
+            "Yakitori",
+            "Teppanyaki",
+            "Omakase",
+            "Yakiniku",
+            "Shabu-shabu",
+            "Japanese-inspired"
+          ]
+        },
+        "Korean": {
+          "definition": "Korean food such as bibimbap, tteokbokki, Korean fried chicken and Korean barbecue.",
+          "category": "East Asian",
+          "origin_country": "South Korea",
+          "includes": [
+            "Korean Barbecue",
+            "Korean Fried Chicken",
+            "Tteokbokki",
+            "Korean Street Food",
+            "Korean Fusion"
+          ]
+        },
+        "Malay": {
+          "definition": "Malay food such as nasi lemak, rendang, ikan bakar, satay, nasi campur and regional Malay food from any state.",
+          "category": "Southeast Asian",
+          "origin_country": "Malaysia",
+          "includes": [
+            "Malay Kampung",
+            "Nasi Campur",
+            "Nasi Lemak",
+            "Nasi Tomato",
+            "Nasi Kerabu",
+            "Nasi Dagang",
+            "Nasi Kukus",
+            "Satay",
+            "Ikan Bakar",
+            "Rendang",
+            "Ayam Percik",
+            "Asam Pedas",
+            "Masak Lemak",
+            "Mee Rebus",
+            "Mee Bandung",
+            "Lontong"
+          ]
+        },
+        "Indian Muslim": {
+          "definition": "Mamak food: roti canai, nasi kandar, mee goreng mamak and teh tarik. A biryani or North Indian restaurant without the mamak menu is Indian.",
+          "category": "Southeast Asian",
+          "origin_country": "Malaysia",
+          "includes": [
+            "Mamak",
+            "Nasi Kandar",
+            "Indian-Muslim",
+            "Roti Canai"
+          ]
+        },
+        "Nyonya": {
+          "definition": "Peranakan food that blends Chinese and Malay cooking, such as laksa Nyonya, ayam pongteh and Nyonya kuih.",
+          "category": "Southeast Asian",
+          "origin_country": "Malaysia",
+          "includes": [
+            "Peranakan",
+            "Baba Nyonya",
+            "Straits Chinese"
+          ]
+        },
+        "Malaysian": {
+          "definition": "One menu that mixes dishes from more than one local community (Malay, Chinese, Indian), such as a modern kopitiam chain selling nasi lemak, kaya toast and curry mee, or a food court whose stalls cover several of them. Also Sarawak and Sabah food, and Malaysian Eurasian (Kristang) food.",
+          "category": "Southeast Asian",
+          "origin_country": "Malaysia",
+          "includes": [
+            "Local",
+            "Nanyang",
+            "Sarawak Laksa",
+            "Kolo Mee",
+            "Tuaran Mee",
+            "Eurasian",
+            "Kristang"
+          ]
+        },
+        "Thai": {
+          "definition": "Thai food such as tom yum, pad thai, green curry and boat noodles, including local Siamese-style tomyam restaurants.",
+          "category": "Southeast Asian",
+          "origin_country": "Thailand",
+          "includes": [
+            "Tomyam",
+            "Siamese",
+            "Southern Thai",
+            "Boat Noodles",
+            "Thai Street Food",
+            "Green Curry"
+          ]
+        },
+        "Vietnamese": {
+          "definition": "Vietnamese food such as pho and banh mi.",
+          "category": "Southeast Asian",
+          "origin_country": "Vietnam",
+          "includes": [
+            "Pho",
+            "Banh Mi"
+          ]
+        },
+        "Indonesian": {
+          "definition": "Indonesian food such as nasi padang, ayam penyet, ayam gepuk and bakso.",
+          "category": "Southeast Asian",
+          "origin_country": "Indonesia",
+          "includes": [
+            "Padang",
+            "Minangkabau",
+            "Minang",
+            "Javanese",
+            "Sundanese",
+            "Acehnese",
+            "Ayam Penyet",
+            "Ayam Gepuk",
+            "Bakso"
+          ]
+        },
+        "Other Southeast Asian": {
+          "definition": "Food of another Southeast Asian country, such as Filipino, Myanmar or Cambodian food.",
+          "category": "Southeast Asian",
+          "origin_country": null,
+          "includes": [
+            "Filipino",
+            "Burmese",
+            "Myanmar",
+            "Cambodian",
+            "Khmer",
+            "Lao"
+          ]
+        },
+        "Indian": {
+          "definition": "Indian food of any region, including banana leaf rice, thosai, tandoori and biryani.",
+          "category": "South Asian",
+          "origin_country": "India",
+          "includes": [
+            "North Indian",
+            "South Indian",
+            "Punjabi",
+            "Kerala",
+            "Chettinad",
+            "Indian Chettinad",
+            "Banana Leaf",
+            "Tandoori",
+            "Biryani",
+            "Thosai",
+            "Dosa",
+            "Indian Vegetarian"
+          ]
+        },
+        "Pakistani": {
+          "definition": "Pakistani food such as nihari, karahi and naan with kebab.",
+          "category": "South Asian",
+          "origin_country": "Pakistan",
+          "includes": []
+        },
+        "Bangladeshi": {
+          "definition": "Bangladeshi food such as bhuna, bharta, fish curry with rice and Bangladeshi sweets.",
+          "category": "South Asian",
+          "origin_country": "Bangladesh",
+          "includes": [
+            "Bengali"
+          ]
+        },
+        "Nepali": {
+          "definition": "Nepali or Tibetan food such as momo, dal bhat and thukpa.",
+          "category": "South Asian",
+          "origin_country": "Nepal",
+          "includes": [
+            "Nepalese",
+            "Tibetan",
+            "Momo"
+          ]
+        },
+        "Sri Lankan": {
+          "definition": "Sri Lankan food such as hoppers, kottu and Sri Lankan crab curry.",
+          "category": "South Asian",
+          "origin_country": "Sri Lanka",
+          "includes": [
+            "Ceylon",
+            "Jaffna"
+          ]
+        },
+        "Middle Eastern": {
+          "definition": "Arab, Turkish, Persian, Afghan, Central Asian or North African food such as mandi rice, kebab, shawarma, hummus, plov and tagine.",
+          "category": "Middle Eastern",
+          "origin_country": null,
+          "includes": [
+            "Arabic",
+            "Arab",
+            "Kebab",
+            "Shawarma",
+            "Mandi",
+            "Turkish",
+            "Lebanese",
+            "Yemeni",
+            "Syrian",
+            "Iraqi",
+            "Persian",
+            "Iranian",
+            "Afghan",
+            "Uzbek",
+            "Central Asian",
+            "Egyptian",
+            "Moroccan",
+            "North African"
+          ]
+        },
+        "Western": {
+          "definition": "General Western menu with no single country, such as chicken chop, lamb chop, grilled steak, fish and chips and pasta together. Includes local 'Western food' stalls.",
+          "category": "Western",
+          "origin_country": null,
+          "includes": [
+            "Western Food",
+            "Continental",
+            "Steakhouse",
+            "Chicken Chop"
+          ]
+        },
+        "American": {
+          "definition": "American food such as hot dogs, ribs, smoked brisket, diner meals and American-style breakfast. A place that mainly sells burgers or fried chicken is Burgers or Fried Chicken.",
+          "category": "Western",
+          "origin_country": "United States",
+          "includes": [
+            "Diner",
+            "Smokehouse",
+            "American BBQ",
+            "Southern",
+            "Hot Dogs"
+          ]
+        },
+        "Italian": {
+          "definition": "Italian food such as pasta, risotto and antipasti. A place that mainly sells pizza is Pizza.",
+          "category": "Western",
+          "origin_country": "Italy",
+          "includes": [
+            "Pasta"
+          ]
+        },
+        "French": {
+          "definition": "French food such as steak frites, duck confit and crepes.",
+          "category": "Western",
+          "origin_country": "France",
+          "includes": [
+            "Creperie"
+          ]
+        },
+        "Mexican": {
+          "definition": "Mexican and Tex-Mex food such as tacos, burritos and nachos.",
+          "category": "Western",
+          "origin_country": "Mexico",
+          "includes": [
+            "Tex-Mex",
+            "Taco"
+          ]
+        },
+        "Latin American": {
+          "definition": "Food of Central or South America other than Mexico, such as Brazilian churrasco, Peruvian ceviche or Argentinian grill.",
+          "category": "Western",
+          "origin_country": null,
+          "includes": [
+            "Brazilian",
+            "Churrascaria",
+            "Peruvian",
+            "Argentinian",
+            "South American"
+          ]
+        },
+        "European": {
+          "definition": "Food of another European country, such as German, Spanish, Portuguese, British, Greek or Swedish.",
+          "category": "Western",
+          "origin_country": null,
+          "includes": [
+            "German",
+            "Spanish",
+            "Portuguese",
+            "British",
+            "Irish",
+            "Greek",
+            "Russian",
+            "Belgian",
+            "Dutch",
+            "Swedish",
+            "Scandinavian"
+          ]
+        },
+        "Pizza": {
+          "definition": "Pizza is the main product.",
+          "category": "Western",
+          "origin_country": "Italy",
+          "includes": []
+        },
+        "Burgers": {
+          "definition": "Burgers are the main product.",
+          "category": "Western",
+          "origin_country": "United States",
+          "includes": [
+            "Burger"
+          ]
+        },
+        "Fried Chicken": {
+          "definition": "Fried chicken or chicken wings are the main product.",
+          "category": "Western",
+          "origin_country": "United States",
+          "includes": [
+            "Chicken Wings",
+            "Korean Fried Chicken"
+          ]
+        },
+        "Sandwiches": {
+          "definition": "Sandwiches, subs or wraps are the main product.",
+          "category": "Western",
+          "origin_country": null,
+          "includes": [
+            "Sandwich",
+            "Deli"
+          ]
+        },
+        "Coffee": {
+          "definition": "Coffee is the main product. A cafe with a full meal menu is classified by its food (for example Western + Coffee).",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Coffee Shop",
+            "Coffee & Pastries",
+            "Coffee & Bakery",
+            "Donuts & Coffee"
+          ]
+        },
+        "Bubble Tea": {
+          "definition": "Modern tea-drink chains are the main product: bubble tea, milk tea, fruit tea, cheese tea or tea lattes, with or without toppings.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": "Taiwan",
+          "includes": [
+            "Milk Tea",
+            "Fruit Tea",
+            "Cheese Tea",
+            "Tea Latte",
+            "Ice Cream & Bubble Tea"
+          ]
+        },
+        "Tea & Juice": {
+          "definition": "Traditional tea, fruit juice, smoothies, coconut, sugarcane or other non-alcoholic drinks are the main product.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Tea",
+            "Chinese Tea",
+            "Juice",
+            "Smoothies",
+            "Coconut",
+            "Sugarcane",
+            "Kombucha",
+            "Beverages"
+          ]
+        },
+        "Alcohol": {
+          "definition": "Beer, wine, cocktails or spirits are the main product, as in a bar, pub or brewery.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Bar",
+            "Pub",
+            "Brewery",
+            "Craft Beer",
+            "Wine Bar",
+            "Cocktail Bar"
+          ]
+        },
+        "Desserts": {
+          "definition": "Sweets that are not baked are the main product: ice cream, gelato, frozen yogurt, cendol, ais kacang, bingsu, tong sui, waffles, kuih or chocolate. A Malay or Nyonya kuih shop also gets Malay or Nyonya.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Dessert",
+            "Ice Cream",
+            "Gelato",
+            "Frozen Yogurt",
+            "Chinese Dessert",
+            "Tong Sui",
+            "Cendol",
+            "Ais Kacang",
+            "ABC",
+            "Bingsu",
+            "Waffles",
+            "Churros",
+            "Kuih",
+            "Chocolate",
+            "Ice Cream & Bubble Tea"
+          ]
+        },
+        "Bakery": {
+          "definition": "Baked goods are the main product: bread, cakes, donuts, pastries or tarts.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Bread",
+            "Cake",
+            "Cakes",
+            "Pastry",
+            "Patisserie",
+            "Donut",
+            "Donuts",
+            "Egg Tart",
+            "Coffee & Bakery",
+            "Coffee & Pastries",
+            "Donuts & Coffee"
+          ]
+        },
+        "Snacks": {
+          "definition": "Small bites eaten on the go are the main product, such as keropok lekor, apam balik, pisang goreng, takoyaki, fries or popcorn.",
+          "category": "Drinks, Desserts & Snacks",
+          "origin_country": null,
+          "includes": [
+            "Street Snacks",
+            "Keropok Lekor",
+            "Apam Balik",
+            "Pisang Goreng",
+            "Takoyaki",
+            "Popcorn",
+            "Fries"
+          ]
+        },
+        "Seafood": {
+          "definition": "Fish and shellfish are the main product, whatever the cooking tradition, including shell-out and Cajun seafood places.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "Seafood Restaurant",
+            "Chinese Seafood",
+            "Shell Out",
+            "Cajun Seafood",
+            "Crab",
+            "Oyster Bar"
+          ]
+        },
+        "Vegetarian": {
+          "definition": "The whole menu is vegetarian or vegan.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "Vegan",
+            "Plant-based",
+            "Buddhist Vegetarian",
+            "Chinese Vegetarian",
+            "Indian Vegetarian"
+          ]
+        },
+        "Healthy": {
+          "definition": "Salads, poke, grain bowls or other food sold as healthy eating are the main product.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "Salad",
+            "Salads",
+            "Poke",
+            "Grain Bowl",
+            "Healthy Bowl",
+            "Keto"
+          ]
+        },
+        "Hot Pot & BBQ": {
+          "definition": "Customers cook at the table: steamboat, hot pot, mala hot pot, shabu-shabu, table barbecue, yakiniku, mookata or lok lok.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "Hot Pot",
+            "Steamboat",
+            "Mala Hot Pot",
+            "Shabu-shabu",
+            "Table BBQ",
+            "Korean Barbecue",
+            "Yakiniku",
+            "Mookata",
+            "Lok Lok"
+          ]
+        },
+        "Fusion": {
+          "definition": "Mixes two or more food traditions inside the dishes, or serves a pan-Asian or international menu with more than three traditions.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "Asian Fusion",
+            "Pan-Asian",
+            "Korean Fusion",
+            "International"
+          ]
+        },
+        "Other": {
+          "definition": "None of the names above fits, for example West African or Ethiopian food.",
+          "category": "Other",
+          "origin_country": null,
+          "includes": [
+            "African",
+            "Nigerian",
+            "Ethiopian"
+          ]
+        }
+      }
+    },
+    "cuisine.category": {
+      "meaning": "The broad group a cuisine belongs to. Use it to zoom out, for example to compare Western against East Asian places in one area. Each cuisine has exactly one category, set in cuisine.name above. A restaurant with several cuisines has the category of each one, so a Korean BBQ place (Hot Pot & BBQ + Korean) is both Other and East Asian.",
+      "filled_by": "lookup",
+      "pick": "one",
+      "status": "planned",
+      "values": {
+        "East Asian": "Food traditions of China, Japan, Korea and Taiwan.",
+        "Southeast Asian": "Food traditions of Malaysia, Thailand, Vietnam, Indonesia, the Philippines, Myanmar and the rest of Southeast Asia.",
+        "South Asian": "Food traditions of India, Pakistan, Bangladesh, Nepal and Sri Lanka.",
+        "Middle Eastern": "Food traditions of the Arab world, Turkey, Iran, Afghanistan, Central Asia and North Africa.",
+        "Western": "Food traditions of Europe and the Americas, including pizza, burgers and fried chicken.",
+        "Drinks, Desserts & Snacks": "The main product is a drink, a dessert, baked goods or a snack, not a meal.",
+        "Other": "Defined by the main product or diet instead of a region (seafood, vegetarian, healthy, hot pot), mixed (fusion), or anything else."
+      }
+    },
+    "price_range.tier": {
+      "meaning": "The price band that price_range.avg_meal_price falls in. The AI estimates avg_meal_price (what one person usually pays for a meal, in RM). The code then sets the tier from min_price below, so the tier and the price always agree.",
+      "filled_by": "lookup",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "budget": {
+          "definition": "Under RM20 per person.",
+          "min_price": 0
+        },
+        "mid": {
+          "definition": "RM20 to RM59 per person.",
+          "min_price": 20
+        },
+        "upscale": {
+          "definition": "RM60 to RM149 per person.",
+          "min_price": 60
+        },
+        "luxury": {
+          "definition": "RM150 or more per person.",
+          "min_price": 150
+        }
+      }
+    },
+    "business_profile.halal_status": {
+      "meaning": "Whether a Muslim customer can eat here.",
+      "filled_by": "ai",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "halal": "Halal-certified, Muslim-owned, or clearly a halal kind of food such as Malay or mamak.",
+        "non-halal": "Serves pork or lard, or alcohol is a main part of the business.",
+        "unknown": "Not enough information to decide."
+      }
+    },
+    "business_profile.restaurant_type": {
+      "meaning": "What kind of place it is: the name a Malaysian customer would use for it.",
+      "rules": [
+        "A listing for a whole kopitiam is kopitiam. A listing for a single stall inside a kopitiam or food court is hawker_stall."
+      ],
+      "filled_by": "ai",
+      "pick": "one",
+      "status": "planned",
+      "values": {
+        "kopitiam": "Traditional coffee shop with local drinks, toast and simple meals, often hosting several food stalls. Includes modern kopitiam chains.",
+        "mamak": "Indian Muslim eatery known for roti canai, nasi kandar and teh tarik, usually open late or 24 hours.",
+        "warung": "Simple Malay eatery (kedai makan), often selling nasi campur or a few cooked-to-order dishes.",
+        "hawker_stall": "One stall selling a few dishes, inside a kopitiam or food court or by the roadside. Includes food trucks.",
+        "food_court": "One place with many stalls sharing the same seating. Includes hawker centres and medan selera.",
+        "canteen": "Eatery inside a school, hospital, factory or office that mainly serves the people there.",
+        "fast_food": "Quick-service outlet with a standard menu, ordered at a counter, kiosk or drive-through.",
+        "casual_restaurant": "Ordinary sit-down restaurant for full meals. Use this when no other type fits better.",
+        "banquet_restaurant": "Large Chinese restaurant with round tables, set up for wedding dinners, banquets and big family meals.",
+        "fine_dining": "Formal, high-end restaurant with full table service.",
+        "cafe": "Modern cafe where coffee, drinks and light meals are the main draw.",
+        "bakery": "Shop that mainly sells bread, cakes or pastries.",
+        "dessert_shop": "Shop that mainly sells desserts such as ice cream, cendol or tong sui.",
+        "drinks_shop": "Shop or kiosk that mainly sells non-alcoholic drinks such as bubble tea or juice.",
+        "bar_pub": "Place where alcoholic drinks are the main draw.",
+        "cloud_kitchen": "Kitchen with no dining area that sells only through delivery apps.",
+        "other": "None of the above fits."
+      }
+    },
+    "business_profile.service_style": {
+      "meaning": "How the customer orders and gets the food.",
+      "rules": [
+        "A kopitiam or mamak where staff take the order at the table and the customer pays later is table_service.",
+        "Ordering at the counter and having the food brought to the table is counter_service.",
+        "Conveyor-belt sushi is self_service."
+      ],
+      "filled_by": "ai",
+      "pick": "one",
+      "status": "planned",
+      "values": {
+        "table_service": "Staff take the order at the table, or by QR code, and bring the food.",
+        "counter_service": "Order and pay at a counter or stall, then collect or wait for the food.",
+        "self_service": "Customers take the food themselves from a display and pay for what they took, as with nasi campur or economy rice.",
+        "buffet": "One fixed price, eat as much as you like.",
+        "takeaway_only": "No seating; everything is taken away.",
+        "delivery_only": "No seating and no walk-in counter; food is sold only through delivery.",
+        "unknown": "Not enough information to decide."
+      }
+    },
+    "business_profile.business_style": {
+      "meaning": "Who runs the business and how large it is.",
+      "filled_by": "ai",
+      "pick": "one",
+      "status": "planned",
+      "values": {
+        "independent": "A single outlet, or a small family business with two or three outlets.",
+        "local_chain": "Malaysian brand with many outlets, such as OldTown White Coffee, Secret Recipe or Marrybrown.",
+        "international_chain": "Brand from outside Malaysia with outlets in several countries, such as McDonald's, KFC or Starbucks.",
+        "unknown": "Not enough information to decide."
+      }
+    },
+    "business_profile.target_segment": {
+      "meaning": "Who mainly eats here.",
+      "filled_by": "ai",
+      "pick": "many",
+      "max": 3,
+      "status": "planned",
+      "values": {
+        "families": "Parents with children, or several generations eating together.",
+        "students": "School, college or university students.",
+        "office_workers": "People who work nearby, mostly at weekday lunch.",
+        "local_residents": "People who live in the neighbourhood and come regularly.",
+        "young_adults": "Friends in their twenties and thirties meeting up.",
+        "couples": "Two people on a date or a quiet meal together.",
+        "tourists": "Visitors from outside the Klang Valley.",
+        "mall_shoppers": "People already shopping in the same mall or shop lot.",
+        "commuters": "People passing through: a train station, petrol station or highway stop.",
+        "late_night_crowd": "People eating supper after 10 pm.",
+        "business_diners": "Client meetings and company meals.",
+        "large_groups": "Celebrations, banquets and gatherings of ten or more.",
+        "solo_diners": "People eating alone, often a quick meal.",
+        "seniors": "Older customers, often regulars in the morning or at lunch.",
+        "foreign_workers": "Migrant workers, often served food from their home country."
+      }
+    },
+    "business_profile.ambiance": {
+      "meaning": "How the place feels to sit in.",
+      "rules": [
+        "Do not pick two values that contradict each other, such as lively and quiet."
+      ],
+      "filled_by": "ai",
+      "pick": "many",
+      "max": 2,
+      "status": "planned",
+      "values": {
+        "no_frills": "Basic and functional: plain tables, little decoration.",
+        "casual": "Relaxed and ordinary: comfortable, with nothing special in the decor.",
+        "cosy": "Warm, comfortable and relaxed.",
+        "lively": "Busy and noisy, with a lot of people and movement.",
+        "quiet": "Calm; suitable for talking, working or studying.",
+        "modern": "New, stylish or trendy interior.",
+        "traditional": "Old-style or heritage look and feel.",
+        "aesthetic": "Designed to look good in photos; people come partly for the look.",
+        "themed": "Built around a theme, such as a character, an era or a hobby.",
+        "nature": "Surrounded by greenery, a garden or open air.",
+        "scenic_view": "Has a view worth coming for, such as a skyline, a lake or a hilltop.",
+        "elegant": "Polished and formal.",
+        "romantic": "Dim and intimate, suited to couples."
+      }
+    },
+    "review.sentiment": {
+      "meaning": "The overall feeling in the text of one review.",
+      "rules": [
+        "Judge the review text only, not the star rating.",
+        "A review with no text gets null, never neutral. An emoji-only review (👍, 😡) does have a sentiment.",
+        "Read Malaysian English, Malay and Chinese naturally: 'not bad', 'boleh lah' and 'ok lah' are usually mildly positive."
+      ],
+      "filled_by": "ai",
+      "pick": "one",
+      "status": "active",
+      "values": {
+        "positive": "Mostly satisfied: praises the place, would return or recommend it, or complaints are minor.",
+        "mixed": "Clear praise and clear complaints of similar weight, such as good food but bad service.",
+        "neutral": "No clear opinion: only describes the visit or the facts.",
+        "negative": "Mostly dissatisfied: complains, would not return, or praise is minor."
+      }
+    }
+  }
+}

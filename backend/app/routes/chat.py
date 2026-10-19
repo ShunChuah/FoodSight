@@ -1,6 +1,5 @@
-# Chat API routes: list, save, rename, pin, and delete chat histories.
-from datetime import datetime, timedelta, timezone
 import os
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -8,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..database import SessionLocal, get_db
-from ..model import ChatHistory, ChatMessage
+from ..database import get_db
+from ..model import ChatHistory, ChatMessage, ChatMessageGraph, ChatMessageMap, ChatMessageQuickReplies, ChatQueryState
 from ..schemas import (
     ChatCreate,
     ChatListResponse,
@@ -22,35 +21,28 @@ from ..schemas import (
     ChatSendResponse,
     DeleteChatResponse,
 )
-from ..services.chat_service import (
+from ..services.chatbot.pipeline import (
+    AssistantTurn,
     assess_query_guardrails,
+    format_conversation_context,
     generate_assistant_response,
+    get_response_budget_seconds,
 )
-from ..services.chat_title_service import (
-    create_temporary_chat_title,
-    persist_chat_title_when_ready,
-    start_chat_title_generation,
-)
-from ..services.guardrail_token_service import (
+from ..services.chatbot.preflight_token import (
     create_guardrail_token,
     verify_guardrail_token,
 )
-
+from ..services.chatbot.titles import (
+    GENERIC_TITLES,
+    create_temporary_chat_title,
+    generated_title,
+)
+from ..services.shared.diagnostics import log_request_timing, log_timing, timing_token_fields, trace_request
+from ..services.shared.messages import response as user_response
 
 router = APIRouter(prefix="/chats", tags=["chats"])
-
-
-def save_generated_chat_title(
-    chat_id: int,
-    temporary_title: str,
-    generated_title: str,
-) -> None:
-    with SessionLocal() as title_db:
-        chat = title_db.get(ChatHistory, chat_id)
-        if not chat or chat.title != temporary_title:
-            return
-        chat.title = generated_title
-        title_db.commit()
+# Saved in the chat's state once a model title has been applied, so it happens only once.
+TITLE_GENERATED = "title_generated"
 
 
 def get_display_timezone():
@@ -68,7 +60,6 @@ def to_display_time(value: datetime) -> datetime:
 
 
 def format_date(value: datetime) -> str:
-    # Format used by the sidebar history item.
     return to_display_time(value).strftime("%d %b %Y")
 
 
@@ -78,7 +69,6 @@ def format_time(value: datetime) -> str:
 
 
 def serialize_message(message: ChatMessage):
-    # Convert database rows into the shape expected by React components.
     base = {
         "id": message.id,
         "type": message.role,
@@ -92,6 +82,9 @@ def serialize_message(message: ChatMessage):
         **base,
         "answer": message.content,
         "mapImage": message.map_image,
+        "mapData": message.map_snapshot.data if message.map_snapshot else None,
+        "graphData": message.graph_snapshot.data if message.graph_snapshot else None,
+        "quickReplies": message.quick_replies.replies if message.quick_replies else [],
     }
 
 
@@ -123,7 +116,6 @@ def get_session_timestamp(chat: ChatHistory) -> datetime:
 
 
 def serialize_chat(chat: ChatHistory) -> ChatRead:
-    # Build one complete chat response, including formatted sidebar date/time.
     session_timestamp = get_session_timestamp(chat)
     updated_at = chat.updated_at or chat.created_at
     return ChatRead(
@@ -142,22 +134,46 @@ def serialize_chat(chat: ChatHistory) -> ChatRead:
 
 
 def get_chat_or_404(db: Session, chat_id: int) -> ChatHistory:
-    # Shared lookup helper so each route handles missing chats consistently.
     chat = db.scalar(
         select(ChatHistory)
         .where(ChatHistory.id == chat_id)
-        .options(selectinload(ChatHistory.messages))
+        .options(
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
+            selectinload(ChatHistory.query_state),
+        )
     )
     if not chat:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chat history not found",
+            detail=user_response("interface.chat_not_found"),
         )
     return chat
 
 
-def build_llm_messages(chat: ChatHistory, user_text: str) -> list[dict[str, str]]:
-    # Rebuild prior turns so the LLM receives context for this chat only.
+def title_generated(chat: ChatHistory | None) -> bool:
+    return bool(chat and chat.query_state and chat.query_state.state.get(TITLE_GENERATED))
+
+
+def title_needed(chat: ChatHistory, first_turn: bool) -> bool:
+    """Ask the model for a title until one has been applied, and never over a title the user typed.
+
+    Usually that is the first question; a later one when the first reply only asked for the user's location.
+    """
+    if title_generated(chat):
+        return False
+    if first_turn:
+        return True
+    first_question = next((m.content for m in get_ordered_messages(chat) if m.role == "user"), "")
+    # Older chats may still carry a generic title from before; it counts as a fallback too.
+    return chat.title == create_temporary_chat_title(first_question) or chat.title in GENERIC_TITLES
+
+
+def build_llm_messages(
+    chat: ChatHistory,
+    user_text: str | None = None,
+) -> list[dict[str, str]]:
     messages = []
 
     for message in get_ordered_messages(chat):
@@ -168,11 +184,13 @@ def build_llm_messages(chat: ChatHistory, user_text: str) -> list[dict[str, str]
             }
         )
 
-    messages.append({"role": "user", "content": user_text})
+    if user_text is not None:
+        messages.append({"role": "user", "content": user_text})
     return messages
 
 
 def build_location_context(payload: ChatSendRequest) -> str:
+    # How the Cypher prompt learns where the user is: a named area, browser GPS, or nothing.
     if payload.location_name:
         return f"User location area: {payload.location_name.strip()}"
     if payload.latitude is not None and payload.longitude is not None:
@@ -185,7 +203,6 @@ def build_location_context(payload: ChatSendRequest) -> str:
 
 @router.get("", response_model=ChatListResponse)
 def list_chat_histories(db: Session = Depends(get_db)) -> ChatListResponse:
-    # Sort pinned chats first, then newest sessions by their first user query time.
     session_timestamp = (
         select(ChatMessage.created_at)
         .where(ChatMessage.chat_id == ChatHistory.id, ChatMessage.role == "user")
@@ -195,7 +212,11 @@ def list_chat_histories(db: Session = Depends(get_db)) -> ChatListResponse:
     )
     chats = db.scalars(
         select(ChatHistory)
-        .options(selectinload(ChatHistory.messages))
+        .options(
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
+        )
         .order_by(
             ChatHistory.pinned.desc(),
             session_timestamp.desc().nullslast(),
@@ -210,7 +231,6 @@ def create_chat_history(
     payload: ChatCreate,
     db: Session = Depends(get_db),
 ) -> ChatRead:
-    # Optional endpoint for creating an empty session before any messages exist.
     title = payload.title.strip() if payload.title else "New Chat"
     chat = ChatHistory(title=title)
 
@@ -221,156 +241,129 @@ def create_chat_history(
     return serialize_chat(chat)
 
 
+# Step 1 of sending a message: a quick rule-based screen (no LLM). The browser uses locationRequired to decide
+# whether to ask for GPS, and passes decisionToken to /messages so the screen is not repeated.
 @router.post("/preflight", response_model=ChatPreflightResponse)
+@trace_request
 def preflight_message(
     payload: ChatPreflightRequest,
     db: Session = Depends(get_db),
 ) -> ChatPreflightResponse:
+    preflight_started_at = perf_counter()
     user_text = payload.message.strip()
     if not user_text:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Message cannot be empty",
+            detail=user_response("interface.empty_message"),
         )
 
     chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
-    prior_messages = build_llm_messages(chat, "")[:-1] if chat else []
-    context_lines = []
-    for message in prior_messages[-8:]:
-        role = "Assistant" if message["role"] == "assistant" else "User"
-        content = " ".join(message["content"].strip().split())
-        context_lines.append(f"{role}: {content[:1200]}")
-    conversation_context = (
-        "\n".join(context_lines) if context_lines else "No previous conversation."
-    )
-
-    decision = assess_query_guardrails(
-        user_text,
-        conversation_context,
-    )
-    return ChatPreflightResponse(
+    prior_messages = build_llm_messages(chat) if chat else []
+    decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
+    response = ChatPreflightResponse(
         status=decision.status,
         isFnb=decision.scope in {"fnb_customer", "fnb_analyst"},
         scope=decision.scope,
         message=decision.message,
         locationRequired=decision.location_required,
         detectedLocation=decision.detected_location,
-        decisionToken=create_guardrail_token(
-            user_text,
-            payload.chat_id,
-            decision,
-        ),
+        traceId=timing_token_fields()["trace_id"],
+        decisionToken=create_guardrail_token(user_text, payload.chat_id, decision),
     )
+    log_timing(
+        "chat.preflight.total",
+        preflight_started_at,
+        decision=decision.status,
+    )
+    return response
 
 
 @router.get("/{chat_id}", response_model=ChatRead)
 def get_chat_history(chat_id: int, db: Session = Depends(get_db)) -> ChatRead:
-    # Returns one full conversation when a history item is opened/refreshed.
     return serialize_chat(get_chat_or_404(db, chat_id))
 
 
+# Step 2: answer the message, then save both sides of the turn.
 @router.post("/messages", response_model=ChatSendResponse)
+@trace_request
 def send_message(
     payload: ChatSendRequest,
     db: Session = Depends(get_db),
 ) -> ChatSendResponse:
-    # Generate the assistant reply first, then persist both sides of the turn.
     send_started_at = perf_counter()
-    print("[TIMING] Chat send started. elapsed=0.00s total=0.00s", flush=True)
     user_text = payload.message.strip()
     if not user_text:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Message cannot be empty",
+            detail=user_response("interface.empty_message"),
         )
 
-    preflight_decision = verify_guardrail_token(
-        payload.preflight_token,
-        user_text,
-        payload.chat_id,
-    )
+    # Reuse the preflight decision when its token is valid; otherwise screen the message again.
+    guardrail_started_at = perf_counter()
+    prior_chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
+    preflight_decision = verify_guardrail_token(payload.preflight_token, user_text, payload.chat_id)
+    guardrail_source = "token"
     if not preflight_decision:
-        prior_chat = get_chat_or_404(db, payload.chat_id) if payload.chat_id else None
-        prior_messages = build_llm_messages(prior_chat, "")[:-1] if prior_chat else []
-        conversation_context = "\n".join(
-            (
-                f"{'Assistant' if message['role'] == 'assistant' else 'User'}: "
-                f"{' '.join(message['content'].strip().split())[:1200]}"
-            )
-            for message in prior_messages[-8:]
-        ) or "No previous conversation."
-        preflight_decision = assess_query_guardrails(
-            user_text,
-            conversation_context,
-        )
-    guardrail_elapsed = perf_counter() - send_started_at
-    print(
-        f"[TIMING] Chat send checked guardrails. "
-        f"elapsed={guardrail_elapsed:.2f}s total={guardrail_elapsed:.2f}s",
-        flush=True,
+        guardrail_source = "reassessed"
+        prior_messages = build_llm_messages(prior_chat) if prior_chat else []
+        preflight_decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
+    log_timing(
+        "chat.send.guardrails",
+        guardrail_started_at,
+        total_started_at=send_started_at,
+        source=guardrail_source,
+        decision=preflight_decision.status,
     )
 
-    title_future = None
-    temporary_title = None
-    should_generate_title = preflight_decision.status in {
-        "ready",
-        "clarification_required",
-    }
+    # A new chat is named after its first question until the model suggests a title.
+    session_title = create_temporary_chat_title(user_text)
+    first_turn = not payload.chat_id or not prior_chat.messages
     if payload.chat_id:
-        # Existing chat: append the new turn to that session only.
-        chat = get_chat_or_404(db, payload.chat_id)
+        chat = prior_chat
         if not chat.messages:
-            temporary_title = create_temporary_chat_title(user_text)
-            chat.title = temporary_title
-            if should_generate_title:
-                title_future = start_chat_title_generation(
-                    user_text,
-                    preflight_decision.status,
-                )
+            chat.title = session_title
     else:
-        # New draft chat: keep it in memory until response generation finishes.
-        temporary_title = create_temporary_chat_title(user_text)
-        chat = ChatHistory(title=temporary_title)
-        if should_generate_title:
-            title_future = start_chat_title_generation(
-                user_text,
-                preflight_decision.status,
-            )
+        chat = ChatHistory(title=session_title)
+    wants_title = title_needed(chat, first_turn)
 
     llm_messages = build_llm_messages(chat, user_text)
     now = datetime.now(timezone.utc)
 
+    # The whole reply must be ready within the response budget, counted from the start of this request.
     generation_started_at = perf_counter()
+    generation_status = "success"
     try:
-        answer, map_image = generate_assistant_response(
+        turn = generate_assistant_response(
             llm_messages,
             build_location_context(payload),
             payload.location_permission_denied,
             preflight_decision,
+            deadline=send_started_at + get_response_budget_seconds(),
+            title_needed=wants_title,
         )
     except Exception as exc:
+        generation_status = "error"
         print(f"Assistant response generation failed: {exc}", flush=True)
-        answer = (
-            "I could not process this request right now. Please try again."
-        )
-        map_image = None
-    generation_elapsed = perf_counter() - generation_started_at
-    generation_total = perf_counter() - send_started_at
-    print(
-        f"[TIMING] Chat send generated the assistant response. "
-        f"elapsed={generation_elapsed:.2f}s total={generation_total:.2f}s",
-        flush=True,
+        turn = AssistantTurn(user_response("errors.unexpected"))
+    # The model suggests the title while answering; it is applied once per chat.
+    title = generated_title(turn.chat_title, user_text) if wants_title else None
+    if title:
+        chat.title = title
+    log_timing(
+        "chat.send.generation",
+        generation_started_at,
+        status=generation_status,
+        total_started_at=send_started_at,
     )
+    log_request_timing("chat.request.answer_ready", status=generation_status)
 
     assistant_created_at = max(
         datetime.now(timezone.utc),
         now + timedelta(microseconds=1),
     )
 
+    # Save the turn: the user message, the reply with its map / graph / buttons, and the title flag.
     persist_started_at = perf_counter()
-    if temporary_title and not chat.messages:
-        chat.title = temporary_title
-
     if not payload.chat_id:
         db.add(chat)
         db.flush()
@@ -384,10 +377,18 @@ def send_message(
     assistant_message = ChatMessage(
         chat_id=chat.id,
         role="assistant",
-        content=answer,
-        map_image=map_image,
+        content=turn.answer,
+        map_snapshot=ChatMessageMap(data=turn.map_data) if turn.map_data is not None else None,
+        graph_snapshot=ChatMessageGraph(data=turn.graph_data) if turn.graph_data else None,
+        quick_replies=ChatMessageQuickReplies(replies=turn.quick_replies) if turn.quick_replies else None,
         created_at=assistant_created_at,
     )
+
+    if title:
+        if chat.query_state:
+            chat.query_state.state = {**chat.query_state.state, TITLE_GENERATED: True}
+        else:
+            chat.query_state = ChatQueryState(state={TITLE_GENERATED: True})
 
     chat.updated_at = assistant_created_at
     db.add(user_message)
@@ -397,37 +398,23 @@ def send_message(
     db.refresh(user_message)
     db.refresh(assistant_message)
 
-    if title_future and temporary_title:
-        persist_chat_title_when_ready(
-            title_future,
-            lambda generated_title: save_generated_chat_title(
-                chat.id,
-                temporary_title,
-                generated_title,
-            ),
-        )
-
-    # A parallel title callback may have updated this chat in another session.
-    db.expire_all()
     chat = get_chat_or_404(db, chat.id)
     response = ChatSendResponse(
         chat=serialize_chat(chat),
         userMessage=serialize_message(user_message),
         assistantMessage=serialize_message(assistant_message),
     )
-    persist_elapsed = perf_counter() - persist_started_at
-    persist_total = perf_counter() - send_started_at
-    print(
-        f"[TIMING] Chat send saved the chat turn. "
-        f"elapsed={persist_elapsed:.2f}s total={persist_total:.2f}s",
-        flush=True,
+    log_timing(
+        "chat.send.persist",
+        persist_started_at,
+        total_started_at=send_started_at,
     )
-    total_elapsed = perf_counter() - send_started_at
-    print(
-        f"[TIMING] Chat send prepared the API response. "
-        f"elapsed={total_elapsed:.2f}s total={total_elapsed:.2f}s",
-        flush=True,
+    log_timing(
+        "chat.send.total",
+        send_started_at,
+        status="degraded" if generation_status == "error" else "success",
     )
+    log_request_timing("chat.request.total", status="degraded" if generation_status == "error" else "success")
     return response
 
 
@@ -437,12 +424,11 @@ def rename_chat_history(
     payload: ChatRenameRequest,
     db: Session = Depends(get_db),
 ) -> ChatRead:
-    # Updates only the sidebar title; conversation messages stay unchanged.
     title = payload.title.strip()
     if not title:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Title cannot be empty",
+            detail=user_response("interface.empty_title"),
         )
 
     chat = get_chat_or_404(db, chat_id)
@@ -461,7 +447,6 @@ def update_chat_pin(
     payload: ChatPinRequest,
     db: Session = Depends(get_db),
 ) -> ChatRead:
-    # Pinned chats are sorted above unpinned chats in the history list.
     chat = get_chat_or_404(db, chat_id)
     chat.pinned = payload.pinned
     chat.updated_at = datetime.now(timezone.utc)
@@ -477,7 +462,6 @@ def delete_chat_history(
     chat_id: int,
     db: Session = Depends(get_db),
 ) -> DeleteChatResponse:
-    # SQLAlchemy cascade removes all messages that belong to this chat.
     chat = get_chat_or_404(db, chat_id)
 
     db.delete(chat)

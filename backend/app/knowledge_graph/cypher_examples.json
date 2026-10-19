@@ -1,0 +1,234 @@
+{
+  "description": "Verified examples added to the Cypher prompt. Queries return restaurant_id plus computed values only (and anchor_id when starting from a named restaurant); the application adds the restaurant details. Non-query examples show the action (clarify, explain, decline) with its reply and options. Each query must pass the validator (tests/test_cypher_and_answers.py). Use only ontology.json names and categories.json values.",
+  "examples": [
+    {
+      "question": "Halal Japanese restaurants in SS 2 under RM30",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:SERVES]->(:Cuisine {name: 'Japanese'})\nMATCH (r)-[:HAS_PROFILE]->(:BusinessProfile {halal_status: 'halal'})\nMATCH (r)-[:PRICED_AT]->(p:PriceRange)\nWHERE p.avg_meal_price < $max_price\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE a.name =~ $area_pattern\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "max_price": 30,
+        "area_pattern": "(?i)^SS ?2\\b.*"
+      }
+    },
+    {
+      "question": "Cheap food in Damansara Utama",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:PRICED_AT]->(:PriceRange {tier: 'budget'})\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "place": "Damansara Utama"
+      }
+    },
+    {
+      "question": "Which areas have the most cafes?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL', amenity_type: 'cafe'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nRETURN a.name AS area_name, count(DISTINCT r) AS cafes\nORDER BY cafes DESC\nLIMIT 5",
+      "parameters": {}
+    },
+    {
+      "question": "Who are the competitors of Village Park Restaurant?",
+      "cypher": "MATCH (t:Restaurant)\nOPTIONAL MATCH (t)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(ta:Area)\nWITH t, toLower(t.name + ' ' + coalesce(ta.name, '')) AS label\nWHERE all(word IN $name_words WHERE label CONTAINS word)\nMATCH (t)-[:COMPETES_WITH]-(r:Restaurant {business_status: 'OPERATIONAL'})\nWITH DISTINCT r, t\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id, t.restaurant_id AS anchor_id, t.name AS competitor_of\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "name_words": [
+          "village",
+          "park"
+        ]
+      }
+    },
+    {
+      "question": "Cafes near Village Park Restaurant",
+      "cypher": "MATCH (t:Restaurant)\nOPTIONAL MATCH (t)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(ta:Area)\nWITH t, toLower(t.name + ' ' + coalesce(ta.name, '')) AS label\nWHERE all(word IN $name_words WHERE label CONTAINS word)\nMATCH (t)-[:LOCATED_IN]->(tl:Location)\nMATCH (r:Restaurant {business_status: 'OPERATIONAL', amenity_type: 'cafe'})-[:LOCATED_IN]->(l:Location)\nWHERE r <> t\nWITH t, r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                          point({latitude: tl.latitude, longitude: tl.longitude})) AS distance_m\nWHERE distance_m <= $default_radius_m\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m,\n       t.restaurant_id AS anchor_id, t.name AS near_place\nORDER BY distance_m\nLIMIT 5",
+      "parameters": {
+        "name_words": [
+          "village",
+          "park"
+        ]
+      }
+    },
+    {
+      "question": "Is Starbucks Damansara Uptown halal?",
+      "cypher": "MATCH (r:Restaurant)\nOPTIONAL MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label\nWHERE all(word IN $name_words WHERE label CONTAINS word)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.total_reviews, 0) DESC\nLIMIT 3",
+      "parameters": {
+        "name_words": [
+          "starbucks",
+          "damansara",
+          "uptown"
+        ]
+      },
+      "details": true
+    },
+    {
+      "question": "Tell me more about Calibrate Small Space",
+      "details": true,
+      "cypher": "MATCH (r:Restaurant)\nOPTIONAL MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label\nWHERE all(word IN $name_words WHERE label CONTAINS word)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.total_reviews, 0) DESC\nLIMIT 3",
+      "parameters": {
+        "name_words": [
+          "calibrate",
+          "small",
+          "space"
+        ]
+      }
+    },
+    {
+      "question": "Any 24 hour mamak? Just give me a few.",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:HAS_PROFILE]->(:BusinessProfile {restaurant_type: 'mamak'})\nMATCH (r)-[:HAS_HOURS]->(:OperatingHours {is_24_7: true})\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, -1) DESC\nLIMIT 3",
+      "parameters": {}
+    },
+    {
+      "question": "Supper spots after 11pm in SS2",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE a.name =~ $area_pattern\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "area_pattern": "(?i)^SS ?2\\b.*"
+      }
+    },
+    {
+      "question": "Restaurants that take reservations within 1 km of me",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:HAS_FACILITY]->(:Facility {name: 'Reservations'})\nMATCH (r)-[:LOCATED_IN]->(l:Location)\nWITH r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                       point({latitude: $latitude, longitude: $longitude})) AS distance_m\nWHERE distance_m <= $radius_m\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m\nORDER BY distance_m\nLIMIT 5",
+      "parameters": {
+        "radius_m": 1000
+      }
+    },
+    {
+      "question": "Any halal food near me?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:HAS_PROFILE]->(:BusinessProfile {halal_status: 'halal'})\nMATCH (r)-[:LOCATED_IN]->(l:Location)\nWITH r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                       point({latitude: $latitude, longitude: $longitude})) AS distance_m\nWHERE distance_m <= $default_radius_m\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH r, distance_m, coalesce(rt.rating_score, 0) AS score\nORDER BY score DESC, distance_m\nLIMIT 5\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m",
+      "parameters": {}
+    },
+    {
+      "question": "Tapau nasi lemak near me",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:HAS_FACILITY]->(:Facility {name: 'Takeout'})\nWHERE toLower(r.name) CONTAINS $dish\n   OR EXISTS { MATCH (r)-[:HAS_DISH]->(d:Dish) WHERE toLower(d.name) CONTAINS $dish }\nMATCH (r)-[:LOCATED_IN]->(l:Location)\nWITH r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                       point({latitude: $latitude, longitude: $longitude})) AS distance_m\nWHERE distance_m <= $default_radius_m\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m\nORDER BY distance_m\nLIMIT 5",
+      "parameters": {
+        "dish": "nasi lemak"
+      }
+    },
+    {
+      "question": "Anything to eat near 1 Utama?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWITH r, toLower(r.name + ' ' + a.name) AS label\nWHERE any(word IN $place_words WHERE label CONTAINS word)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH r, coalesce(rt.rating_score, 0) AS score, coalesce(rt.total_reviews, 0) AS reviews\nORDER BY score DESC, reviews DESC\nLIMIT 5\nRETURN r.restaurant_id AS restaurant_id",
+      "parameters": {
+        "place_words": [
+          "1 utama",
+          "1utama",
+          "bandar utama"
+        ]
+      }
+    },
+    {
+      "question": "What is the average rating in each price tier?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:PRICED_AT]->(p:PriceRange)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN p.tier AS price_tier, count(DISTINCT r) AS restaurants, round(avg(rt.rating_score) * 10) / 10 AS average_rating\nORDER BY average_rating DESC\nLIMIT 5",
+      "parameters": {}
+    },
+    {
+      "question": "Mixue or Chagee, which one should I go to?",
+      "cypher": "MATCH (r:Restaurant)\nOPTIONAL MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label\nWHERE any(words IN $places WHERE all(word IN words WHERE label CONTAINS word))\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "places": [
+          [
+            "mixue"
+          ],
+          [
+            "chagee"
+          ]
+        ]
+      }
+    },
+    {
+      "question": "Summarise the food scene in Kota Damansara for me",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nOPTIONAL MATCH (r)-[:PRICED_AT]->(p:PriceRange)\nWITH a, count(DISTINCT r) AS restaurants, round(avg(rt.rating_score) * 10) / 10 AS average_rating,\n     round(avg(p.avg_meal_price)) AS average_meal_price\nRETURN a.name AS area_name, restaurants, average_rating, average_meal_price,\n       COLLECT { MATCH (x:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a)\n                 MATCH (x)-[:SERVES]->(c:Cuisine)\n                 WITH c.name AS cuisine, count(DISTINCT x) AS places ORDER BY places DESC LIMIT 5\n                 RETURN cuisine + ' (' + toString(places) + ')' } AS top_cuisines,\n       COLLECT { MATCH (x:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a)\n                 MATCH (x)-[:PRICED_AT]->(q:PriceRange)\n                 WITH q.tier AS tier, count(DISTINCT x) AS places ORDER BY places DESC\n                 RETURN tier + ' (' + toString(places) + ')' } AS price_tiers\nLIMIT 5",
+      "parameters": {
+        "place": "Kota Damansara"
+      }
+    },
+    {
+      "question": "Are the reviews for Hayaki good?",
+      "cypher": "MATCH (r:Restaurant)\nOPTIONAL MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label\nWHERE all(word IN $name_words WHERE label CONTAINS word)\nMATCH (r)-[:HAS_REVIEW]->(v:Review)\nRETURN r.name AS restaurant, v.sentiment AS sentiment, v.individual_rating AS stars,\n       left(v.text, 300) AS review\nORDER BY v.published_at DESC\nLIMIT 10",
+      "parameters": {
+        "name_words": [
+          "hayaki"
+        ]
+      }
+    },
+    {
+      "question": "What do people complain about at cafes?",
+      "cypher": "MATCH (r:Restaurant {amenity_type: 'cafe'})-[:HAS_REVIEW]->(v:Review {sentiment: 'negative'})\nRETURN r.name AS restaurant, v.individual_rating AS stars, left(v.text, 300) AS review\nORDER BY v.published_at DESC\nLIMIT 10",
+      "parameters": {}
+    },
+    {
+      "question": "Which restaurant in Bandar Utama has the most negative reviews?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nMATCH (r)-[:HAS_REVIEW]->(v:Review {sentiment: 'negative'})\nWITH r, count(v) AS negative_reviews\nRETURN r.restaurant_id AS restaurant_id, negative_reviews\nORDER BY negative_reviews DESC\nLIMIT 3",
+      "parameters": {
+        "place": "Bandar Utama"
+      }
+    },
+    {
+      "question": "Top rated cafes in Kota Damansara",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL', amenity_type: 'cafe'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nMATCH (r)-[:HAS_RATING]->(rt:Rating)\nWHERE rt.total_reviews >= $default_min_reviews\nRETURN r.restaurant_id AS restaurant_id\nORDER BY rt.rating_score DESC, rt.total_reviews DESC\nLIMIT 5",
+      "parameters": {
+        "place": "Kota Damansara"
+      }
+    },
+    {
+      "question": "Most popular Malay restaurant in PJ",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:SERVES]->(:Cuisine {name: 'Malay'})\nMATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY rt.total_reviews DESC\nLIMIT 3",
+      "parameters": {}
+    },
+    {
+      "question": "Who would I compete with if I open a Korean restaurant in Kota Damansara?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:SERVES]->(:Cuisine {name: 'Korean'})\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
+      "parameters": {
+        "place": "Kota Damansara"
+      }
+    },
+    {
+      "question": "How many Japanese restaurants compete in SS2?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:SERVES]->(:Cuisine {name: 'Japanese'})\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE a.name =~ $area_pattern\nRETURN a.name AS area_name, count(DISTINCT r) AS japanese_restaurants\nLIMIT 1",
+      "parameters": {
+        "area_pattern": "(?i)^SS ?2\\b.*"
+      }
+    },
+    {
+      "question": "Will a ramen shop succeed in Seksyen 17?",
+      "cypher": "MATCH (r:Restaurant {business_status: 'OPERATIONAL'})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE a.name =~ $area_pattern\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nOPTIONAL MATCH (r)-[:PRICED_AT]->(p:PriceRange)\nRETURN a.name AS area_name, count(DISTINCT r) AS restaurants,\n       count(DISTINCT CASE WHEN EXISTS { MATCH (r)-[:SERVES]->(:Cuisine {name: 'Japanese'}) } THEN r END) AS japanese_restaurants,\n       round(avg(rt.rating_score) * 10) / 10 AS average_rating, round(avg(p.avg_meal_price)) AS average_meal_price\nLIMIT 1",
+      "parameters": {
+        "area_pattern": "(?i)^Seksyen ?17\\b.*"
+      }
+    },
+    {
+      "question": "Which restaurants have live music?",
+      "action": "decline",
+      "reply": "I don't have information about live music at restaurants yet."
+    },
+    {
+      "question": "Cafes with free parking",
+      "action": "decline",
+      "reply": "I don't have parking information for restaurants yet, so I can't filter by it.",
+      "options": [
+        "Cafes with delivery",
+        "Cafes that take reservations"
+      ]
+    },
+    {
+      "question": "Where can I get good BBQ?",
+      "action": "clarify",
+      "reply": "Do you mean grilling at your own table, or barbecued dishes like satay and roast meat?",
+      "options": [
+        "Grill at the table",
+        "Barbecued dishes"
+      ]
+    },
+    {
+      "question": "What's the difference between a kopitiam and a mamak?",
+      "action": "explain",
+      "reply": "A kopitiam is a traditional coffee shop with local drinks, toast and simple meals, often with several food stalls inside. A mamak is an Indian Muslim eatery known for roti canai, nasi kandar and teh tarik, and many stay open late."
+    },
+    {
+      "question": "Best nasi lemak in Bukit Bintang?",
+      "action": "decline",
+      "reply": "I only cover Petaling Jaya for now, so I can't search Bukit Bintang.",
+      "options": [
+        "Nasi lemak in SS 2",
+        "Nasi lemak in Damansara Utama"
+      ]
+    },
+    {
+      "question": "Can you help me fix my laptop?",
+      "action": "decline",
+      "reply": "I can't help with laptops, but I'm happy to help you find somewhere good to eat or drink in Petaling Jaya.",
+      "options": []
+    }
+  ]
+}

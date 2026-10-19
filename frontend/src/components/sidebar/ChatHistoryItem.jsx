@@ -24,7 +24,6 @@ function ChatHistoryItem({
   const [renameValue, setRenameValue] = useState(title);
 
   useEffect(() => {
-    // Position the menu near the three-dot button.
     if (menuOpen && moreButtonRef.current) {
       const rect = moreButtonRef.current.getBoundingClientRect();
       setMenuPos({
@@ -35,7 +34,6 @@ function ChatHistoryItem({
   }, [menuOpen]);
 
   useEffect(() => {
-    // Focus and select the title text as soon as inline rename starts.
     if (isRenaming && renameInputRef.current) {
       renameInputRef.current.focus();
       renameInputRef.current.select();
@@ -43,7 +41,6 @@ function ChatHistoryItem({
   }, [isRenaming]);
 
   const startRename = (event) => {
-    // Switch from display title to inline input without selecting the chat row.
     event.stopPropagation();
     renameCancelledRef.current = false;
     setRenameValue(title);

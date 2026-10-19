@@ -7,15 +7,13 @@ const MAX_MESSAGE_WORDS = 1000;
 const MAX_MESSAGE_CHARACTERS = 5000;
 
 function ChatInput({
-  onPrepareQuery,
   onSendQuery,
+  quickReplies = [],
   showSuggestions,
   disabled = false,
 }) {
-  const GEOLOCATION_PERMISSION_DENIED = 1;
   const queries = quickQueries;
   const [input, setInput] = useState("");
-  const [isResolvingLocation, setIsResolvingLocation] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [micPermissionTooltip, setMicPermissionTooltip] = useState("");
   const textareaRef = useRef(null);
@@ -24,9 +22,11 @@ function ChatInput({
   const wordCount = input.trim() ? input.trim().split(/\s+/).length : 0;
   const isMessageTooLong =
     wordCount > MAX_MESSAGE_WORDS || input.length > MAX_MESSAGE_CHARACTERS;
+  const messageLimitNotice = wordCount > MAX_MESSAGE_WORDS
+    ? "Your message is too long. Please keep it under 1,000 words."
+    : "Your message is too long. Please keep it under 5,000 characters.";
   const sendDisabled =
     disabled
-    || isResolvingLocation
     || isRecording
     || isMessageEmpty
     || isMessageTooLong;
@@ -87,7 +87,7 @@ function ChatInput({
     recognition.onerror = (event) => {
       console.error("Speech recognition failed", event.error);
       if (["not-allowed", "service-not-allowed"].includes(event.error)) {
-        setMicPermissionTooltip("Enable microphone permission to use voice input.");
+        setMicPermissionTooltip("Please allow microphone access to use voice input.");
       }
       setIsRecording(false);
     };
@@ -103,7 +103,7 @@ function ChatInput({
       setIsRecording(true);
     } catch (error) {
       console.error("Failed to start speech recognition", error);
-      setMicPermissionTooltip("Enable microphone permission to use voice input.");
+      setMicPermissionTooltip("Please allow microphone access to use voice input.");
       recognitionRef.current = null;
       setIsRecording(false);
     }
@@ -115,113 +115,12 @@ function ChatInput({
     setInput(query);
   };
 
-  const submitQuery = async (
-    query,
-    location,
-    locationPermissionDenied = false,
-  ) => {
-    // Location preparation is complete once the message is ready to submit.
-    // The parent `disabled` prop exclusively owns the backend-generation lock.
-    setIsResolvingLocation(false);
-    setInput("");
-    await onSendQuery(query, location, locationPermissionDenied);
-  };
-
-  const requestBrowserLocation = async (queryOverride) => {
-    const query = queryOverride.trim();
-    if (!query) {
-      setIsResolvingLocation(false);
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      await submitQuery(query, null, true);
-      return;
-    }
-
-    setIsResolvingLocation(true);
-    let position;
-    try {
-      position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false,
-          timeout: 30000,
-          maximumAge: 300000,
-        });
-      });
-    } catch (error) {
-      console.error("Failed to get browser location", error);
-      setIsResolvingLocation(false);
-      await submitQuery(
-        query,
-        null,
-        error?.code === GEOLOCATION_PERMISSION_DENIED,
-      );
-      return;
-    }
-
-    setIsResolvingLocation(false);
-    await submitQuery(query, {
-      source: "browser",
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-    });
-  };
-
-  const resolveLocationPermission = async (query) => {
-    if (!navigator.geolocation) {
-      await submitQuery(query, null, true);
-      return;
-    }
-
-    try {
-      const permission = navigator.permissions?.query
-        ? await navigator.permissions.query({ name: "geolocation" })
-        : null;
-      if (permission?.state === "denied") {
-        await submitQuery(query, null, true);
-        return;
-      }
-    } catch (error) {
-      console.error("Failed to check location permission", error);
-    }
-
-    await requestBrowserLocation(query);
-  };
-
   const handleSend = async () => {
-    // Prevent empty sends and duplicate sends while the backend is processing.
-    if (
-      !input.trim()
-      || disabled
-      || isResolvingLocation
-      || isRecording
-      || isMessageTooLong
-    ) {
-      return;
-    }
-
+    if (sendDisabled) return;
     const query = input.trim();
     setInput("");
-    setIsResolvingLocation(true);
-    try {
-      const preflight = await onPrepareQuery(query);
-      if (!preflight.isFnb || !preflight.locationRequired) {
-        const location = preflight.detectedLocation
-          ? { source: "query", name: preflight.detectedLocation }
-          : null;
-        setIsResolvingLocation(false);
-        await submitQuery(query, location);
-        return;
-      }
-
-      await resolveLocationPermission(query);
-    } catch (error) {
-      console.error("Failed to prepare chat query", error);
-      await resolveLocationPermission(query);
-    } finally {
-      setIsResolvingLocation(false);
-    }
+    const sent = await onSendQuery(query);
+    if (sent === false) setInput(query);
   };
 
   return (
@@ -244,6 +143,22 @@ function ChatInput({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {quickReplies.length > 0 && (
+        <div className="quick-reply-actions" role="group" aria-label="Suggested replies">
+          {quickReplies.map((reply) => (
+            <button
+              className="quick-reply-button"
+              key={reply}
+              type="button"
+              disabled={disabled}
+              onClick={() => onSendQuery(reply)}
+            >
+              {reply}
+            </button>
+          ))}
         </div>
       )}
 
@@ -287,20 +202,18 @@ function ChatInput({
               isMessageEmpty || isMessageTooLong ? "has-tooltip" : ""
             }`}
             data-tooltip={
-              isMessageTooLong ? "Text is too long" : "Message is empty"
+              isMessageTooLong ? messageLimitNotice : "Please enter a message."
             }
           >
             <button
               className="send-btn"
               type="button"
               title={
-                isResolvingLocation
-                  ? "Getting location"
-                  : isMessageTooLong
-                    ? "Text too long"
-                    : isMessageEmpty
-                      ? ""
-                      : "Send"
+                isMessageTooLong
+                  ? messageLimitNotice
+                  : isMessageEmpty
+                    ? ""
+                    : "Send"
               }
               onClick={handleSend}
               disabled={sendDisabled}

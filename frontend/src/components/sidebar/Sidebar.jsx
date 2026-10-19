@@ -18,6 +18,7 @@ function Sidebar({
   onPinChat,
   onDeleteChat,
   onCloseSidebar,
+  onSettingsOpen,
   darkMode,
   setDarkMode,
   focusSearch,
@@ -35,7 +36,6 @@ function Sidebar({
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      // Close the three-dot menu when the user clicks elsewhere.
       const clickedMenu = event.target.closest(".chat-menu");
       const clickedMoreButton = event.target.closest(".more-btn");
 
@@ -119,12 +119,10 @@ function Sidebar({
                 selected={selectedChatId === chat.id}
                 menuOpen={openMenuId === chat.id}
                 onClick={() => {
-                  // Selecting a history item loads that saved conversation.
                   setSelectedChatId(chat.id);
                   setOpenMenuId(null);
                 }}
                 onMoreClick={() => {
-                  // Toggle the menu for only this chat item.
                   setOpenMenuId(openMenuId === chat.id ? null : chat.id);
                 }}
                 onRename={(title) => {
@@ -133,7 +131,6 @@ function Sidebar({
                   setOpenMenuId(null);
                 }}
                 onPinToggle={() => {
-                  // Send the opposite pinned value to the backend.
                   onPinChat?.(chat.id, !chat.pinned);
                   setOpenMenuId(null);
                 }}
@@ -145,7 +142,7 @@ function Sidebar({
             ))}
       </div>
 
-      <SidebarFooter darkMode={darkMode} setDarkMode={setDarkMode} />
+      <SidebarFooter darkMode={darkMode} setDarkMode={setDarkMode} onSettingsOpen={onSettingsOpen} />
 
       {chatPendingDeletion && (
         <GeneralDialog

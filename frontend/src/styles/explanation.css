@@ -99,7 +99,8 @@
 
 /* MAP TAB */
 .map-evidence-section {
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -120,6 +121,18 @@
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.explanation-map-frame.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.explanation-map-frame.is-empty p {
+  margin: 0;
+  padding: 16px;
+  text-align: center;
 }
 
 .explanation-map-frame img.is-loading {
@@ -181,8 +194,16 @@
 }
 
 /* KNOWLEDGE GRAPH EVIDENCE */
+.kg-evidence-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
 .kg-evidence-section {
   width: 100%;
+  flex: 1;
+  min-height: 0;
   background: #fef2ed;
   border: 1px solid #ff6129;
   border-radius: 20px;
@@ -198,9 +219,8 @@
 
 .kg-graph-box {
   width: 100%;
-  height: 56vh;
+  flex: 1;
   min-height: 360px;
-  max-height: 570px;
   background: #ffffff;
   border: 1px solid #e4e4e7;
   border-radius: 10px;
@@ -208,6 +228,75 @@
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.kg-graph-box {
+  position: relative;
+}
+
+.kg-graph-canvas {
+  position: absolute;
+  inset: 0;
+  /* Pinch on the graph zooms the graph, not the page. */
+  touch-action: none;
+  /* The background can be dragged to move the view. */
+  cursor: grab;
+}
+
+.kg-graph-canvas:active {
+  cursor: grabbing;
+}
+
+.kg-graph-status {
+  position: relative;
+  margin: 0;
+  padding: 0 16px;
+  font-size: 14px;
+  color: #52525b;
+  text-align: center;
+}
+
+.kg-zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kg-zoom-controls button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  color: #3f3f46;
+  cursor: pointer;
+}
+
+.kg-zoom-controls button:hover {
+  border-color: #ff6129;
+  color: #ff6129;
+}
+
+.kg-zoom-controls button:focus-visible {
+  outline: 2px solid #ff6129;
+  outline-offset: 2px;
+}
+
+.kg-zoom-controls svg {
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 520px) {
+  .kg-graph-box {
+    min-height: 280px;
+  }
 }
 
 .kg-network-svg {
@@ -321,6 +410,16 @@
 [data-theme="dark"] .explanation-map-frame {
   background: var(--dark-bg);
   border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .kg-zoom-controls button {
+  background: var(--dark-card);
+  border-color: var(--dark-border);
+  color: var(--dark-text);
+}
+
+[data-theme="dark"] .kg-graph-status {
+  color: var(--dark-muted);
 }
 
 [data-theme="dark"] .kg-evidence-section {

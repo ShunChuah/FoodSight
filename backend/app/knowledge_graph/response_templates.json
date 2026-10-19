@@ -1,0 +1,29 @@
+{
+  "description": "Everything FoodSight says to users. Write like a friendly local guide: plain words, short sentences, and a next step when something can't be done. Never mention data, databases, records, filters or queries. Values in braces are filled in by the code. Restart the backend after edits.",
+  "maps": {
+    "missing_coordinates": "I found some places, but I don’t know exactly where they are, so I can’t show them on the map.",
+    "partial_coordinates": "A few places don’t have an exact location, so they aren’t shown on the map."
+  },
+  "errors": {
+    "out_of_scope": "Sorry, I can only help with food and drink, like finding restaurants, comparing places, checking prices or menus, or F&B business questions.",
+    "unsupported_capability": "Sorry, I can’t help with {capabilities} yet.",
+    "outside": "Sorry, that’s outside what I can help with. I’m best at food, drinks and restaurants.",
+    "clarify": "Could you say that in another way?",
+    "unknown": "Sorry, I didn’t quite get that. Could you try rephrasing it?",
+    "answer": "Sorry, something went wrong while I was putting your answer together. Please try again.",
+    "no_results": "Sorry, I couldn’t find anything that matches.",
+    "unavailable": "Sorry, I can’t look up restaurants right now. Please try again in a moment.",
+    "retrieval": "Sorry, I couldn’t get that information just now. Please try again.",
+    "validation": "Sorry, I couldn’t run that search. Could you try asking in a different way?",
+    "unexpected": "Sorry, something went wrong on my side. Please try again."
+  },
+  "interface": {
+    "empty_message": "Please type a message first.",
+    "message_limit": "That message is a bit long. Please keep it under {maximum} words.",
+    "chat_not_found": "Sorry, I couldn’t find that chat.",
+    "empty_title": "Please enter a title."
+  },
+  "location": {
+    "permission": "I can find {venue} near you if you share your location. Is that okay?"
+  }
+}

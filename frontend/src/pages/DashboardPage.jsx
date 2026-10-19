@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
+import Settings from "../components/modals/Settings";
+import { deleteChatBatch } from "../services/deleteChatBatch";
+import { loadShowGraphEvidence, saveShowGraphEvidence } from "../services/detailsPresentation";
 import {
   createChatHistory,
   deleteChatHistory,
-  fetchChatHistory,
   fetchChatHistories,
   preflightChatMessage,
   renameChatHistory,
@@ -16,7 +18,9 @@ import "../styles/dashboard.css";
 
 function DashboardPage() {
   const [darkMode, setDarkMode] = useState(false);
+  const [showGraphEvidence, setShowGraphEvidence] = useState(loadShowGraphEvidence);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [shouldFocusSearch, setShouldFocusSearch] = useState(false);
   const [chats, setChats] = useState([]);
   const [isLoadingChats, setIsLoadingChats] = useState(true);
@@ -38,7 +42,6 @@ function DashboardPage() {
   };
 
   const replaceChat = (savedChat) => {
-    // Replace one updated chat in local state without reloading the whole list.
     setChats((prevChats) => {
       const nextChats = [
         savedChat,
@@ -52,27 +55,10 @@ function DashboardPage() {
     });
   };
 
-  const refreshGeneratedTitle = async (chatId, temporaryTitle) => {
-    // Poll independently from Cypher generation so the sidebar title changes
-    // within about one second of the background title being saved.
-    for (let attempt = 0; attempt < 15; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      try {
-        const refreshedChat = await fetchChatHistory(chatId);
-        replaceChat(refreshedChat);
-        if (refreshedChat.title !== temporaryTitle) return;
-      } catch (error) {
-        console.error("Failed to refresh generated chat title", error);
-        return;
-      }
-    }
-  };
-
   useEffect(() => {
     let ignore = false;
 
     async function loadChatHistories() {
-      // Initial load from PostgreSQL when the dashboard opens.
       try {
         const savedChats = await fetchChatHistories();
         if (!ignore) {
@@ -123,7 +109,6 @@ function DashboardPage() {
     location = null,
     locationPermissionDenied = false,
   ) => {
-    // Sends the query to the backend, which saves user and assistant messages.
     if (!query.trim() || isSendingRef.current) return;
 
     isSendingRef.current = true;
@@ -134,8 +119,6 @@ function DashboardPage() {
       ?? selectedChatId;
     setPendingChatId(chatId);
     setPendingQuery(query);
-    const isNewChat = draftChatIdRef.current === chatId;
-    const temporaryTitle = isNewChat ? "New Chat" : "";
     try {
       const preflight =
         preflightRef.current?.query === query
@@ -149,15 +132,12 @@ function DashboardPage() {
         preflight,
       });
 
-      if (isNewChat) {
-        void refreshGeneratedTitle(chatId, temporaryTitle);
-      }
-
       const savedChat = await sendPromise;
       replaceChat(savedChat);
       setSelectedChatId(savedChat.id);
     } catch (error) {
       console.error("Failed to save chat message", error);
+      throw error;
     } finally {
       preflightRef.current = null;
       draftChatIdRef.current = null;
@@ -174,7 +154,6 @@ function DashboardPage() {
   };
 
   const handleSearchOpen = () => {
-    // Reopen the sidebar and focus the search input.
     setSidebarOpen(true);
     setShouldFocusSearch(true);
   };
@@ -185,7 +164,6 @@ function DashboardPage() {
   };
 
   const handleRenameChat = async (chatId, title) => {
-    // Saves a new title, then replaces the updated chat in local state.
     try {
       const savedChat = await renameChatHistory(chatId, title);
       replaceChat(savedChat);
@@ -195,7 +173,6 @@ function DashboardPage() {
   };
 
   const handlePinChat = async (chatId, pinned) => {
-    // Saves pinned state and re-sorts the local list.
     try {
       const savedChat = await updateChatPin(chatId, pinned);
       replaceChat(savedChat);
@@ -217,7 +194,19 @@ function DashboardPage() {
     }
   };
 
-  // Selected chat controls what conversation ChatArea renders.
+  const handleClearHistory = async () => {
+    if (isSending || isSendingRef.current || isLoadingChats) {
+      throw new Error("Wait for the current chat operation to finish.");
+    }
+    const { deletedIds, failedIds } = await deleteChatBatch(
+      chats.map((chat) => chat.id), deleteChatHistory,
+    );
+    const deleted = new Set(deletedIds);
+    setChats((previous) => previous.filter((chat) => !deleted.has(chat.id)));
+    setSelectedChatId((previous) => deleted.has(previous) ? null : previous);
+    if (failedIds.length) throw new Error(`Failed to delete ${failedIds.length} chats.`);
+  };
+
   const selectedChat = chats.find((chat) => chat.id === selectedChatId);
   const selectedOwnsPendingRequest =
     pendingChatId === null
@@ -244,12 +233,14 @@ function DashboardPage() {
           focusSearch={shouldFocusSearch}
           onSearchFocused={handleSearchFocused}
           onCloseSidebar={() => setSidebarOpen(false)}
+          onSettingsOpen={() => setSettingsOpen(true)}
         />
       ) : (
         <ClosedSidebar
           onOpenSidebar={() => setSidebarOpen(true)}
           onNewChat={handleNewChat}
           onSearchOpen={handleSearchOpen}
+          onSettingsOpen={() => setSettingsOpen(true)}
         />
       )}
 
@@ -260,8 +251,27 @@ function DashboardPage() {
         onSendQuery={handleSendQuery}
         isSending={isSending}
         darkMode={darkMode}
+        showGraphEvidence={showGraphEvidence}
         pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
       />
+
+      {settingsOpen && (
+        <Settings
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode((previous) => !previous)}
+          showGraphEvidence={showGraphEvidence}
+          onToggleGraphEvidence={() => {
+            const next = !showGraphEvidence;
+            setShowGraphEvidence(next);
+            saveShowGraphEvidence(next);
+          }}
+          onClose={() => setSettingsOpen(false)}
+          onClearHistory={handleClearHistory}
+          hasChats={chats.length > 0}
+          historyLoading={isLoadingChats}
+          chatBusy={isSending}
+        />
+      )}
     </div>
   );
 }

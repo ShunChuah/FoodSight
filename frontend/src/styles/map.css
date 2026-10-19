@@ -1,0 +1,9 @@
+.interactive-map { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; }
+.restaurant-map { flex: 1; min-height: 320px; width: 100%; border: 1px solid #e4e4e7; border-radius: 10px; z-index: 0; }
+.restaurant-map .leaflet-control-attribution { font-size: 10px; }
+.business-map-popup { max-width: 260px; overflow-wrap: anywhere; font-size: 13px; }
+.business-map-popup strong { font-size: 14px; }
+.business-map-popup p { margin: 5px 0; }
+.ranked-map-marker span { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #ff6129; border: 2px solid white; border-radius: 50%; box-shadow: 0 1px 5px #0005; color: white; font-size: 13px; font-weight: 700; }
+[data-theme="dark"] .restaurant-map { border-color: var(--dark-border); }
+[data-theme="dark"] .restaurant-map .leaflet-popup-content-wrapper, [data-theme="dark"] .restaurant-map .leaflet-popup-tip { background: var(--dark-card); color: var(--dark-text); }

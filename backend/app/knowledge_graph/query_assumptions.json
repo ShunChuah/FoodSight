@@ -1,33 +1,65 @@
 {
-  "price_terms": [
-    {
-      "name": "affordable budget range",
-      "triggers": ["affordable", "cheap", "budget", "low price", "low cost", "inexpensive"],
-      "instruction": "Treat affordable, cheap, budget, low price, low cost, and inexpensive as PriceRange.tier values matching budget, low, cheap, or affordable. Prefer ordering by PriceRange.avg_price ASC when available."
+  "version": 1,
+  "description": "Search policies and defaults only. Category meanings, aliases and price tiers are defined in categories.json. Restart the backend after edits. Explicit user constraints take precedence. Schema capabilities and security ceilings remain in code; deployment/model settings remain in .env.",
+  "policy": {
+    "coverage": {
+      "description": "Only records connected through an Area to this City are supported. Search-radius expansion never extends city coverage. Unknown place names are not proof that a place is outside the city.",
+      "city": "Petaling Jaya"
     },
-    {
-      "name": "premium price range",
-      "triggers": ["premium", "luxury", "expensive", "high end", "fine dining"],
-      "instruction": "Treat premium, luxury, expensive, high end, and fine dining as PriceRange.tier values matching premium, luxury, expensive, or high."
-    }
-  ],
-  "location_terms": [
-    {
-      "name": "near me default radius",
-      "triggers": ["near me", "nearby", "around me", "around here", "close to me", "nearest", "closest"],
-      "instruction": "When the user asks for near me or nearby results and provides browser coordinates, use a default radius of 3 km unless the user specifies a different distance."
+    "alternatives": {
+      "description": "After an empty discovery search, expand only a system-default nearby radius. Explicit food, price, numeric distance, amenities and other requirements remain fixed until the user changes them. Explain every expansion.",
+      "enabled": true,
+      "automatic_radius_steps_meters": [5000, 8000],
+      "maximum_attempts": 3,
+      "time_budget_seconds": 4,
+      "result_limit": 3
     },
-    {
-      "name": "walking distance radius",
-      "triggers": ["walking distance", "walkable"],
-      "instruction": "Treat walking distance and walkable as a default radius of 1 km when browser coordinates are available."
+    "results": {
+      "description": "Explicit counts override defaults, including answer size. Maximum 25 is the code safety ceiling.",
+      "default_limit": 3,
+      "discovery_limit": 5,
+      "maximum_limit": 25
+    },
+    "proximity": {
+      "description": "Straight-line distance over available dataset records. Explicit distance wins, then an explicit mode, then venue/general defaults. A larger radius does not extend dataset coverage.",
+      "modes": {
+        "radius_search": {"terms": ["near me", "nearby", "around me", "around here", "close to me", "current location"]},
+        "nearest_search": {"terms": ["nearest", "closest"], "default_limit": 1},
+        "walking_proxy": {"terms": ["walking distance", "walkable"]},
+        "distance_measurement": {"terms": ["distance from", "distance between", "distance to", "how far"], "requires_radius": false},
+        "delivery_search": {"terms": ["delivery", "delivers near me", "can deliver here"]}
+      },
+      "default_radius_meters": 3000,
+      "venue_radius_meters": {
+        "cafe": 2000,
+        "coffee shop": 2000
+      },
+      "delivery_radius_meters": 5000,
+      "walking_radius_meters": 1000,
+      "minimum_radius_meters": 100,
+      "maximum_radius_meters": 50000
+    },
+    "ranking": {
+      "description": "Rating means highest average_rating; popularity means highest review_count, not visits or sales; price means lowest restaurant avg_price; distance means shortest straight-line distance and requires coordinates. Best/top rated ranks only places with at least rated_minimum_reviews reviews; this default is loosened when nothing matches.",
+      "default_field": "Restaurant.average_rating",
+      "default_direction": "desc",
+      "rated_minimum_reviews": 20,
+      "choices": {
+        "highest rated": "Restaurant.average_rating",
+        "highest rating": "Restaurant.average_rating",
+        "most popular": "Restaurant.review_count",
+        "cheapest": "PriceRange.avg_price",
+        "closest": "Location.distance_m",
+        "nearest": "Location.distance_m",
+        "rating": "Restaurant.average_rating",
+        "price": "PriceRange.avg_price",
+        "distance": "Location.distance_m",
+        "popularity": "Restaurant.review_count"
+      }
+    },
+    "price_matching": {
+      "default_currency": "MYR",
+      "currency_note": "Missing restaurant price currency uses MYR for the current Petaling Jaya dataset. Recorded currencies take precedence. Missing min/max remain unknown, never copied from averages."
     }
-  ],
-  "rating_terms": [
-    {
-      "name": "high rating",
-      "triggers": ["high rating", "high ratings", "high rated", "highly rated", "best", "good", "top rated", "rating", "ratings"],
-      "instruction": "Treat high rating, high rated, highly rated, best, good, and top rated as Restaurant.average_rating >= 4.0 when available, and order by Restaurant.average_rating DESC then Restaurant.review_count DESC."
-    }
-  ]
+  }
 }
