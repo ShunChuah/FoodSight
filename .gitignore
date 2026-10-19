@@ -3,12 +3,18 @@ frontend/node_modules/
 backend/venv/
 backend/.venv/
 .vscode/
+.idea/
 
 frontend/dist/
+dist/
 
 .env
 .env.local
+*.env
 backend/.env
+
+# Data files (raw/cleaned CSVs are generated, not source)
+data/
 
 # Local graph imports and recovery archives
 neo4j/imports/
@@ -17,6 +23,10 @@ neo4j/backups/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Testing files (kept locally, never pushed)
 backend/tests/
