@@ -3,6 +3,18 @@
   box-sizing: border-box;
 }
 
+.dashboard-page,
+.page-bg {
+  background: #fafafa url("../assets/background.png") no-repeat center center;
+  background-size: cover;
+}
+
+.dashboard-page[data-theme="dark"],
+.dark .page-bg {
+  background-color: #1f1f1f;
+  background-image: url("../assets/backgroundDarkMode.png");
+}
+
 html,
 body,
 #root {

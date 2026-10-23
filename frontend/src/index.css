@@ -3,31 +3,24 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
   --color-brand: #ff6129;
   --color-brand-hover: #ee5320;
-  --color-brand-soft: #fdf1ec;
-  --color-ink: #111827;
-  --color-surface-dark: #0e0e0e;
-  --color-page-dark: #252323;
+  --color-brand-soft: #fff3ed;
+  --color-ink: #09090b;
+  --color-surface-dark: #181818;
+  --color-page-dark: #1f1f1f;
+  --color-line-dark: #333333;
+  --color-muted-dark: #a1a1a1;
+  --color-gray-200: #e4e4e7;
+  --color-gray-300: #d4d4d8;
+  --color-gray-400: #a1a1aa;
+  --color-gray-500: #71717a;
 }
 
 /* Every size in the app is in rem, so this one rule shrinks the whole layout on short
-   windows until the tallest page (register) fits without scrolling. 16px is the design size. */
+   windows until the tallest page (register, about 55rem tall) fits without scrolling.
+   16px is the design size, reached from about 890px tall. */
 html {
-  font-size: clamp(9px, 1.5vh, 16px);
-}
-
-.page-bg {
-  background-color: #fafafa;
-  background-image:
-    radial-gradient(ellipse 34% 46% at 84% 22%, rgb(255 97 41 / 0.24), transparent 72%),
-    radial-gradient(ellipse 30% 42% at 20% 84%, rgb(255 97 41 / 0.24), transparent 72%);
-}
-
-.dark .page-bg {
-  background-color: var(--color-page-dark);
-  background-image:
-    radial-gradient(ellipse 34% 46% at 84% 22%, rgb(255 97 41 / 0.26), transparent 72%),
-    radial-gradient(ellipse 30% 42% at 20% 84%, rgb(255 97 41 / 0.26), transparent 72%);
+  font-size: clamp(9px, 1.8vh, 16px);
 }
