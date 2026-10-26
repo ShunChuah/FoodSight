@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -86,6 +86,9 @@ class ChatMessage(Base):
     graph_snapshot: Mapped["ChatMessageGraph | None"] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, uselist=False,
     )
+    graph_job: Mapped["ChatMessageGraphJob | None"] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, uselist=False,
+    )
 
 
 class ChatMessageQuickReplies(Base):
@@ -119,6 +122,23 @@ class ChatMessageGraph(Base):
         ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
     )
     data: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class ChatMessageGraphJob(Base):
+    """Knowledge Graph Evidence still being built after its answer was sent (status "pending"), or that failed.
+
+    Replaced by a ChatMessageGraph when the graph is ready; removed when there turns out to be nothing to draw.
+    """
+
+    __tablename__ = "chat_message_graph_jobs"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
+    )
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc),
+    )
 
 
 class UserPreference(Base):

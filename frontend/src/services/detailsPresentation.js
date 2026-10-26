@@ -6,12 +6,17 @@ export function hasGraphView(graphData) {
   return Array.isArray(graphData?.nodes) && graphData.nodes.length > 0;
 }
 
+// The graph is built after the answer is sent; until then its tab shows a skeleton.
+export function isGraphPending(message) {
+  return message?.graphStatus === "pending";
+}
+
 // Tabs the View Details panel can show for one response, in display order.
 // An empty list means there is nothing to show, so the button is hidden.
 export function detailTabs(message, { showKnowledgeGraph = true } = {}) {
   const tabs = [];
   if (hasMapView(message?.mapData, message?.mapImage)) tabs.push("map");
-  if (showKnowledgeGraph && hasGraphView(message?.graphData)) tabs.push("knowledge");
+  if (showKnowledgeGraph && (isGraphPending(message) || hasGraphView(message?.graphData))) tabs.push("knowledge");
   return tabs;
 }
 

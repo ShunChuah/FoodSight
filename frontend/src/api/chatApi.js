@@ -37,6 +37,12 @@ export async function sendChatMessage({
   return response.data.chat;
 }
 
+// { graphStatus, graphData } for an answer whose graph evidence was still being built.
+export async function fetchGraphEvidence(chatId, messageId) {
+  const response = await api.get(`/chats/${chatId}/messages/${messageId}/graph`);
+  return response.data;
+}
+
 export async function preflightChatMessage({ chatId, message }) {
   const response = await api.post("/chats/preflight", {
     chat_id: chatId ?? null,

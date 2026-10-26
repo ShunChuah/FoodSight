@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Waypoints, Map, PlayCircle, X } from "lucide-react";
 import KnowledgeGraphEvidence from "./KnowledgeGraphEvidence";
+import KnowledgeGraphSkeleton from "./KnowledgeGraphSkeleton";
 import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
 import MapPreview from "../map/MapPreview";
 import { hasMapView } from "../../services/mapPresentation";
 import "../../styles/explanation.css";
 
 // `tabs` lists only the tabs with something to show (see detailTabs).
-function AIExplanationPanel({ tabs, mapImage, mapData, graphData, darkMode = false, onClose }) {
+// graphPending: the graph is still being built after the answer was sent.
+function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending = false, darkMode = false, onClose }) {
   const showMap = tabs.includes("map");
   const showKnowledge = tabs.includes("knowledge");
   const [selectedTab, setSelectedTab] = useState(tabs[0]);
@@ -84,7 +86,9 @@ function AIExplanationPanel({ tabs, mapImage, mapData, graphData, darkMode = fal
           </section>
         ) : (
           <div className="kg-evidence-panel" role="tabpanel">
-            <KnowledgeGraphEvidence graphData={graphData} darkMode={darkMode} />
+            {graphPending
+              ? <KnowledgeGraphSkeleton />
+              : <KnowledgeGraphEvidence graphData={graphData} darkMode={darkMode} />}
           </div>
         )}
       </div>

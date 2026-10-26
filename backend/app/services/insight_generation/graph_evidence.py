@@ -1,99 +1,131 @@
 """Knowledge Graph Evidence for View Details (FR-58: graph visualisation).
 
-Turns the rows behind an answer into nodes and relationships:
+Reads from Neo4j the part of the graph an answer was built from and draws it as stored: the real
+nodes, labels, relationship types and property values, nothing the app works out (distances, "open now").
+For each restaurant in the answer, the nodes its details come from, by every relationship Neo4j has
+between them (some pairs have two, such as PRICED_AT and HAS_PRICE_RANGE to the same PriceRange):
 
-    Dough! Bakery & Cafe -SERVES-> Western
-    Dough! Bakery & Cafe -LOCATED_IN-> Seksyen 17
-    Hideaway Cafe        -SERVES-> Western        (the same Western node)
+    (Restaurant)-[:LOCATED_IN|LOCATED_AT]->(Location)-[:IN_AREA|LOCATED_IN]->(Area)-[:IN_CITY|PART_OF]->(City)
+    (Restaurant)-[:PRICED_AT|HAS_PRICE_RANGE]->(PriceRange)
+    (Restaurant)-[:HAS_RATING|HAS_PROFILE|HAS_HOURS]->(Rating|BusinessProfile|OperatingHours)
+    (Restaurant)-[:SERVES|HAS_FACILITY]->(Cuisine|Facility)
+    (Restaurant)-[:COMPETES_WITH]-(Restaurant)      only for "competitors of ..." answers
 
-Only facts already in the retrieved rows are drawn, so the picture never shows
-more than the answer used. Repeated values share one node; that is what makes
-connections between results visible. Restaurant -> Area is drawn directly
-(the graph stores Restaurant -> Location -> Area; the Location step adds nothing
-for the user).
+For an analysis answer about areas: (Area)-[:IN_CITY|PART_OF]->(City). Each Neo4j node is drawn once, so
+places that share a Cuisine, Facility, Area or City all connect to the same node; reviews are not drawn
+(no answer reads them). The graph is built after the answer has been sent (chatbot/graph_jobs.py).
 """
 from typing import Any
 
-from ..shared.config import policy
-from .presentation import distance_label, money_label, price_tier_label
+from ..shared.neo4j import execute_cypher
+from .graph_answer import _plain, _today
 
 MAX_RESTAURANTS = 10
-MAX_NODES = 60
+MAX_NODES = 80
+
+# Fixed queries (their plans stay cached in Neo4j). Each row is one relationship, or a node alone (rel null).
+RESTAURANT_SUBGRAPH = """
+UNWIND range(0, size($ids) - 1) AS position
+MATCH (r:Restaurant) WHERE r.restaurant_id = $ids[position]
+CALL {
+  WITH r
+  RETURN r AS a, null AS rel, null AS b
+  UNION
+  WITH r
+  MATCH (r)-[rel:LOCATED_IN|LOCATED_AT|PRICED_AT|HAS_PRICE_RANGE|HAS_RATING|HAS_PROFILE|HAS_HOURS|SERVES|HAS_FACILITY]->(b)
+  RETURN r AS a, rel, b
+  UNION
+  WITH r
+  MATCH (r)-[:LOCATED_IN]->(a:Location)-[rel:IN_AREA|LOCATED_IN]->(b:Area)
+  RETURN a, rel, b
+  UNION
+  WITH r
+  MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)-[rel:IN_CITY|PART_OF]->(b:City)
+  RETURN a, rel, b
+  UNION
+  WITH r
+  MATCH (r)-[rel:COMPETES_WITH]-(other:Restaurant) WHERE other.restaurant_id IN $anchors
+  RETURN startNode(rel) AS a, rel, endNode(rel) AS b
+}
+RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, properties(a) AS source_properties,
+       type(rel) AS type,
+       elementId(b) AS target_id, labels(b)[0] AS target_label, properties(b) AS target_properties
+ORDER BY position, type, target_label, target_id
+""".strip()
+
+AREA_SUBGRAPH = """
+UNWIND range(0, size($areas) - 1) AS position
+MATCH (a:Area) WHERE a.name = $areas[position]
+OPTIONAL MATCH (a)-[rel:IN_CITY|PART_OF]->(b:City)
+RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, properties(a) AS source_properties,
+       type(rel) AS type,
+       elementId(b) AS target_id, labels(b)[0] AS target_label, properties(b) AS target_properties
+ORDER BY position
+""".strip()
+
+# What a node without a name shows inside its circle: its main stored value, unformatted.
+CAPTION_PROPERTIES = {
+    "Rating": "rating_score",
+    "PriceRange": "tier",
+    "Location": "postcode",
+    "BusinessProfile": "service_style",
+}
 
 
-class _Graph:
-    def __init__(self) -> None:
-        self.nodes: dict[str, dict] = {}
-        self.edges: dict[tuple[str, str, str], dict] = {}
-
-    def node(self, label: str, key: object, name: str, properties: dict | None = None) -> str | None:
-        """Add (or reuse) a node; the same label + key is always the same node."""
-        node_id = f"{label}:{str(key).strip().casefold()}"
-        if node_id not in self.nodes:
-            if len(self.nodes) >= MAX_NODES:
-                return None  # keep the picture readable
-            self.nodes[node_id] = {"id": node_id, "label": label, "name": name,
-                                   "properties": {k: v for k, v in (properties or {}).items() if v not in (None, "", [])}}
-        return node_id
-
-    def edge(self, source: str | None, target: str | None, relationship: str) -> None:
-        if source and target:
-            self.edges.setdefault((source, target, relationship), {"source": source, "target": target, "type": relationship})
-
-    def to_dict(self) -> dict | None:
-        if not self.nodes:
-            return None
-        return {"nodes": list(self.nodes.values()), "edges": list(self.edges.values())}
+class GraphEvidenceError(RuntimeError):
+    """Neo4j could not be read; the graph job reports the graph as failed."""
 
 
 def build_graph_evidence(records: list[dict[str, Any]]) -> dict | None:
-    """Return {"nodes": [...], "edges": [...]} for the answer's rows, or None when there is nothing to draw."""
-    graph = _Graph()
-    for row in records[:MAX_RESTAURANTS]:
-        if not isinstance(row, dict):
-            continue
-        if row.get("restaurant_name"):
-            _add_restaurant(graph, row)
-        elif row.get("area_name"):
-            _add_area(graph, row)
-    return graph.to_dict()
+    """Return {"nodes": [...], "edges": [...]} as stored in Neo4j, or None when there is nothing to draw.
 
-
-def _add_restaurant(graph: _Graph, row: dict) -> None:
-    name = str(row["restaurant_name"])
-    currency = row.get("currency") or "MYR"
-    halal = {"halal": "Listed as halal", "non-halal": "Listed as non-halal"}.get(row.get("halal_status"))
-    restaurant = graph.node("Restaurant", row.get("restaurant_id") or name, name, {
-        "Rating": f"{row['average_rating']:g} out of 5" if isinstance(row.get("average_rating"), (int, float)) else None,
-        "Reviews": f"{int(row['review_count']):,}" if isinstance(row.get("review_count"), (int, float)) else None,
-        "Average price": money_label(row.get("average_price"), currency),
-        "Distance": distance_label(row.get("distance_m")),
-        "Halal": halal,
-    })
-    if restaurant is None:
-        return
-    for cuisine in row.get("cuisines") or []:
-        graph.edge(restaurant, graph.node("Cuisine", cuisine, str(cuisine)), "SERVES")
-    if row.get("area"):
-        graph.edge(restaurant, graph.node("Area", row["area"], str(row["area"])), "LOCATED_IN")
-    tier = row.get("price_tier")
-    if tier:
-        label = price_tier_label(tier)
-        graph.edge(restaurant, graph.node("PriceRange", tier, label[:1].upper() + label[1:]), "HAS_PRICE_RANGE")
-
-
-def _add_area(graph: _Graph, row: dict) -> None:
-    """An area row from an analysis question, with the numbers the query computed for it."""
-    area = str(row["area_name"])
-    node = graph.node("Area", area, area, {
-        key.replace("_", " ").capitalize(): _number_text(value)
-        for key, value in row.items() if key != "area_name" and _number_text(value) is not None
-    })
-    city = policy("coverage")["city"]
-    graph.edge(node, graph.node("City", city, city), "PART_OF")
-
-
-def _number_text(value: Any) -> str | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    records are the rows the answer was built from: restaurant rows (restaurant_id) or area rows (area_name).
+    """
+    rows = [row for row in records[:MAX_RESTAURANTS] if isinstance(row, dict)]
+    ids = list(dict.fromkeys(row["restaurant_id"] for row in rows if row.get("restaurant_id") is not None))
+    if ids:
+        # Only an answer about competitors used COMPETES_WITH, so only then is it evidence.
+        anchors = list(dict.fromkeys(row["anchor_id"] for row in rows
+                                     if row.get("competitor_of") and row.get("anchor_id") is not None))
+        result = execute_cypher(RESTAURANT_SUBGRAPH, {"ids": ids, "anchors": anchors})
+    else:
+        areas = list(dict.fromkeys(str(row["area_name"]) for row in rows if row.get("area_name")))
+        if not areas:
+            return None
+        result = execute_cypher(AREA_SUBGRAPH, {"areas": areas})
+    if result.status == "skipped_disabled":
         return None
-    return f"{int(value):,}" if float(value).is_integer() else f"{value:,.1f}"
+    if result.status != "success":
+        raise GraphEvidenceError(f"Neo4j {result.status}: {result.detail or result.message}")
+
+    nodes: dict[str, dict] = {}
+    edges: dict[tuple[str, str, str], dict] = {}
+
+    def add(node_id: str | None, label: str | None, properties: dict | None) -> bool:
+        if not node_id:
+            return False
+        if node_id not in nodes:
+            if len(nodes) >= MAX_NODES:
+                return False  # keep the picture readable
+            properties = _plain(properties or {})
+            nodes[node_id] = {"id": node_id, "label": label, "name": _caption(label, properties),
+                              "properties": properties}
+        return True
+
+    for row in result.records:
+        source = add(row["source_id"], row["source_label"], row["source_properties"])
+        target = add(row["target_id"], row["target_label"], row["target_properties"])
+        if source and target and row["type"]:
+            key = (row["source_id"], row["target_id"], row["type"])
+            edges.setdefault(key, {"source": row["source_id"], "target": row["target_id"], "type": row["type"]})
+    if not nodes:
+        return None
+    return {"nodes": list(nodes.values()), "edges": list(edges.values())}
+
+
+def _caption(label: str | None, properties: dict) -> str:
+    """The node's name; for a node without one, its main stored value (today's hours for OperatingHours)."""
+    field = "name" if properties.get("name") not in (None, "") else (
+        _today() if label == "OperatingHours" else CAPTION_PROPERTIES.get(label))
+    value = properties.get(field) if field else None
+    return str(value) if value not in (None, "") else str(label or "Node")

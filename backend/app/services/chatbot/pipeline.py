@@ -4,7 +4,9 @@ assess_query_guardrails() runs at preflight; generate_assistant_response() runs 
 """
 import os
 from dataclasses import dataclass, field
+from functools import partial
 from time import perf_counter
+from typing import Callable
 
 from ...contracts import GuardrailDecision
 from ..insight_generation.graph_answer import generate_answer, query_graph
@@ -40,7 +42,8 @@ class AssistantTurn:
 
     answer: str
     map_data: dict | None = None
-    graph_data: dict | None = None
+    # Builds the Knowledge Graph Evidence; the chat route runs it after the answer has been sent.
+    build_graph: Callable[[], dict | None] | None = None
     quick_replies: list[str] = field(default_factory=list)
     chat_title: str | None = None  # the model's title suggestion, when one was asked for
 
@@ -87,7 +90,7 @@ def generate_assistant_response(
     return AssistantTurn(
         answer=answer.text or LLM_ERROR_ANSWER,
         map_data=result.map_result.to_dict() if has_rows else None,
-        graph_data=build_graph_evidence(result.records[:result.query_plan.result_limit]) if has_rows else None,
+        build_graph=partial(build_graph_evidence, result.records) if has_rows else None,
         quick_replies=replies.get("quick_replies", []),
         chat_title=replies.get("chat_title"),
     )

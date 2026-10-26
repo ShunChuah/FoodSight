@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session, selectinload
 from ..auth.backend import current_user
 from ..auth.models import User
 from ..database import get_db
-from ..model import ChatHistory, ChatMessage, ChatMessageGraph, ChatMessageMap, ChatMessageQuickReplies, ChatQueryState
+from ..model import (
+    ChatHistory,
+    ChatMessage,
+    ChatMessageGraphJob,
+    ChatMessageMap,
+    ChatMessageQuickReplies,
+    ChatQueryState,
+)
 from ..schemas import (
     ChatCreate,
     ChatListResponse,
@@ -22,7 +29,9 @@ from ..schemas import (
     ChatSendRequest,
     ChatSendResponse,
     DeleteChatResponse,
+    GraphEvidenceRead,
 )
+from ..services.chatbot.graph_jobs import graph_status, start_graph_job
 from ..services.chatbot.pipeline import (
     AssistantTurn,
     assess_query_guardrails,
@@ -87,6 +96,8 @@ def serialize_message(message: ChatMessage):
         "mapImage": message.map_image,
         "mapData": message.map_snapshot.data if message.map_snapshot else None,
         "graphData": message.graph_snapshot.data if message.graph_snapshot else None,
+        # "pending" while the graph is still being built after the answer was sent.
+        "graphStatus": graph_status(message),
         "quickReplies": message.quick_replies.replies if message.quick_replies else [],
     }
 
@@ -145,6 +156,7 @@ def get_chat_or_404(db: Session, chat_id: int, user_id: int) -> ChatHistory:
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_job),
             selectinload(ChatHistory.query_state),
         )
     )
@@ -224,6 +236,7 @@ def list_chat_histories(
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_job),
         )
         .order_by(
             ChatHistory.pinned.desc(),
@@ -377,7 +390,8 @@ def send_message(
         now + timedelta(microseconds=1),
     )
 
-    # Save the turn: the user message, the reply with its map / graph / buttons, and the title flag.
+    # Save the turn: the user message, the reply with its map / buttons, and the title flag. The graph
+    # evidence is saved as pending and built once the answer is on its way (start_graph_job below).
     persist_started_at = perf_counter()
     if not payload.chat_id:
         db.add(chat)
@@ -394,7 +408,7 @@ def send_message(
         role="assistant",
         content=turn.answer,
         map_snapshot=ChatMessageMap(data=turn.map_data) if turn.map_data is not None else None,
-        graph_snapshot=ChatMessageGraph(data=turn.graph_data) if turn.graph_data else None,
+        graph_job=ChatMessageGraphJob(status="pending") if turn.build_graph else None,
         quick_replies=ChatMessageQuickReplies(replies=turn.quick_replies) if turn.quick_replies else None,
         created_at=assistant_created_at,
     )
@@ -419,6 +433,8 @@ def send_message(
         userMessage=serialize_message(user_message),
         assistantMessage=serialize_message(assistant_message),
     )
+    if turn.build_graph:
+        start_graph_job(assistant_message.id, turn.build_graph)
     log_timing(
         "chat.send.persist",
         persist_started_at,
@@ -431,6 +447,31 @@ def send_message(
     )
     log_request_timing("chat.request.total", status="degraded" if generation_status == "error" else "success")
     return response
+
+
+@router.get("/{chat_id}/messages/{message_id}/graph", response_model=GraphEvidenceRead)
+def get_graph_evidence(
+    chat_id: int,
+    message_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> GraphEvidenceRead:
+    """The browser asks this while an answer's graph evidence is pending."""
+    message = db.scalar(
+        select(ChatMessage)
+        .join(ChatHistory)
+        .where(ChatMessage.id == message_id, ChatMessage.chat_id == chat_id, ChatHistory.user_id == user.id)
+        .options(selectinload(ChatMessage.graph_snapshot), selectinload(ChatMessage.graph_job))
+    )
+    if not message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=user_response("interface.chat_not_found"),
+        )
+    return GraphEvidenceRead(
+        graphStatus=graph_status(message),
+        graphData=message.graph_snapshot.data if message.graph_snapshot else None,
+    )
 
 
 @router.patch("/{chat_id}/title", response_model=ChatRead)

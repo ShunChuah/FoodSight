@@ -5,10 +5,12 @@ import ChatArea from "../components/chat/ChatArea";
 import Settings from "../components/modals/Settings";
 import { deleteChatBatch } from "../services/deleteChatBatch";
 import { loadShowGraphEvidence, saveShowGraphEvidence } from "../services/detailsPresentation";
+import { pendingGraphs, waitForGraph, withGraphEvidence } from "../services/pendingGraphs";
 import {
   createChatHistory,
   deleteChatHistory,
   fetchChatHistories,
+  fetchGraphEvidence,
   preflightChatMessage,
   renameChatHistory,
   sendChatMessage,
@@ -91,6 +93,23 @@ function DashboardPage() {
       ignore = true;
     };
   }, []);
+
+  // Answers arrive before their graph evidence; fetch each pending graph once it is built.
+  const pendingGraphKey = pendingGraphs(chats)
+    .map(({ chatId, messageId }) => `${chatId}:${messageId}`)
+    .join(",");
+  useEffect(() => {
+    if (!pendingGraphKey) return undefined;
+    const controller = new AbortController();
+    for (const key of pendingGraphKey.split(",")) {
+      const [chatId, messageId] = key.split(":").map(Number);
+      waitForGraph(() => fetchGraphEvidence(chatId, messageId), { signal: controller.signal })
+        .then((result) => {
+          if (result) setChats((previous) => withGraphEvidence(previous, chatId, messageId, result));
+        });
+    }
+    return () => controller.abort();
+  }, [pendingGraphKey]);
 
   // Apply the account's saved theme after login, unless the user already switched it on this page.
   useEffect(() => {

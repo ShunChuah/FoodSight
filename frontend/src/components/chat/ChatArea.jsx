@@ -6,7 +6,7 @@ import AIResponseSkeleton from "./AIResponseSkeleton";
 import UserQuestionBubble from "./UserQuestionBubble";
 import AIExplanationPanel from "../explanation/AIExplanationPanel";
 import { submitChatQuery } from "../../services/submitChatQuery";
-import { detailTabs } from "../../services/detailsPresentation";
+import { detailTabs, isGraphPending } from "../../services/detailsPresentation";
 import "../../styles/chat.css";
 
 function ChatArea({
@@ -29,11 +29,13 @@ function ChatArea({
   const showWelcome =
     !hasPendingQuery && (!selectedChat || messages.length === 0);
   const resultRef = useRef(null);
-  const [explanationContext, setExplanationContext] = useState(null);
+  const [explanationMessageId, setExplanationMessageId] = useState(null);
   const [sendError, setSendError] = useState("");
   const tabsFor = (message) => detailTabs(message, { showKnowledgeGraph: showGraphEvidence });
-  // Re-checked on every render: turning graph evidence off can leave the open panel empty.
-  const explanationTabs = explanationContext ? tabsFor(explanationContext.message) : [];
+  // Read from the chat on every render, so a graph that finishes while the panel is open replaces
+  // its skeleton, and turning graph evidence off can leave the open panel empty.
+  const explanationMessage = messages.find((message) => message.id === explanationMessageId);
+  const explanationTabs = explanationMessage ? tabsFor(explanationMessage) : [];
   const submissionInFlight = useRef(false);
 
   const handleSubmit = async (query) => {
@@ -79,10 +81,8 @@ function ChatArea({
                   key={message.id}
                   answer={message.answer}
                   hasDetails={tabsFor(message).length > 0}
-                  isExplanationOpen={explanationTabs.length > 0 && explanationContext?.messageId === message.id}
-                  onShowExplanation={() =>
-                    setExplanationContext({ messageId: message.id, message })
-                  }
+                  isExplanationOpen={explanationTabs.length > 0 && explanationMessageId === message.id}
+                  onShowExplanation={() => setExplanationMessageId(message.id)}
                 />
               ),
             )}
@@ -109,13 +109,14 @@ function ChatArea({
 
       {explanationTabs.length > 0 && (
         <AIExplanationPanel
-          key={explanationContext.messageId}
+          key={explanationMessageId}
           tabs={explanationTabs}
-          mapImage={explanationContext.message.mapImage}
-          mapData={explanationContext.message.mapData}
-          graphData={explanationContext.message.graphData}
+          mapImage={explanationMessage.mapImage}
+          mapData={explanationMessage.mapData}
+          graphData={explanationMessage.graphData}
+          graphPending={isGraphPending(explanationMessage)}
           darkMode={darkMode}
-          onClose={() => setExplanationContext(null)}
+          onClose={() => setExplanationMessageId(null)}
         />
       )}
     </main>

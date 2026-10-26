@@ -10,6 +10,7 @@ MAX_MESSAGE_WORDS = 1000
 MAX_MESSAGE_CHARACTERS = 5000
 ScopeType = Literal["fnb_customer", "fnb_analyst"]
 GuardrailStatus = Literal["ready", "unsupported", "out_of_scope"]
+GraphStatus = Literal["pending", "ready", "failed"]
 
 
 class ChatMessageInput(BaseModel):
@@ -88,6 +89,8 @@ class ChatMessageRead(BaseModel):
     mapImage: str | None = None
     mapData: dict | None = None
     graphData: dict | None = None
+    # None when the answer has no graph evidence; "pending" while it is built after the answer was sent.
+    graphStatus: GraphStatus | None = None
     quickReplies: list[str] = Field(default_factory=list)
     createdAt: datetime
 
@@ -111,6 +114,11 @@ class ChatSendResponse(BaseModel):
     chat: ChatRead
     userMessage: ChatMessageRead
     assistantMessage: ChatMessageRead
+
+
+class GraphEvidenceRead(BaseModel):
+    graphStatus: GraphStatus | None = None
+    graphData: dict | None = None
 
 
 class DeleteChatResponse(BaseModel):
