@@ -51,9 +51,8 @@ from ..services.chatbot.titles import (
 from ..services.shared.diagnostics import log_request_timing, log_timing, timing_token_fields, trace_request
 from ..services.shared.messages import response as user_response
 
-# Every route needs a logged-in, verified user and only sees that user's chats.
+# Every route needs a verified user and only sees that user's chats.
 router = APIRouter(prefix="/chats", tags=["chats"])
-# Saved in the chat's state once a model title has been applied, so it happens only once.
 TITLE_GENERATED = "title_generated"
 
 
@@ -76,7 +75,6 @@ def format_date(value: datetime) -> str:
 
 
 def format_time(value: datetime) -> str:
-    # Remove leading zero so the UI shows "9:30 AM" instead of "09:30 AM".
     return to_display_time(value).strftime("%I:%M %p").lstrip("0")
 
 
@@ -96,15 +94,13 @@ def serialize_message(message: ChatMessage):
         "mapImage": message.map_image,
         "mapData": message.map_snapshot.data if message.map_snapshot else None,
         "graphData": message.graph_snapshot.data if message.graph_snapshot else None,
-        # "pending" while the graph is still being built after the answer was sent.
         "graphStatus": graph_status(message),
         "quickReplies": message.quick_replies.replies if message.quick_replies else [],
     }
 
 
 def get_ordered_messages(chat: ChatHistory) -> list[ChatMessage]:
-    # Older user/assistant pairs can share the same timestamp. Their IDs preserve
-    # insertion order, so use ID as a deterministic tie-breaker everywhere.
+    # Older user/assistant pairs can share a timestamp; ids keep insertion order, so they break ties everywhere.
     return sorted(
         chat.messages,
         key=lambda message: (message.created_at, message.id),
@@ -112,7 +108,6 @@ def get_ordered_messages(chat: ChatHistory) -> list[ChatMessage]:
 
 
 def get_session_timestamp(chat: ChatHistory) -> datetime:
-    # The sidebar timestamp represents when the session started: the first user query.
     first_user_message = next(
         (
             message
@@ -173,16 +168,11 @@ def title_generated(chat: ChatHistory | None) -> bool:
 
 
 def title_needed(chat: ChatHistory, first_turn: bool) -> bool:
-    """Ask the model for a title until one has been applied, and never over a title the user typed.
-
-    Usually that is the first question; a later one when the first reply only asked for the user's location.
-    """
     if title_generated(chat):
         return False
     if first_turn:
         return True
     first_question = next((m.content for m in get_ordered_messages(chat) if m.role == "user"), "")
-    # Older chats may still carry a generic title from before; it counts as a fallback too.
     return chat.title == create_temporary_chat_title(first_question) or chat.title in GENERIC_TITLES
 
 
@@ -206,7 +196,6 @@ def build_llm_messages(
 
 
 def build_location_context(payload: ChatSendRequest) -> str:
-    # How the Cypher prompt learns where the user is: a named area, browser GPS, or nothing.
     if payload.location_name:
         return f"User location area: {payload.location_name.strip()}"
     if payload.latitude is not None and payload.longitude is not None:
@@ -263,8 +252,6 @@ def create_chat_history(
     return serialize_chat(chat)
 
 
-# Step 1 of sending a message: a quick rule-based screen (no LLM). The browser uses locationRequired to decide
-# whether to ask for GPS, and passes decisionToken to /messages so the screen is not repeated.
 @router.post("/preflight", response_model=ChatPreflightResponse)
 @trace_request
 def preflight_message(
@@ -310,7 +297,6 @@ def get_chat_history(
     return serialize_chat(get_chat_or_404(db, chat_id, user.id))
 
 
-# Step 2: answer the message, then save both sides of the turn.
 @router.post("/messages", response_model=ChatSendResponse)
 @trace_request
 def send_message(
@@ -326,7 +312,6 @@ def send_message(
             detail=user_response("interface.empty_message"),
         )
 
-    # Reuse the preflight decision when its token is valid; otherwise screen the message again.
     guardrail_started_at = perf_counter()
     prior_chat = get_chat_or_404(db, payload.chat_id, user.id) if payload.chat_id else None
     preflight_decision = verify_guardrail_token(payload.preflight_token, user_text, payload.chat_id)
@@ -343,7 +328,6 @@ def send_message(
         decision=preflight_decision.status,
     )
 
-    # A new chat is named after its first question until the model suggests a title.
     session_title = create_temporary_chat_title(user_text)
     first_turn = not payload.chat_id or not prior_chat.messages
     if payload.chat_id:
@@ -357,7 +341,6 @@ def send_message(
     llm_messages = build_llm_messages(chat, user_text)
     now = datetime.now(timezone.utc)
 
-    # The whole reply must be ready within the response budget, counted from the start of this request.
     generation_started_at = perf_counter()
     generation_status = "success"
     try:
@@ -373,7 +356,6 @@ def send_message(
         generation_status = "error"
         print(f"Assistant response generation failed: {exc}", flush=True)
         turn = AssistantTurn(user_response("errors.unexpected"))
-    # The model suggests the title while answering; it is applied once per chat.
     title = generated_title(turn.chat_title, user_text) if wants_title else None
     if title:
         chat.title = title
@@ -390,8 +372,6 @@ def send_message(
         now + timedelta(microseconds=1),
     )
 
-    # Save the turn: the user message, the reply with its map / buttons, and the title flag. The graph
-    # evidence is saved as pending and built once the answer is on its way (start_graph_job below).
     persist_started_at = perf_counter()
     if not payload.chat_id:
         db.add(chat)
@@ -456,7 +436,6 @@ def get_graph_evidence(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> GraphEvidenceRead:
-    """The browser asks this while an answer's graph evidence is pending."""
     message = db.scalar(
         select(ChatMessage)
         .join(ChatHistory)

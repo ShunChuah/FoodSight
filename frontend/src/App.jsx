@@ -22,7 +22,6 @@ function App() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/verify" element={<VerifyEmail />} />
-            {/* The chat dashboard is only for logged-in users. */}
             <Route element={<ProtectedRoute />}>
               <Route path="/chat" element={<DashboardPage />} />
             </Route>

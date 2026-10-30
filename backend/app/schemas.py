@@ -41,7 +41,6 @@ class ChatCreate(BaseModel):
 
 
 class ChatSendRequest(ChatMessageInput):
-    # chat_id is null for a draft new chat; backend creates the session on send.
     chat_id: int | None = None
     location_name: str | None = Field(default=None, max_length=160)
     latitude: float | None = Field(default=None, ge=-90, le=90)
@@ -89,7 +88,6 @@ class ChatMessageRead(BaseModel):
     mapImage: str | None = None
     mapData: dict | None = None
     graphData: dict | None = None
-    # None when the answer has no graph evidence; "pending" while it is built after the answer was sent.
     graphStatus: GraphStatus | None = None
     quickReplies: list[str] = Field(default_factory=list)
     createdAt: datetime
@@ -130,7 +128,6 @@ ThemeName = Literal["light", "dark"]
 
 
 class PreferencesRead(BaseModel):
-    # None until the user has picked a theme; the browser keeps its current one.
     theme: ThemeName | None = None
 
 

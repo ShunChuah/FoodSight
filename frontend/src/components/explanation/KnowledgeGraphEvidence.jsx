@@ -6,8 +6,6 @@ import "../../styles/explanation.css";
 const ZOOM_STEP = 1.25;
 const ACCENT = "#ff6129";
 
-// Cytoscape style sheet. Each node's colour, size and wrapped label come from its data
-// (graphPresentation.js); the name is written inside the circle, as in Neo4j Browser.
 function graphStyle(darkMode, fontFamily) {
   const line = darkMode ? "#52525b" : "#d4d4d8";
   return [
@@ -42,7 +40,6 @@ function graphStyle(darkMode, fontFamily) {
         "curve-style": "bezier",
         label: "data(label)",
         "font-size": 9,
-        // Relationship names would bury the picture when zoomed out; they appear once zoomed in.
         "min-zoomed-font-size": 10,
         color: darkMode ? "#a1a1a1" : "#71717a",
         "text-rotation": "autorotate",
@@ -51,7 +48,6 @@ function graphStyle(darkMode, fontFamily) {
         "text-background-padding": 2,
       },
     },
-    // A clicked node: its relationships are named and stand out, the rest of the graph fades.
     {
       selector: "node.is-selected",
       style: { "border-width": 3, "border-color": darkMode ? "#fafafa" : "#18181b" },
@@ -71,9 +67,6 @@ function graphStyle(darkMode, fontFamily) {
   ];
 }
 
-// Force-directed layout, as in Neo4j Browser: relationships pull nodes together and nodes push
-// each other apart, so each place becomes a flower of its facts and shared facts sit between
-// the places that have them. It starts from seedPositions, so an answer always looks the same.
 const LAYOUT = {
   name: "fcose",
   randomize: false,
@@ -91,19 +84,17 @@ const LAYOUT = {
 let fcoseRegistered = false;
 
 const GRAPH_PADDING = 30;
-const MIN_ZOOM_FACTOR = 0.25; // zoom out to a quarter of the fitted size
+const MIN_ZOOM_FACTOR = 0.25;
 const MAX_ZOOM_FACTOR = 4;
 
-// graphData: { nodes: [{ id, label, name, properties }], edges: [{ source, target, type }] }.
 function KnowledgeGraphEvidence({ graphData, darkMode = false }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
-  const resetRef = useRef(null); // puts nodes back where the layout placed them
+  const resetRef = useRef(null);
   const fontFamilyRef = useRef("sans-serif");
   const [status, setStatus] = useState("loading");
-  const [selectedId, setSelectedId] = useState(null); // the clicked node, highlighted with its links
+  const [selectedId, setSelectedId] = useState(null);
 
-  // 1. Create the graph once per graphData; load Cytoscape only when this tab is opened.
   useEffect(() => {
     let cancelled = false;
     let cy = null;
@@ -121,19 +112,14 @@ function KnowledgeGraphEvidence({ graphData, darkMode = false }) {
         cy = cytoscape({
           container: containerRef.current,
           elements: toCytoscapeElements(graphData, (text) => context.measureText(text).width),
-          // Sizes must be known before the layout runs; colours follow the theme below.
           style: graphStyle(false, fontFamilyRef.current),
           layout: LAYOUT,
-          // Drag nodes, drag the background to move the view, wheel or pinch to zoom.
           autounselectify: true,
           boxSelectionEnabled: false,
         });
-        // Part any circles the layout left touching.
         const spread = spreadOverlaps(cy.nodes().map((node) => ({ id: node.id(), ...node.position(), r: node.data("size") / 2 })));
         cy.nodes().positions((node) => spread.get(node.id()));
-        // Where the layout put each node, so Reset view can undo the user's dragging.
         const layoutPositions = Object.fromEntries(cy.nodes().map((node) => [node.id(), { ...node.position() }]));
-        // Fit the whole graph, then allow zooming out to a quarter of that size and in to 4x.
         const fitGraph = () => {
           cy.minZoom(0.01);
           cy.maxZoom(10);
@@ -147,7 +133,6 @@ function KnowledgeGraphEvidence({ graphData, darkMode = false }) {
           fitGraph();
         };
         fitGraph();
-        // Click a node to highlight it and its links; click the background to clear it.
         cy.on("tap", "node", (event) => setSelectedId(event.target.id()));
         cy.on("tap", (event) => {
           if (event.target === cy) setSelectedId(null);
@@ -166,12 +151,10 @@ function KnowledgeGraphEvidence({ graphData, darkMode = false }) {
     };
   }, [graphData]);
 
-  // 2. Follow the theme without redrawing the layout (keeps the user's zoom and position).
   useEffect(() => {
     if (status === "ready") cyRef.current?.style(graphStyle(darkMode, fontFamilyRef.current));
   }, [darkMode, status]);
 
-  // Outline the clicked node, name its relationships and fade everything it is not linked to.
   useEffect(() => {
     const cy = cyRef.current;
     if (status !== "ready" || !cy) return;
@@ -183,7 +166,6 @@ function KnowledgeGraphEvidence({ graphData, darkMode = false }) {
     cy.elements().not(node.closedNeighborhood()).addClass("is-faded");
   }, [selectedId, status]);
 
-  // 3. Buttons: zoom around the middle of the graph box, or reset nodes and zoom.
   const zoomBy = (factor) => {
     const cy = cyRef.current;
     if (cy) cy.zoom({ level: cy.zoom() * factor, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });

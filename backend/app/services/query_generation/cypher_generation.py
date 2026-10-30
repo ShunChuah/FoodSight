@@ -1,9 +1,6 @@
-"""Schema-aware Cypher generation: question -> one LLM call -> checked Cypher.
+# Schema-aware Cypher generation: question -> one LLM call -> checked Cypher.
+# The model's query is untrusted: check_cypher() must accept it before it runs.
 
-The prompt is built from ontology.json, categories.json, cypher_examples.json and query_assumptions.json.
-The model's query is untrusted: check_cypher() must accept it before it runs, and a rejected query can be
-retried once with the reason (see `previous`).
-"""
 import json
 import os
 import re
@@ -20,24 +17,18 @@ from ..shared.llm import LLMServiceError, call_llm, parse_json_object
 from .cypher_validation import GraphSchema, SchemaRelationship, validate_cypher
 from .proximity import coordinates_from_context, default_radius, explicit_radius_meters
 
-# Marks a plan whose answer is one restaurant's profile card (QueryPlan.requested_fields).
 RESTAURANT_DETAILS_FIELD = "restaurant_details"
-# Time budget for one generation call. Neo4j and the answer need about RESERVED_AFTER_GENERATION_SECONDS
-# afterwards; when less than MIN_GENERATION_SECONDS would be left for the model, generation is skipped.
 MAX_GENERATION_SECONDS = 9.0
 MIN_GENERATION_SECONDS = 2.5
 RESERVED_AFTER_GENERATION_SECONDS = 4.0
 MAX_QUERY_LENGTH = 6000
 MAX_MATCH_CLAUSES = 10
-# Most restaurants per answer and rows for area/group answers. The usual counts come from query_assumptions.json.
 RESTAURANT_LIMIT = 5
 GROUP_LIMIT = 10
-# Values the app sets when the user did not state them (query_assumptions.json). Only these are loosened when a
-# search finds nothing; values the user gave are never changed.
+# Values the app sets itself; only these are loosened when a search finds nothing.
 DEFAULT_RADIUS = "default_radius_m"
 DEFAULT_MIN_REVIEWS = "default_min_reviews"
-RATED_MINIMUM_REVIEWS = 20  # used when policy.ranking has no rated_minimum_reviews
-# Ranking metrics named in query_assumptions.json, written for this graph.
+RATED_MINIMUM_REVIEWS = 20
 RANKING_METRICS = {
     "Restaurant.average_rating": "highest rt.rating_score (Rating)",
     "Restaurant.review_count": "most rt.total_reviews (Rating)",
@@ -45,12 +36,9 @@ RANKING_METRICS = {
     "Location.distance_m": "shortest distance_m (needs the user's position or a named starting place)",
 }
 
-# query: run the Cypher. clarify: ask one question (reply) with quick-reply options. explain: answer a general
-# food question without the database (reply). decline: say what cannot be answered (reply), optionally with options.
 ACTIONS = ("query", "clarify", "explain", "decline")
 MAX_OPTIONS = 4
 
-# The JSON the model must return (sent as a structured-output schema, so the reply always parses).
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -77,7 +65,6 @@ RESPONSE_SCHEMA = {
     "required": ["action", "details", "reply", "options", "cypher", "parameters"],
     "additionalProperties": False,
 }
-# First question of a chat only: the same reply also names the chat.
 TITLED_RESPONSE_SCHEMA = {
     **RESPONSE_SCHEMA,
     "properties": {"chat_title": {"type": "string"}, **RESPONSE_SCHEMA["properties"]},
@@ -93,8 +80,7 @@ TITLE_RULE = (
     "\"McDonald's Competitors\" or \"Cheap Eats Near You\". Never repeat the question word for word."
 )
 
-# Fixed prompt text. schema_prompt() puts the ontology, vocabularies, defaults and examples between TASK and the
-# output rules; this part is identical for every question, so the LLM provider can cache it.
+# Fixed prompt text, identical for every question so the provider can cache it.
 TASK = """You turn one question about food and drink places in Petaling Jaya into one read-only Neo4j 5 Cypher query.
 Use only the graph described below. Read the vocabularies carefully: filters on a categorical property must use its exact values."""
 
@@ -165,22 +151,19 @@ datasets, properties, queries or the graph. When an action does not use a field,
 Return JSON only."""
 
 
-# What generate_cypher() returns to graph_answer.query_graph().
 @dataclass(frozen=True)
 class CypherResult:
-    # success (a validated query) | clarify | explain | cannot_answer (decline)
-    # | rejected_validation | invalid_json | skipped_deadline | <LLM error code>
     status: str
     plan: QueryPlan | None = None
     reply: str | None = None
     options: tuple[str, ...] = ()
-    details: bool = False  # the user asked about one particular restaurant
+    details: bool = False
     error: str | None = None
     cypher: str | None = None
     chat_title: str | None = None
 
 
-# Files behind the prompt. Each is read once per process (lru_cache): restart the backend after editing them.
+# Prompt files are read once per process: restart the backend after editing them.
 def ontology_path() -> Path:
     path = Path(os.getenv("ONTOLOGY_PATH", "app/knowledge_graph/ontology.json"))
     return path if path.is_absolute() else Path(__file__).resolve().parents[3] / path
@@ -193,14 +176,12 @@ def load_ontology() -> dict:
 
 @lru_cache(maxsize=1)
 def load_vocabulary() -> dict:
-    """The categories file named by the ontology's vocabulary_source, next to the ontology."""
     source = ontology_path().parent / load_ontology()["vocabulary_source"]
     return json.loads(source.read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=1)
 def load_examples() -> list[dict]:
-    """Verified question -> Cypher pairs, next to the ontology (optional file)."""
     path = ontology_path().parent / os.getenv("CYPHER_EXAMPLES_FILE", "cypher_examples.json")
     if not path.exists():
         return []
@@ -209,14 +190,12 @@ def load_examples() -> list[dict]:
 
 @lru_cache(maxsize=1)
 def ontology_graph_schema() -> GraphSchema:
-    """The ontology in the shape validate_cypher() checks against."""
     ontology = load_ontology()
     nodes = {label: set(node["properties"]) for label, node in ontology["nodes"].items()}
     relationships = [
         SchemaRelationship(rel["from"], name, rel["to"])
         for name, rel in ontology["relationships"].items()
     ]
-    # Undirected relationships may be written in either direction.
     for name, rel in ontology["relationships"].items():
         if rel["pattern"].endswith(f"]-(:{rel['to']})"):
             relationships.append(SchemaRelationship(rel["to"], name, rel["from"]))
@@ -225,7 +204,6 @@ def ontology_graph_schema() -> GraphSchema:
 
 @lru_cache(maxsize=1)
 def vocabulary_bindings() -> dict[tuple[str, str], str]:
-    """(label, property) -> categories column, e.g. ("Cuisine", "name") -> "cuisine.name"."""
     return {
         (label, prop): spec["vocabulary"]
         for label, node in load_ontology()["nodes"].items()
@@ -239,12 +217,6 @@ def allowed_values(column: str) -> set[str]:
 
 
 def normalise_area_patterns(cypher: str, parameters: dict[str, Any]) -> dict[str, Any]:
-    """Fix frequent parameter slips the model makes.
-
-    - `a.name =~ $pattern`: a doubled backslash, and "SS2" without its space.
-    - `toLower(a.name) CONTAINS toLower($place)`: "Bandar Utama (PJU 6)" -> "Bandar Utama".
-    - Numbers sent as text and compared with < or >= ("1000") become numbers.
-    """
     parameters = dict(parameters)
     for name in re.findall(r"=~\s*\$(\w+)", cypher):
         pattern = parameters.get(name)
@@ -265,12 +237,6 @@ def normalise_area_patterns(cypher: str, parameters: dict[str, Any]) -> dict[str
 
 @lru_cache(maxsize=1)
 def schema_prompt() -> str:
-    """Static part of the prompt: the graph, its vocabularies and the rules.
-
-    Only what helps write Cypher is sent. PostgreSQL details (pg_type, defaults,
-    constraints, application tables) and labelling-only details (osm tags,
-    filled_by, origin_country) stay in the files.
-    """
     ontology = load_ontology()
     columns = load_vocabulary()["columns"]
     lines = [TASK, "", "# Context"]
@@ -316,7 +282,6 @@ def schema_prompt() -> str:
 
 
 def defaults_prompt() -> str:
-    """What to assume when the user leaves something out, from query_assumptions.json."""
     proximity, ranking, results = policy("proximity"), policy("ranking"), policy("results")
     venues = ", ".join(f"{venue} {_km(radius)}" for venue, radius in proximity["venue_radius_meters"].items())
     choices: dict[str, list[str]] = {}
@@ -388,7 +353,6 @@ def question_prompt(
     want_title: bool = False,
     may_clarify: bool = True,
 ) -> str:
-    """Dynamic part of the prompt for one request."""
     parts = []
     if conversation_context and conversation_context != "No previous conversation.":
         parts.append("Previous conversation (use it to resolve follow-ups such as 'what about halal ones?'):\n"
@@ -412,6 +376,7 @@ def question_prompt(
     return "\n\n".join(parts)
 
 
+# Entry point for LLM call 1. Never raises; previous = (rejected query, reason) for the one retry.
 def generate_cypher(
     question: str,
     conversation_context: str,
@@ -422,10 +387,6 @@ def generate_cypher(
     want_title: bool = False,
     may_clarify: bool = True,
 ) -> CypherResult:
-    """Ask the model what to do (query, clarify, explain or decline) and check any query. Never raises.
-
-    previous: (rejected query, reason) for the one corrected attempt.
-    """
     started_at = perf_counter()
     result = _generate(question, conversation_context, location_context, deadline, previous, want_title, may_clarify)
     log_timing("cypher.generation", started_at, status=result.status, retry=bool(previous))
@@ -434,10 +395,8 @@ def generate_cypher(
 
 def _generate(question, conversation_context, location_context, deadline, previous, want_title,
               may_clarify=True) -> CypherResult:
-    # 1. Ask the model, unless too little of the response budget is left.
     timeout = MAX_GENERATION_SECONDS
     if deadline is not None:
-        # Leave time to run the query and write the answer within the deadline.
         timeout = min(timeout, deadline - perf_counter() - RESERVED_AFTER_GENERATION_SECONDS)
         if timeout < MIN_GENERATION_SECONDS:
             return CypherResult("skipped_deadline")
@@ -451,14 +410,13 @@ def _generate(question, conversation_context, location_context, deadline, previo
         )
     except LLMServiceError as exc:
         return CypherResult(exc.code or "llm_error", error=str(exc))
-    # 2. Read the reply. A question, an explanation or a decline goes straight back to the user.
     payload = parse_json_object(raw)
     if not payload or not isinstance(payload.get("cypher"), str):
         return CypherResult("invalid_json", error="The model did not return the expected JSON.")
     title = payload.get("chat_title") if want_title and isinstance(payload.get("chat_title"), str) else None
     reply = payload["reply"].strip() if isinstance(payload.get("reply"), str) else ""
     if not payload["cypher"].strip() and re.match(r"(?:OPTIONAL\s+)?MATCH\b", reply, flags=re.IGNORECASE):
-        payload["cypher"], reply = reply, ""  # the query was written in the reply field
+        payload["cypher"], reply = reply, ""
     options = tuple(dict.fromkeys(
         " ".join(option.split())[:80] for option in payload.get("options") or []
         if isinstance(option, str) and option.strip()))[:MAX_OPTIONS]
@@ -466,17 +424,15 @@ def _generate(question, conversation_context, location_context, deadline, previo
     incomplete = (action == "decline" and not reply) or (action == "explain" and not reply) or \
         (action == "clarify" and (not reply or len(options) < 2))
     if incomplete and payload["cypher"].strip():
-        action = "query"  # a query labelled as another action, without that action's text: run it
+        action = "query"
     if action == "clarify" and reply and len(options) >= 2:
         return CypherResult("clarify", reply=reply, options=options, chat_title=title)
     if action == "explain" and reply:
         return CypherResult("explain", reply=reply, chat_title=title)
     if action != "query" or not payload["cypher"].strip():
-        # decline, or a clarify/explain without the text it needs
         return CypherResult("cannot_answer", reply=reply or None, options=options if action == "decline" else (),
                             chat_title=title)
 
-    # 3. A query: fix the common slips, collect its parameters and fill in the app's default values.
     cypher = repair_cypher(clean_cypher(payload["cypher"]))
     parameters = {
         item["name"].lstrip("$"): item["value"]
@@ -492,9 +448,7 @@ def _generate(question, conversation_context, location_context, deadline, previo
         parameters = _apostrophe_free_words(parameters, cypher)
     kg_debug("Cypher (unvalidated)", {"cypher": cypher, "parameters": parameters})
 
-    # 4. Check it. A rejected query goes back to the caller with the reason, for one corrected attempt.
     if not coordinates and re.search(r"\$(?:latitude|longitude)\b", cypher):
-        # The user has not shared a position: any $latitude/$longitude value was made up by the model.
         error = ("The user's position is not available, so $latitude and $longitude cannot be used. "
                  "Search the named area (or all of Petaling Jaya) without distances.")
     else:
@@ -502,7 +456,7 @@ def _generate(question, conversation_context, location_context, deadline, previo
     if error:
         kg_debug("Cypher rejected", error)
         return CypherResult("rejected_validation", error=error, cypher=cypher, chat_title=title)
-    # Deterministic fixes after validation: the model's own query is what was checked.
+    # Fixed after validation, so the check sees the model's own query.
     parameters = normalise_area_patterns(cypher, parameters)
     details = payload.get("details") is True
     return CypherResult("success", plan=build_plan(cypher, parameters, details), cypher=cypher, chat_title=title,
@@ -511,21 +465,14 @@ def _generate(question, conversation_context, location_context, deadline, previo
 
 def apply_defaults(cypher: str, parameters: dict[str, Any], question: str,
                    conversation_context: str = "") -> tuple[str, dict[str, Any]]:
-    """Set the app's default values (query_assumptions.json) and keep them apart from the user's own values.
-
-    A search radius the user did not state becomes $default_radius_m, whatever value the model guessed, so it can be
-    widened later; a radius the user did state is never marked as a default.
-    """
     parameters = {name: value for name, value in parameters.items() if name not in (DEFAULT_RADIUS, DEFAULT_MIN_REVIEWS)}
     stated = explicit_radius_meters(question)
     for name in dict.fromkeys(_radius_parameters(cypher)):
         if stated is not None:
-            # The user gave a distance: use it as their value.
             if name == DEFAULT_RADIUS:
                 cypher, name = re.sub(rf"\${DEFAULT_RADIUS}\b", "$radius_m", cypher), "radius_m"
             parameters[name] = stated
         elif name != DEFAULT_RADIUS and parameters.get(name) not in _earlier_radii(conversation_context):
-            # A distance the user never gave: the model's guess becomes the default.
             cypher = re.sub(rf"\${name}\b", f"${DEFAULT_RADIUS}", cypher)
             parameters.pop(name, None)
     if re.search(rf"\${DEFAULT_RADIUS}\b", cypher):
@@ -536,7 +483,6 @@ def apply_defaults(cypher: str, parameters: dict[str, Any], question: str,
 
 
 def _radius_parameters(cypher: str) -> list[str]:
-    """Parameters that cap a distance: distance_m <= $x, or point.distance(...) <= $x."""
     nested = r"\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)"
     return re.findall(rf"distance\w*(?:\.\w+)?\s*(?:{nested})?\s*<=?\s*\$(\w+)", cypher, flags=re.IGNORECASE)
 
@@ -546,13 +492,11 @@ def _user_turns(conversation_context: str) -> list[str]:
 
 
 def _earlier_radii(conversation_context: str) -> set[int]:
-    """Distances the user gave earlier in the chat (a follow-up keeps them)."""
     return {radius for turn in _user_turns(conversation_context)
             if (radius := explicit_radius_meters(turn)) is not None}
 
 
 def _default_radius(question: str, conversation_context: str) -> int:
-    """The policy radius for this request; a short follow-up ("any halal ones?") keeps the earlier request's kind."""
     general = policy("proximity")["default_radius_meters"]
     for turn in [question, *reversed(_user_turns(conversation_context))]:
         radius = default_radius(turn)
@@ -562,11 +506,6 @@ def _default_radius(question: str, conversation_context: str) -> int:
 
 
 def relaxed_parameters(parameters: dict[str, Any]) -> list[tuple[dict[str, Any], int | None]]:
-    """Looser versions of the app's own defaults, in the order to try them after a search finds nothing.
-
-    Each item is (parameters, the widened radius or None). The review minimum goes first (same distance), then the
-    radius widens through policy.alternatives.automatic_radius_steps_meters. The user's values are never touched.
-    """
     settings = policy("alternatives")
     if not settings["enabled"]:
         return []
@@ -584,10 +523,6 @@ def relaxed_parameters(parameters: dict[str, Any]) -> list[tuple[dict[str, Any],
 
 
 def clean_cypher(cypher: str) -> str:
-    """Remove comments (a ';' inside one looks like a second statement) and a trailing ';'.
-
-    Also turns a query written with literal "\\n" text (instead of line breaks) back into lines.
-    """
     if "\n" not in cypher and "\\n" in cypher:
         cypher = cypher.replace("\\n", "\n").replace("\\t", " ")
     cypher = re.sub(r"/\*[\s\S]*?\*/", "", cypher)
@@ -596,7 +531,6 @@ def clean_cypher(cypher: str) -> str:
 
 
 def build_plan(cypher: str, parameters: dict[str, Any], details: bool = False) -> QueryPlan:
-    """details: the user asked about one particular restaurant, so the answer shows its profile card."""
     maximum = RESTAURANT_LIMIT if returns_restaurants(cypher) else GROUP_LIMIT
     limits = [int(value) for value in re.findall(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)]
     return QueryPlan(
@@ -607,13 +541,11 @@ def build_plan(cypher: str, parameters: dict[str, Any], details: bool = False) -
 
 
 def returns_restaurants(cypher: str) -> bool:
-    """True when the final RETURN lists restaurants (it returns restaurant_id)."""
     final_return = re.split(r"\bRETURN\b", cypher, flags=re.IGNORECASE)[-1]
     return bool(re.search(r"\bAS\s+restaurant_id\b", final_return, flags=re.IGNORECASE))
 
 
 def undirected_pattern_issues(cypher: str) -> list[str]:
-    """validate_cypher() checks arrows only; `(:Cuisine)-[:IN_AREA]-()` is impossible in either direction."""
     relationships = ontology_graph_schema().relationships
     issues = []
     sides = [
@@ -628,9 +560,7 @@ def undirected_pattern_issues(cypher: str) -> list[str]:
 
 
 def aggregate_issues(cypher: str) -> list[str]:
-    """avg()/sum()/stDev() of a collect()ed list fails in Neo4j ("expected Float ... but was List")."""
     collected = set(re.findall(r"\bcollect\s*\([^)]*\)\s+AS\s+([A-Za-z_]\w*)", cypher, flags=re.IGNORECASE))
-    # avg(scores), avg(x IN scores | x) and avg([s IN scores WHERE ...]) all pass a list
     misused = sorted({name for name in collected if re.search(
         rf"\b(?:avg|sum|stDev|stDevP|min|max|percentileCont|percentileDisc)\s*\(\s*(?:\[\s*)?"
         rf"(?:\w+\s+IN\s+)?{re.escape(name)}\b", cypher, flags=re.IGNORECASE)})
@@ -648,7 +578,6 @@ def parameter_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
     if invented:
         issues.append(f"Do not invent coordinates (${', $'.join(invented)}). Use only $latitude and $longitude, the "
                       "user's position; to search a named area, filter on the Area name instead.")
-    # all(word IN $p ...) needs a list of words; several named places need any(words IN $places WHERE all(...)).
     for name in re.findall(r"\ball\s*\(\s*\w+\s+IN\s+\$(\w+)", cypher, flags=re.IGNORECASE):
         value = parameters.get(name)
         if isinstance(value, list) and any(isinstance(item, list) for item in value):
@@ -658,15 +587,8 @@ def parameter_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
 
 
 def repair_cypher(cypher: str) -> str:
-    """Fix a frequent, safe-to-fix mistake instead of spending a retry on it.
-
-    `RETURN DISTINCT r.restaurant_id AS restaurant_id ... ORDER BY rt.rating_score` is rejected by Neo4j.
-    Restaurant rows are de-duplicated by restaurant_id afterwards anyway, so DISTINCT can go when the
-    RETURN has no aggregation. Also turns an SQL-style quote inside a string ('mcdonald''s') into Cypher's \\',
-    and an OPTIONAL MATCH whose WHERE filters earlier variables into a MATCH (see required_optional_matches).
-    """
     cypher = re.sub(r"(?<=[A-Za-z])''(?=[A-Za-z])", r"\\'", cypher)
-    cypher = re.sub(r"\s+NULLS\s+(?:LAST|FIRST)\b", "", cypher, flags=re.IGNORECASE)  # not supported by Neo4j
+    cypher = re.sub(r"\s+NULLS\s+(?:LAST|FIRST)\b", "", cypher, flags=re.IGNORECASE)
     cypher = _nulls_last(cypher)
     cypher = _bounded_limit(cypher)
     cypher = _without_junk_patterns(cypher)
@@ -685,14 +607,11 @@ def repair_cypher(cypher: str) -> str:
     return repaired
 
 
-# Fragments the model sometimes leaves on a pattern: an empty or "?" relationship to an anonymous node, as in
-# (:BusinessProfile {halal_status: 'halal'})-[]-(). They are never meant, and "-[]-()" silently removes rows.
+# Junk the model leaves on a pattern ("-[]-()"), which silently removes rows.
 JUNK_PATTERN = re.compile(r"\s*<?-\[\s*:?\s*\??\s*\]-?>?\s*\(\s*\)|\s*-\[:\w*\]\?<?-\(\s*\)")
-# "WITH ..., r r RETURN": a variable written twice before the next clause.
 DOUBLED_VARIABLE = re.compile(r"\b([A-Za-z_]\w*)\s+\1(?=\s+(?:RETURN|WITH|ORDER|WHERE|MATCH|OPTIONAL|UNWIND)\b)")
 
 
-# (:PriceRange {tier: 'mid'})-[:PRICED_AT]-(): the relationship just matched, repeated to an anonymous node.
 REPEATED_RELATIONSHIP = re.compile(r"(-\[:(\w+)\]->?\([^()]*\))\s*<?-\[:\2\]->?\(\s*\)")
 
 
@@ -701,26 +620,19 @@ def _without_junk_patterns(cypher: str) -> str:
     return DOUBLED_VARIABLE.sub(r"\1", cypher)
 
 
-# toLower(r.name + ' ' + coalesce(a.name, '')) in the name-matching pattern (see the output rules).
 NAME_LABEL = re.compile(r"toLower\(\s*(\w+\.name\s*\+\s*' '\s*\+\s*coalesce\(\s*\w+\.name\s*,\s*''\s*\))\s*\)")
 APOSTROPHES = ("'", "\u2019", " ")
 
 
 def _apostrophe_free_labels(cypher: str) -> str:
-    """Compare names without apostrophes and spaces: "mcdonalds" finds "McDonald's", "1 utama" finds "1Utama"."""
     return NAME_LABEL.sub(
         lambda m: f"toLower(replace(replace(replace({m.group(1)}, \"'\", ''), '\u2019', ''), ' ', ''))", cypher)
 
 
-# all(word IN $name_words WHERE label CONTAINS word), any(words IN $places WHERE all(...)).
 LABEL_WORDS = re.compile(r"\b\w+\s+IN\s+\$(\w+)\s+WHERE\s+(?:label\s+CONTAINS|all\s*\()", re.IGNORECASE)
 
 
 def _apostrophe_free_words(parameters: dict[str, Any], cypher: str) -> dict[str, Any]:
-    """The words matched against a name label, without apostrophes or spaces (to match _apostrophe_free_labels).
-
-    Only those parameters change: vocabulary values such as 'Chinese (Malaysia)' keep their spaces.
-    """
     names = set(LABEL_WORDS.findall(cypher))
 
     def clean(value: Any) -> Any:
@@ -733,8 +645,8 @@ def _apostrophe_free_words(parameters: dict[str, Any], cypher: str) -> dict[str,
             for name, value in parameters.items()}
 
 
+# `ORDER BY rt.rating_score DESC` puts places without a rating first in Neo4j; coalesce puts them last.
 def _nulls_last(cypher: str) -> str:
-    """`ORDER BY rt.rating_score DESC` puts places without a rating first in Neo4j; coalesce puts them last."""
     def fix(match: re.Match) -> str:
         items = re.split(r",(?![^()]*\))", match.group(2))
         fixed = [re.sub(r"^(\s*)([A-Za-z_]\w*\.[A-Za-z_]\w*)(\s+DESC(?:ENDING)?\b)", r"\1coalesce(\2, -1)\3", item,
@@ -745,7 +657,6 @@ def _nulls_last(cypher: str) -> str:
 
 
 def _bounded_limit(cypher: str) -> str:
-    """Lower a LIMIT above the allowed rows to the maximum, and add one when the query has none."""
     maximum = RESTAURANT_LIMIT if returns_restaurants(cypher) else GROUP_LIMIT
     cypher = re.sub(r"\bLIMIT\s+(\d+)\b", lambda m: f"LIMIT {min(int(m.group(1)), maximum)}", cypher,
                     flags=re.IGNORECASE)
@@ -756,7 +667,6 @@ def _bounded_limit(cypher: str) -> str:
 
 
 def order_by_issues(cypher: str) -> list[str]:
-    """Neo4j rejects ORDER BY x.property after RETURN DISTINCT or an aggregating RETURN."""
     final = re.split(r"\bRETURN\b", cypher, flags=re.IGNORECASE)[-1]
     parts = re.split(r"\bORDER\s+BY\b", final, maxsplit=1, flags=re.IGNORECASE)
     projection, ordering = parts[0], parts[1] if len(parts) > 1 else ""
@@ -782,12 +692,9 @@ def limit_issues(cypher: str) -> list[str]:
 
 
 def check_cypher(cypher: str, parameters: dict[str, Any]) -> str | None:
-    """Return a message for the model when the query must not run, else None."""
     started_at = perf_counter()
-    # Safety first (read-only, known labels / properties / directions, LIMIT), then mistakes the model makes often.
     valid, error = validate_cypher(cypher, ontology_graph_schema(), parameters)
     if not valid and re.search(r"\bUNION\b", cypher, flags=re.IGNORECASE):
-        # Say exactly what to change, so the corrected attempt does not repeat it.
         error = ("UNION is not allowed. Return one row with several columns instead "
                  "(for example RETURN chains, independents, total).")
     if valid and "`" in cypher:
@@ -808,29 +715,18 @@ def check_cypher(cypher: str, parameters: dict[str, Any]) -> str | None:
     return None if valid else error
 
 
-# Regexes for reading a query clause by clause (quoted strings are skipped).
 QUOTED = r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\""
 CLAUSE = re.compile(r"\b(OPTIONAL\s+MATCH|MATCH|WHERE|WITH|RETURN|UNWIND|ORDER\s+BY|LIMIT|SKIP)\b", re.IGNORECASE)
 
 
+# A WHERE after OPTIONAL MATCH that mentions earlier variables never removes rows: the condition is silently ignored.
 def optional_match_filter_issues(cypher: str) -> list[str]:
-    """A WHERE after OPTIONAL MATCH that mentions earlier variables never removes rows.
-
-    `OPTIONAL MATCH (r)-[:HAS_HOURS]->(h) WHERE r.business_status = 'OPERATIONAL'`
-    keeps every r, so the user's condition is silently ignored.
-    """
     return [f"The WHERE after OPTIONAL MATCH mentions {', '.join(earlier)}, which an earlier clause matched; "
             "it will not remove any rows. Move that condition to a WHERE after MATCH or WITH."
             for _, earlier in _filtering_optional_matches(cypher)]
 
 
 def required_optional_matches(cypher: str) -> str:
-    """Turn an OPTIONAL MATCH used as a filter into a MATCH, so the filter applies.
-
-    That is an OPTIONAL MATCH whose WHERE mentions earlier variables, or only its own new ones when nothing later
-    uses them. The graph is treated as complete (every restaurant has its profile, rating, price and hours), so no
-    restaurant is lost that the filter would have kept.
-    """
     starts = {start for start, _ in _filtering_optional_matches(cypher)} | set(_unused_optional_filters(cypher))
     for start in sorted(starts, reverse=True):
         cypher = cypher[:start] + re.sub(r"^OPTIONAL\s+", "", cypher[start:], flags=re.IGNORECASE)
@@ -838,7 +734,6 @@ def required_optional_matches(cypher: str) -> str:
 
 
 def _unused_optional_filters(cypher: str) -> list[int]:
-    """Positions of OPTIONAL MATCHes whose WHERE filters only new variables that nothing after it uses."""
     text = re.sub(QUOTED, lambda match: "'" + " " * (len(match.group()) - 2) + "'", cypher)
     keywords = list(CLAUSE.finditer(text))
     bound: set[str] = set()
@@ -863,8 +758,6 @@ def _unused_optional_filters(cypher: str) -> list[int]:
 
 
 def _filtering_optional_matches(cypher: str) -> list[tuple[int, list[str]]]:
-    """(position of the OPTIONAL MATCH, earlier variables its WHERE mentions) for each misused OPTIONAL MATCH."""
-    # Quoted text is blanked out (same length) so keywords inside strings are not read as clauses.
     text = re.sub(QUOTED, lambda match: "'" + " " * (len(match.group()) - 2) + "'", cypher)
     keywords = list(CLAUSE.finditer(text))
     bound: set[str] = set()
@@ -891,10 +784,9 @@ def _filtering_optional_matches(cypher: str) -> list[tuple[int, list[str]]]:
 
 
 def vocabulary_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
-    """Values compared with a categorical property that are not in its vocabulary."""
     bindings = vocabulary_bindings()
     variables = dict(re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*)", cypher))
-    used: list[tuple[str, str, Any]] = []  # (label, property, value)
+    used: list[tuple[str, str, Any]] = []
 
     def add(variable: str, prop: str, value: Any) -> None:
         label = variables.get(variable)
@@ -904,24 +796,19 @@ def vocabulary_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
     def literals(text: str) -> list[str]:
         return [a if a else b for a, b in re.findall(QUOTED, text)]
 
-    # x.prop = 'value'   x.prop <> 'value'
     for variable, prop, single, double in re.findall(
             rf"\b(\w+)\.(\w+)\s*(?:=|<>)\s*(?:{QUOTED})", cypher):
         add(variable, prop, single or double)
-    # x.prop IN ['a', 'b']
     for variable, prop, items in re.findall(r"\b(\w+)\.(\w+)\s+IN\s+\[([^\]]*)\]", cypher, flags=re.IGNORECASE):
         for value in literals(items):
             add(variable, prop, value)
-    # x.prop = $p   x.prop IN $p
     for variable, prop, name in re.findall(r"\b(\w+)\.(\w+)\s*(?:=|<>|\bIN\b)\s*\$(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, parameters.get(name))
-    # 'value' IN split(x.prop, ', ')   $p IN split(x.prop, ', ')
     for single, double, variable, prop in re.findall(
             rf"(?:{QUOTED})\s+IN\s+split\(\s*(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, single or double)
     for name, variable, prop in re.findall(r"\$(\w+)\s+IN\s+split\(\s*(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, parameters.get(name))
-    # (x:Label {prop: 'value', other: $p})
     for variable, label, body in re.findall(r"\(\s*(\w*)\s*:\s*(\w+)\s*\{([^}]*)\}", cypher):
         for prop, single, double, name in re.findall(rf"(\w+)\s*:\s*(?:(?:{QUOTED})|\$(\w+))", body):
             if (label, prop) in bindings:

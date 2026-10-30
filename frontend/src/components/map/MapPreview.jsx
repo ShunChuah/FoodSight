@@ -10,7 +10,6 @@ const tileUrl = import.meta.env.VITE_MAP_TILE_URL || "https://tile.openstreetmap
 const attribution = import.meta.env.VITE_MAP_TILE_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 const NEUTRAL_CENTER = [3.1073, 101.6067];
 
-// Show every restaurant marker, and keep the map sized to its panel.
 function FitToRestaurants({ positions }) {
   const map = useMap();
   useEffect(() => {
@@ -45,7 +44,6 @@ function MapPreview({ mapData }) {
       <FitToRestaurants positions={positions} />
       {features.map((feature, index) => {
         const data = feature.properties ?? {};
-        // Answers saved before markers stopped being numbered keep their 1, 2, 3… labels; names stay React text.
         const rank = typeof data.marker_label === "string" && /^[0-9]{1,3}$/.test(data.marker_label) ? data.marker_label : null;
         const details = <><Tooltip>{data.label}</Tooltip><Popup><RestaurantDetails data={data} /></Popup></>;
         return rank

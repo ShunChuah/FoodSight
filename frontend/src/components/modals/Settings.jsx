@@ -38,8 +38,6 @@ function Settings({
   }, []);
 
   useEffect(() => {
-    // When the confirmation closes, return focus to the menu (the button that opened it,
-    // or the heading once there are no chats left to clear).
     if (wasConfirmingRef.current && !confirmingClear) {
       const button = clearButtonRef.current;
       (button && !button.disabled ? button : headingRef.current)?.focus();
@@ -91,7 +89,6 @@ function Settings({
         backdropPointerRef.current = false;
       }}
     >
-      {/* While the confirmation is open, the menu behind it can't be focused or clicked. */}
       <div className="settings-content" inert={confirmingClear}>
         <h2 ref={headingRef} id={titleId} tabIndex={-1}>Settings</h2>
 

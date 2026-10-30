@@ -1,20 +1,5 @@
-"""Knowledge Graph Evidence for View Details (FR-58: graph visualisation).
+# Knowledge Graph Evidence: the Neo4j subgraph an answer was built from, drawn as stored.
 
-Reads from Neo4j the part of the graph an answer was built from and draws it as stored: the real
-nodes, labels, relationship types and property values, nothing the app works out (distances, "open now").
-For each restaurant in the answer, the nodes its details come from, by every relationship Neo4j has
-between them (some pairs have two, such as PRICED_AT and HAS_PRICE_RANGE to the same PriceRange):
-
-    (Restaurant)-[:LOCATED_IN|LOCATED_AT]->(Location)-[:IN_AREA|LOCATED_IN]->(Area)-[:IN_CITY|PART_OF]->(City)
-    (Restaurant)-[:PRICED_AT|HAS_PRICE_RANGE]->(PriceRange)
-    (Restaurant)-[:HAS_RATING|HAS_PROFILE|HAS_HOURS]->(Rating|BusinessProfile|OperatingHours)
-    (Restaurant)-[:SERVES|HAS_FACILITY]->(Cuisine|Facility)
-    (Restaurant)-[:COMPETES_WITH]-(Restaurant)      only for "competitors of ..." answers
-
-For an analysis answer about areas: (Area)-[:IN_CITY|PART_OF]->(City). Each Neo4j node is drawn once, so
-places that share a Cuisine, Facility, Area or City all connect to the same node; reviews are not drawn
-(no answer reads them). The graph is built after the answer has been sent (chatbot/graph_jobs.py).
-"""
 from typing import Any
 
 from ..shared.neo4j import execute_cypher
@@ -23,7 +8,6 @@ from .graph_answer import _plain, _today
 MAX_RESTAURANTS = 10
 MAX_NODES = 80
 
-# Fixed queries (their plans stay cached in Neo4j). Each row is one relationship, or a node alone (rel null).
 RESTAURANT_SUBGRAPH = """
 UNWIND range(0, size($ids) - 1) AS position
 MATCH (r:Restaurant) WHERE r.restaurant_id = $ids[position]
@@ -63,7 +47,6 @@ RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, properties(a) AS
 ORDER BY position
 """.strip()
 
-# What a node without a name shows inside its circle: its main stored value, unformatted.
 CAPTION_PROPERTIES = {
     "Rating": "rating_score",
     "PriceRange": "tier",
@@ -73,18 +56,13 @@ CAPTION_PROPERTIES = {
 
 
 class GraphEvidenceError(RuntimeError):
-    """Neo4j could not be read; the graph job reports the graph as failed."""
+    pass
 
 
 def build_graph_evidence(records: list[dict[str, Any]]) -> dict | None:
-    """Return {"nodes": [...], "edges": [...]} as stored in Neo4j, or None when there is nothing to draw.
-
-    records are the rows the answer was built from: restaurant rows (restaurant_id) or area rows (area_name).
-    """
     rows = [row for row in records[:MAX_RESTAURANTS] if isinstance(row, dict)]
     ids = list(dict.fromkeys(row["restaurant_id"] for row in rows if row.get("restaurant_id") is not None))
     if ids:
-        # Only an answer about competitors used COMPETES_WITH, so only then is it evidence.
         anchors = list(dict.fromkeys(row["anchor_id"] for row in rows
                                      if row.get("competitor_of") and row.get("anchor_id") is not None))
         result = execute_cypher(RESTAURANT_SUBGRAPH, {"ids": ids, "anchors": anchors})
@@ -106,7 +84,7 @@ def build_graph_evidence(records: list[dict[str, Any]]) -> dict | None:
             return False
         if node_id not in nodes:
             if len(nodes) >= MAX_NODES:
-                return False  # keep the picture readable
+                return False
             properties = _plain(properties or {})
             nodes[node_id] = {"id": node_id, "label": label, "name": _caption(label, properties),
                               "properties": properties}
@@ -124,7 +102,6 @@ def build_graph_evidence(records: list[dict[str, Any]]) -> dict | None:
 
 
 def _caption(label: str | None, properties: dict) -> str:
-    """The node's name; for a node without one, its main stored value (today's hours for OperatingHours)."""
     field = "name" if properties.get("name") not in (None, "") else (
         _today() if label == "OperatingHours" else CAPTION_PROPERTIES.get(label))
     value = properties.get(field) if field else None

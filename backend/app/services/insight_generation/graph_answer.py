@@ -1,8 +1,5 @@
-"""Run the generated Cypher (query_graph) and write the answer from its rows (generate_answer).
+# Runs the generated Cypher (query_graph) and writes the answer from its rows (generate_answer).
 
-The generated query returns only restaurant_id (plus anything it computed, such as distance_m); the restaurant
-details come from one fixed query (RESTAURANT_DETAILS), so every answer has the same facts to work with.
-"""
 import json
 import os
 import re
@@ -34,7 +31,7 @@ from .presentation import comparison_evidence, distance_label, money_label
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
-# Fixed query (its plan stays cached in Neo4j): details for the restaurants a generated query returned.
+# Details for the restaurant_ids a generated query returns (generated queries return ids only).
 RESTAURANT_DETAILS = """
 UNWIND range(0, size($ids) - 1) AS position
 MATCH (r:Restaurant) WHERE r.restaurant_id = $ids[position]
@@ -57,7 +54,6 @@ RETURN position, r.restaurant_id AS restaurant_id, r.name AS restaurant_name, r.
 ORDER BY position
 """.strip()
 
-# Columns of RESTAURANT_DETAILS (and the details added to it); the answer model gets them in a fixed shape.
 DETAIL_COLUMNS = {
     "position", "restaurant_id", "restaurant_name", "venue_type", "business_status", "latitude", "longitude", "area",
     "average_rating", "review_count", "average_price", "price_tier", "halal_status", "restaurant_type", "good_for",
@@ -65,7 +61,6 @@ DETAIL_COLUMNS = {
     "phone", "website", "address", "open_now", "weekly_hours",
 }
 
-# Instructions for the answer model (LLM call 2). One of the *_FORMAT texts below is added, depending on the rows.
 ANSWER_INSTRUCTIONS = """
 You are FoodSight, a friendly local food guide for Petaling Jaya, Malaysia. Write a warm, natural reply to the
 user's question using only the supplied evidence.
@@ -100,7 +95,6 @@ Rules:
 - Do not use bold or other formatting; the app formats names and facts itself.
 """.strip()
 
-# Several places (a search, list or comparison): each description carries the useful facts itself.
 LIST_INTRODUCTION = "- introduction: one friendly sentence that answers the question. Do not list names or numbers here."
 LIST_FORMAT = """
 Return JSON only with exactly this shape:
@@ -116,14 +110,11 @@ Return JSON only with exactly this shape:
   Name the places you mention; never write record ids such as R1. Use "" when there is no useful tip.
 """.strip()
 
-# Places the user named and wants compared: the introduction gives the verdict with the deciding facts.
 COMPARE_FORMAT = LIST_FORMAT.replace(LIST_INTRODUCTION, """- introduction: one or two sentences that answer the comparison
   directly, naming the places and the facts that decide it (for example "KFC Bandar Utama is the cheaper pick at
   around RM15 on average, against around RM35 at The Port."). When they are about the same, say so plainly. When a
   brand has several branches, compare the brand and mention the branches only if they differ.""")
 
-# One restaurant the user asked about: the model answers the question first and picks the details that back it up
-# (all of them when the user asks about the place in general); the app lists those details below the answer.
 CARD_FIELDS = ("About", "Rating", "Price", "Distance", "Hours", "Cuisine", "Type", "Halal", "Good for", "Services",
                "Meals", "Drinks", "Dietary", "Accessibility", "Address", "Phone", "Website")
 CARD_FORMAT = """
@@ -145,7 +136,6 @@ Return JSON only with exactly this shape:
   (for example "It's popular at dinner time, so book ahead"), or "".
 """.strip()
 
-# Areas, counts or averages instead of restaurants.
 SUMMARY_FORMAT = """
 Answer in one or two friendly sentences. When several areas or groups are compared, follow with up to 5 short
 bullets in the given order, each a natural phrase with its key number. Add one practical tip only if the evidence
@@ -163,28 +153,19 @@ def query_graph(
     want_title: bool = False,
     may_clarify: bool = True,
 ) -> RetrievalResult:
-    """The model chooses to query, clarify, explain or decline; a query is checked, run and followed up.
-
-    `replies` receives the chat_title (when want_title) and the quick_replies for a clarifying question,
-    a decline or a search worth widening. may_clarify is False right after the assistant asked a question.
-    """
-    # 1. LLM call 1: a query, or a question / explanation / decline for the user.
     replies = replies if replies is not None else {}
     generated = generate_cypher(user_query, conversation_context, location_context, deadline=deadline,
                                 want_title=want_title, may_clarify=may_clarify)
     if want_title and generated.chat_title:
         replies["chat_title"] = generated.chat_title
     if generated.status == "clarify" and not may_clarify:
-        # It asked again anyway: one more attempt that must answer with defaults (skipped when time is short).
         retry = generate_cypher(user_query, conversation_context, location_context, deadline=deadline,
                                 previous=("", NO_SECOND_QUESTION_ERROR), may_clarify=False)
         generated = retry if retry.status != "skipped_deadline" else generated
     if generated.status == "rejected_validation":
-        # One corrected attempt, with the reason it was rejected (skipped when time is short).
         retry = generate_cypher(user_query, conversation_context, location_context, deadline=deadline,
                                 previous=(generated.cypher or "", generated.error or ""), may_clarify=may_clarify)
         generated = _keep_details(retry, generated) if retry.status != "skipped_deadline" else generated
-    # 2. Replies that need no database.
     if generated.status == "clarify":
         return _clarification(replies, generated.reply or "", generated.options)
     if generated.status == "explain":
@@ -192,7 +173,6 @@ def query_graph(
                                message=generated.reply)
     if generated.status == "cannot_answer":
         reason = _friendly_reason(generated.reply)
-        # Suggestions must be food and drink requests ("Find nearby mechanics" is dropped).
         replies["quick_replies"] = [option for option in generated.options if _about_food(option)] \
             if reason != UNSUPPORTED_REQUEST else []
         return RetrievalResult(status="unsupported", query_plan=QueryPlan(), message=reason)
@@ -201,7 +181,6 @@ def query_graph(
         return RetrievalResult(status=status, query_plan=QueryPlan(),
                                message=response("errors.validation" if status == "invalid_query" else "errors.retrieval"))
 
-    # 3. Run the query (NEO4J_EXECUTE_QUERIES=false stops here, for checking queries without a database).
     plan = generated.plan
     if not execution_enabled():
         return RetrievalResult(status="preview", query_plan=plan)
@@ -209,7 +188,6 @@ def query_graph(
     best = _asks_best_rated(user_query, plan)
     execution = _run(plan, deadline, more_candidates=bool(wanted or best) and returns_restaurants(plan.cypher))
     if execution.status == "error" and execution.detail:
-        # Neo4j rejected the query (syntax, types): one corrected attempt, if time allows.
         retry = _keep_details(generate_cypher(user_query, conversation_context, location_context, deadline=deadline,
                                               previous=(plan.cypher, execution.detail)), generated)
         if retry.status == "success" and retry.plan:
@@ -219,14 +197,12 @@ def query_graph(
         return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message)
     widened = None
     if not execution.records:
-        # Nothing found: loosen only the app's own defaults (radius, review minimum), never the user's values.
+        # Nothing found: loosen only the app's own defaults, never the user's values.
         relaxed = _relax(plan, deadline)
         if relaxed:
             plan, execution, widened = relaxed
 
-    # 4. Follow-up checks on the rows, then add the restaurant details the answer needs.
     rows = [{key: _plain(value) for key, value in row.items()} for row in execution.records]
-    # Code check 1: the named starting restaurant matched several places ("competitors of McDonald's").
     branches = _anchor_question(rows, deadline)
     if branches:
         return _clarification(replies, *branches)
@@ -235,7 +211,6 @@ def query_graph(
         rows = _whole_word_matches(rows, plan)
         if best:
             rows = _well_reviewed(rows)[:plan.result_limit if not wanted else None]
-        # "open now", "after 11pm", "supper": keep only places whose regular hours cover that time.
         if wanted:
             open_rows = [row for row in rows if open_now(row.get("hours_today"), wanted) is True]
             if not open_rows:
@@ -243,7 +218,6 @@ def query_graph(
             rows = open_rows[:plan.result_limit]
     kg_debug("Cypher rows", rows)
     if not rows:
-        # Code check 2: nothing found because the area named in the query does not exist in the graph.
         unknown_area = _unknown_area_question(plan, deadline)
         if unknown_area:
             return _clarification(replies, *unknown_area)
@@ -253,7 +227,6 @@ def query_graph(
             replies["quick_replies"] = [SEARCH_ALL_PJ]
             return RetrievalResult(status="no_results", query_plan=plan, message=NO_RESULTS_IN_AREA)
         return RetrievalResult(status="no_results", query_plan=plan, message=NO_RESULTS)
-    # 5. Notes shown above the answer, and a "search all of PJ" button when an area has only one or two matches.
     notes = [_widened_note(widened)] if widened else []
     missing = _missing_places(rows, named_places(plan.parameters), user_query)
     if missing:
@@ -265,12 +238,10 @@ def query_graph(
         query_plan=plan,
         records=rows,
         map_result=build_map_result(rows),
-        # With rows, the message is a note shown above the answer.
         message=" ".join(notes) or None,
     )
 
 
-# Fewer restaurants than this in an area the user named: say so and offer to look across Petaling Jaya.
 FEW_RESULTS = 3
 
 
@@ -278,33 +249,26 @@ BEST_RATED = re.compile(r"\b(?:best|top[- ]rated|highest[- ]rated|best[- ]rated|
 
 
 def _asks_best_rated(question: str, plan: QueryPlan) -> bool:
-    """A "best" / "top rated" question whose query ranks by rating without the review minimum."""
     return bool(BEST_RATED.search(question) and returns_restaurants(plan.cypher)
                 and re.search(r"ORDER\s+BY[^\n]*rating_score", plan.cypher, re.IGNORECASE)
                 and not re.search(r"total_reviews\s*>=?", plan.cypher, re.IGNORECASE))
 
 
 def _well_reviewed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Places with at least the review minimum for "best" (query_assumptions.json); all rows when none have it."""
     minimum = policy("ranking").get("rated_minimum_reviews", 0)
     kept = [row for row in rows if isinstance(row.get("review_count"), int) and row["review_count"] >= minimum]
     return kept or rows
 
 
 def _keep_details(retry: CypherResult, first: CypherResult) -> CypherResult:
-    """A corrected attempt answers the same question: keep the first attempt's "one restaurant" flag."""
     if not first.details or retry.details or not retry.plan:
         return retry
     plan = replace(retry.plan, requested_fields=(*retry.plan.requested_fields, RESTAURANT_DETAILS_FIELD))
     return replace(retry, plan=plan, details=True)
 
 
+# Prefer whole-word name matches: "gem" is Restoran Gem, not Restoran Gembira.
 def _whole_word_matches(rows: list[dict[str, Any]], plan: QueryPlan) -> list[dict[str, Any]]:
-    """Prefer places whose name has the user's words as whole words: "gem" is Restoran Gem, not Restoran Gembira.
-
-    The query matches words with CONTAINS, which also finds them inside longer words. Places matching only that
-    way are dropped when at least one place matches every word whole.
-    """
     names = re.findall(r"\ball\s*\(\s*\w+\s+IN\s+\$(\w+)", plan.cypher, flags=re.IGNORECASE)
     words = next((plan.parameters[name] for name in names if isinstance(plan.parameters.get(name), list)
                   and all(isinstance(word, str) for word in plan.parameters[name])), None)
@@ -320,7 +284,6 @@ def _whole_word_matches(rows: list[dict[str, Any]], plan: QueryPlan) -> list[dic
 
 
 def named_places(parameters: dict[str, Any] | None) -> list[list[str]]:
-    """The places the user named for a comparison: a parameter holding a list of word lists ($places)."""
     for value in (parameters or {}).values():
         if isinstance(value, list) and len(value) >= 2 and all(
                 isinstance(words, list) and words and all(isinstance(word, str) for word in words) for words in value):
@@ -329,7 +292,6 @@ def named_places(parameters: dict[str, Any] | None) -> list[list[str]]:
 
 
 def _missing_places(rows: list[dict[str, Any]], places: list[list[str]], question: str) -> list[str]:
-    """The named places no returned restaurant matches, written as the user wrote them."""
     labels = [f"{row.get('restaurant_name', '')} {row.get('area', '')}".casefold() for row in rows]
     missing = []
     for words in places:
@@ -345,18 +307,11 @@ def _join(names: list[str]) -> str:
 
 
 def few_area_matches(plan: QueryPlan, rows: list[dict[str, Any]]) -> bool:
-    """A search in an area the user named found only one or two places (not a lookup of named places,
-    and not a question that asked for fewer, such as "the most popular restaurant in SS2")."""
     return (0 < len(rows) < min(FEW_RESULTS, plan.result_limit) and returns_restaurants(plan.cypher) and _filters_on_area(plan.cypher)
             and RESTAURANT_DETAILS_FIELD not in plan.requested_fields and not named_places(plan.parameters))
 
 
 def _relax(plan: QueryPlan, deadline: float | None) -> tuple[QueryPlan, CypherExecutionResult, int | None] | None:
-    """Rerun with looser defaults (query_assumptions.json policy.alternatives) until something is found.
-
-    Returns the plan that found rows, its execution and the widened radius (None when only the review minimum
-    was loosened), or None.
-    """
     settings = policy("alternatives")
     stop = perf_counter() + settings["time_budget_seconds"]
     if deadline is not None:
@@ -387,7 +342,6 @@ NO_RESULTS = ("Sorry, I couldn't find anything that matches. You could try a dif
 
 
 def _filters_on_area(cypher: str) -> bool:
-    """The query keeps only places in a named area (not just reading the area name to match a restaurant name)."""
     for variable in re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*Area\b", cypher):
         v = re.escape(variable)
         if re.search(rf"\(\s*{v}\s*:\s*Area\s*\{{|\b{v}\.name\s*(?:=~|=|CONTAINS|STARTS\s+WITH)"
@@ -398,7 +352,6 @@ def _filters_on_area(cypher: str) -> bool:
 
 NO_SECOND_QUESTION_ERROR ="You asked the user a question again. Choose another action and use sensible defaults."
 
-# Fixed checks (their plans stay cached in Neo4j).
 ANCHOR_PLACES = """
 UNWIND $ids AS id
 MATCH (r:Restaurant) WHERE r.restaurant_id = id
@@ -424,7 +377,6 @@ def _clarification(replies: dict, question: str, options: tuple[str, ...] | list
 
 
 def _anchor_question(rows: list[dict[str, Any]], deadline: float | None) -> tuple[str, list[str]] | None:
-    """"Which one do you mean?" when the rows start from more than one restaurant with the user's name."""
     anchors = list(dict.fromkeys(row["anchor_id"] for row in rows if row.get("anchor_id") is not None))
     if len(anchors) < 2:
         return None
@@ -440,7 +392,6 @@ def _anchor_question(rows: list[dict[str, Any]], deadline: float | None) -> tupl
 
 
 def _unknown_area_question(plan: QueryPlan, deadline: float | None) -> tuple[str, list[str]] | None:
-    """When the query filtered on an area name that matches no Area, offer the busiest areas instead."""
     area_variables = set(re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*Area\b", plan.cypher))
     for variable in area_variables:
         v = re.escape(variable)
@@ -468,15 +419,13 @@ def _unknown_area_question(plan: QueryPlan, deadline: float | None) -> tuple[str
 
 TECHNICAL_WORDS = re.compile(
     r"\b(?:graph|vocabular\w*|schema|cypher|node|field|column)s?\b|\b[A-Z]\w+\.\w+\b|\$\w+"
-    r"|\b[a-z]+_[a-z_]+\b",  # snake_case names such as author_name
+    r"|\b[a-z]+_[a-z_]+\b",
     re.IGNORECASE)
-# How the search worked never belongs in a reply ("matched by area name pattern", "radius you provided").
 SEARCH_MECHANICS = re.compile(
     r"\b(?:pattern|fuzzy|match(?:ed|ing|es)?|amenity_type|section(?: code)?|area names?|as the area|starting with|"
     r"radius you|filters?|quer(?:y|ied)|database|dataset|operational|status|results?|returned|required|"
     r"search(?:ed|ing)?|no area filter|whole city|treated|(?:options|info|information) (?:I|we) have|"
     r"I (?:picked|chose|selected|pulled|included|highlighted|focused on))\b", re.IGNORECASE)
-# Softer system words the model sometimes uses in a decline; reworded rather than discarding a useful reply.
 SYSTEM_PHRASES = ((re.compile(r"\s+(?:in|from) (?:the|this|my|our) (?:database|dataset|data)\b", re.IGNORECASE), ""),
                   (re.compile(r"\b(?:the|this|my|our) (?:database|dataset|data)\b", re.IGNORECASE), "my information"),
                   (re.compile(r"\bqueries\b", re.IGNORECASE), "searches"),
@@ -485,9 +434,9 @@ UNSUPPORTED_REQUEST = ("Sorry, I don't have that information yet, so I can't sea
                        "prices, ratings, opening hours, halal status, and services like delivery or reservations.")
 
 
+# Category values and the dishes/labels they include (categories.json), as whole words.
 @lru_cache(maxsize=1)
 def _food_terms() -> re.Pattern:
-    """Category values and the dishes/labels they include (categories.json), as whole words."""
     terms = {"food", "eat", "eats", "drink", "drinks", "dish", "dishes", "meal", "meals", "dinner", "lunch", "breakfast"}
     for column in load_vocabulary()["columns"].values():
         for value, detail in column["values"].items():
@@ -502,7 +451,6 @@ def _about_food(text: str) -> bool:
 
 
 def _friendly_reason(reason: str | None) -> str:
-    """The model's reason for not answering, unless it talks about the system instead of the food."""
     if not reason:
         return response("errors.outside")
     if TECHNICAL_WORDS.search(reason):
@@ -519,11 +467,6 @@ SEARCH_OPENING = re.compile(
 
 
 def clean_opening(text: str, fallback: str | None = None) -> str:
-    """Drop an opening clause stating an assumption or how the search worked.
-
-    "Assuming nearby means within 1000 m, here are cafes ..." -> "Here are cafes ...". When the rest still
-    describes the search, the whole text is replaced by `fallback` (if given).
-    """
     match = SEARCH_OPENING.match(text)
     if match:
         rest = text[match.end():].lstrip()
@@ -534,18 +477,16 @@ def clean_opening(text: str, fallback: str | None = None) -> str:
 
 
 def _run(plan: QueryPlan, deadline: float | None, more_candidates: bool = False) -> CypherExecutionResult:
-    # Checked again here so a corrected query from a retry is never run unchecked.
+    # Re-checked so a retried query never runs unchecked.
     if check_cypher(plan.cypher, plan.parameters):
         return CypherExecutionResult([], "invalid", response("errors.validation"))
     cypher = plan.cypher
     if more_candidates:
-        # An hours filter runs on the rows afterwards, so fetch more places to choose from.
         maximum = policy("results")["maximum_limit"]
         cypher = re.sub(r"\bLIMIT\s+\d+\b", f"LIMIT {maximum}", cypher, flags=re.IGNORECASE)
     return execute_cypher(cypher, plan.parameters, timeout_seconds=_query_time(deadline))
 
 
-# Seconds kept for writing the answer after the database work.
 ANSWER_SECONDS = 3.0
 
 
@@ -554,14 +495,12 @@ def _query_time(deadline: float | None) -> float | None:
 
 
 def _with_restaurant_details(rows: list[dict[str, Any]], deadline: float | None) -> list[dict[str, Any]]:
-    """Add the fixed set of restaurant details to each returned restaurant_id, keeping the query's order."""
     groups: dict[Any, list[dict[str, Any]]] = {}
     for row in rows:
         if row.get("restaurant_id") is not None:
             groups.setdefault(row["restaurant_id"], []).append(row)
     if not groups:
         return []
-    # One row per restaurant; a column that differs between its rows (review, stars) becomes a list.
     first = {}
     for restaurant_id, group in groups.items():
         row = dict(group[0])
@@ -588,7 +527,6 @@ def _with_restaurant_details(rows: list[dict[str, Any]], deadline: float | None)
             if not hours.get("is_24_7") else None
         detail["open_now"] = open_now(detail["hours_today"], _now())
         detail["currency"] = "MYR"
-        # The generated query's own columns (distance_m, competitor_of, counts) come first.
         merged.append({**{k: v for k, v in row.items() if k not in DETAIL_COLUMNS}, **detail})
     return merged
 
@@ -613,7 +551,6 @@ CLOCK_TIME = re.compile(r"\b(?:after|past|at|by|around)\s+(\d{1,2})(?:[:.](\d{2}
 
 
 def time_asked(question: str, now: datetime) -> datetime | None:
-    """The moment the user wants places to be open: now, a clock time today, or 11pm for supper."""
     clock = CLOCK_TIME.search(question or "")
     if clock:
         hour = int(clock.group(1)) % 12 + (12 if clock.group(3).lower() == "pm" else 0)
@@ -625,11 +562,8 @@ def time_asked(question: str, now: datetime) -> datetime | None:
     return None
 
 
+# A range past midnight ("18:00-02:00") counts until it ends, also from yesterday's hours.
 def open_now(hours_today: Any, now: datetime) -> bool | None:
-    """Whether today's regular hours ("07:30-14:30, 18:00-21:00") cover this moment; None when unknown.
-
-    A range past midnight ("12:00-02:00") counts until midnight; yesterday's late hours are not checked.
-    """
     if hours_today == "open 24 hours":
         return True
     if not isinstance(hours_today, str):
@@ -648,7 +582,6 @@ def open_now(hours_today: Any, now: datetime) -> bool | None:
 
 
 def _plain(value: Any) -> Any:
-    """Neo4j values (temporal types, nodes, points) as JSON-friendly Python values."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (list, tuple)):
@@ -657,11 +590,11 @@ def _plain(value: Any) -> Any:
         return {key: _plain(item) for key, item in value.items()}
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
-    if hasattr(value, "iso_format"):  # neo4j.time.DateTime / Date / Time / Duration
+    if hasattr(value, "iso_format"):
         return value.iso_format()
-    if hasattr(value, "items") and hasattr(value, "labels"):  # neo4j Node
+    if hasattr(value, "items") and hasattr(value, "labels"):
         return {key: _plain(item) for key, item in value.items()}
-    if hasattr(value, "x") and hasattr(value, "y"):  # neo4j Point
+    if hasattr(value, "x") and hasattr(value, "y"):
         return {"longitude": value.x, "latitude": value.y}
     return str(value)
 
@@ -680,25 +613,21 @@ def generate_answer(
 
 
 def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: str, deadline: float | None) -> AnswerResult:
-    # Replies decided earlier (no results, a question, an explanation, a decline) are shown as they are.
     if retrieval.status == "no_results":
         return AnswerResult(status="no_results", text=retrieval.message or response("errors.no_results"))
     if retrieval.status == "clarification_required":
         return AnswerResult(status="clarification_required", text=retrieval.message or response("errors.clarify"))
     if retrieval.status == "success" and not retrieval.records and retrieval.message:
-        # An explanation written by the query model; nothing to look up.
         return AnswerResult(status="success", text=retrieval.message, used_llm=True)
     if retrieval.status != "success":
         status = "unsupported" if retrieval.status == "unsupported" else "fallback"
         return AnswerResult(status=status, text=retrieval.message or response("errors.retrieval"))
 
-    note = retrieval.message  # for example that the search went further than usual
+    note = retrieval.message
     rows = retrieval.records
     restaurants = bool(rows) and all(row.get("restaurant_name") for row in rows)
-    # A profile card only when the user asked about one particular restaurant; otherwise a list.
     card = restaurants and len(rows) == 1 and RESTAURANT_DETAILS_FIELD in retrieval.query_plan.requested_fields
     evidence = _restaurant_evidence(rows, card) if restaurants else [_group_evidence(row) for row in rows]
-    # Written without the model; used when it is too slow or returns something unusable.
     fallback = _restaurant_fallback(rows, card, user_query) if restaurants else _group_fallback(evidence)
     timeout = remaining_response_timeout(deadline)
     if note:
@@ -706,7 +635,6 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     if timeout is None and deadline is not None:
         return AnswerResult(status="fallback", text=fallback)
 
-    # LLM call 2: the model writes the text in JSON; _render_model_answer() lays it out the same way every time.
     context = ""
     if conversation_context and conversation_context != "No previous conversation.":
         context = f"Earlier in this chat (for context only):\n{conversation_context[-1500:]}\n\n"
@@ -738,7 +666,6 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
 
 
 def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False) -> list[dict[str, Any]]:
-    """What the answer model sees per restaurant: display-ready facts only (no ids or coordinates)."""
     comparisons = comparison_evidence(rows)
     evidence = []
     for row in rows:
@@ -765,7 +692,6 @@ def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False) -> list
             "comparison_facts": [item["description"] for item in comparisons if row.get("restaurant_name") in item["names"]],
         }
         if card:
-            # One place the user asked about: the answer may need how to reach it.
             item.update(phone=row.get("phone"), address=row.get("address"), website=row.get("website"),
                         weekly_hours=row.get("weekly_hours"))
         evidence.append({key: value for key, value in item.items() if value not in (None, "", [])})
@@ -778,7 +704,6 @@ def _group_evidence(row: dict[str, Any]) -> dict[str, Any]:
 
 def _render_model_answer(payload: dict | None, rows: list[dict[str, Any]], card: bool = False,
                          question: str = "", compare: bool = False) -> str:
-    """The model writes the introduction, one short description per place and a tip; the layout is ours."""
     if not payload or not isinstance(payload.get("introduction"), str) or not payload["introduction"].strip():
         raise ValueError("invalid_response_json")
     descriptions = {}
@@ -789,7 +714,6 @@ def _render_model_answer(payload: dict | None, rows: list[dict[str, Any]], card:
                 descriptions[int(match.group(1))] = item["description"]
     conclusion = payload.get("conclusion") if isinstance(payload.get("conclusion"), str) else ""
     if card:
-        # The introduction is the answer itself, so it is kept unless it talks about the system.
         introduction = _direct_answer(clean_opening(payload["introduction"].strip()), question)
         if TECHNICAL_WORDS.search(introduction):
             introduction = f"Here's what I have on {rows[0]['restaurant_name']}."
@@ -798,7 +722,6 @@ def _render_model_answer(payload: dict | None, rows: list[dict[str, Any]], card:
         return render_restaurants(rows, introduction, descriptions, conclusion, card, fields)
     conclusion = _without_sources(conclusion)
     if compare:
-        # The verdict names places and numbers, so it is kept unless it talks about the system.
         introduction = clean_opening(_without_sources(payload["introduction"].strip()))
         if TECHNICAL_WORDS.search(introduction):
             introduction = "Here's how they compare."
@@ -810,9 +733,7 @@ def _render_model_answer(payload: dict | None, rows: list[dict[str, Any]], card:
 
 def render_restaurants(rows: list[dict[str, Any]], introduction: str, descriptions: dict[int, str],
                        conclusion: str = "", card: bool = False, fields: tuple[str, ...] | None = None) -> str:
-    """A list of places, or (card) the profile of the one restaurant the user asked about."""
     if card:
-        # The card shows the tip as its last bullet.
         body, conclusion = _profile_card(rows[0], descriptions.get(1), conclusion, fields), ""
     else:
         body = "\n".join(_list_entry(row, descriptions.get(index)) for index, row in enumerate(rows, 1))
@@ -825,14 +746,12 @@ def _heading(row: dict[str, Any]) -> str:
 
 
 def _list_entry(row: dict[str, Any], description: str | None) -> str:
-    """ "- **Calibrate Small Space — SS 2.** It's a compact, nostalgic cafe ..." """
     label = f"{row['restaurant_name']} — {row['area']}." if row.get("area") else f"{row['restaurant_name']}."
     text = _sentence(description) if description and description.strip() else _fact_sentence(row)
     return f"- **{label}** {text}".rstrip()
 
 
 def _fact_sentence(row: dict[str, Any]) -> str:
-    """The written-out description when the response model is not available."""
     facts = []
     if isinstance(row.get("average_rating"), (int, float)):
         reviews = f" from {row['review_count']:,} reviews" if isinstance(row.get("review_count"), int) else ""
@@ -851,15 +770,11 @@ def _fact_sentence(row: dict[str, Any]) -> str:
 
 def _profile_card(row: dict[str, Any], description: str | None, tip: str | None = None,
                   fields: tuple[str, ...] | None = None) -> str:
-    """One place: its name and area, then its details as bullets (About first, Tip last).
-
-    fields: only these details (the ones that answer the user's question); None shows them all.
-    """
     rating = row.get("average_rating")
     reviews = row.get("review_count")
     kind = str(row.get("restaurant_type") or row.get("venue_type") or "").replace("_", " ")
     if kind.casefold() in {str(cuisine).casefold() for cuisine in row.get("cuisines") or []}:
-        kind = ""  # "Cuisine: Cafe" already says it
+        kind = ""
     details = [
         ("About", _sentence(description) if description and description.strip() else None),
         ("Rating", f"{rating:.1f}" + (f" ({reviews:,} reviews)" if isinstance(reviews, int) else "")
@@ -881,11 +796,10 @@ def _profile_card(row: dict[str, Any], description: str | None, tip: str | None 
     shown = [(label, value) for label, value in details
              if value and (fields is None or label in fields or label == "Tip")]
     if fields is not None and not any(label != "Tip" for label, _ in shown):
-        shown = [(label, value) for label, value in details if value]  # none of the chosen details are known
+        shown = [(label, value) for label, value in details if value]
     return _heading(row) + "\n\n" + "\n".join(f"- **{label}:** {value}" for label, value in shown)
 
 
-# Words in a question about one place -> the card details that answer it (used when the model gives none).
 ASKED_FIELDS = (
     (r"\b(?:book|booking|reserv\w*|table)\b", ("Services", "Phone")),
     (r"\b(?:open|close[sd]?|hours?|time|today|tonight|now)\b", ("Hours",)),
@@ -900,10 +814,8 @@ ASKED_FIELDS = (
 )
 
 
-# "Is it halal?", "Can I book ...?": questions a "Yes" or "No" can answer.
 YES_NO_QUESTION = re.compile(r"^\W*(?:is|are|am|can|could|do|does|did|will|would|should|has|have|any|may)\b", re.IGNORECASE)
 LEADING_YES_NO = re.compile(r"^(?:yes|no)\b\s*[,—–:-]?\s*", re.IGNORECASE)
-# "... from the evidence", "... in the details I have": where an answer came from never belongs in it.
 SOURCE_PHRASES = re.compile(r"\s*\b(?:from|in|based on|according to) (?:the|my) (?:(?:available|provided) )?"
                             r"(?:evidence|data|details|information|info)"
                             r"(?: I have)?\b", re.IGNORECASE)
@@ -911,24 +823,21 @@ SOURCE_PHRASES = re.compile(r"\s*\b(?:from|in|based on|according to) (?:the|my) 
 
 def _without_sources(text: str) -> str:
     text = SOURCE_PHRASES.sub("", text or "")
-    return re.sub(r",\s*(?=[.;:!?,]|$)", "", text)  # "... The Port, based on the info." -> "... The Port."
+    return re.sub(r",\s*(?=[.;:!?,]|$)", "", text)
 
 
 def _direct_answer(text: str, question: str) -> str:
-    """The card's opening answer: no "Yes —" before an answer to a what/when/where question, no sources."""
     text = _without_sources(text)
     if not YES_NO_QUESTION.match(question or "") and LEADING_YES_NO.match(text):
         rest = LEADING_YES_NO.sub("", text, count=1)
         text = rest[:1].upper() + rest[1:] if rest else text
     return text
 
-# "tell me more about it", "details of X", "what's X like": the whole card.
 GENERAL_REQUEST = re.compile(r"\b(?:tell me (?:more )?about|more (?:about|info\w*|details?)|details?|info\w* (?:on|about)|"
                              r"what(?:'s| is) .+ like|describe|overview)\b", re.IGNORECASE)
 
 
 def _card_fields(chosen: Any, question: str) -> tuple[str, ...] | None:
-    """The card details to show: the model's choice, else the ones the question asks about; None means all."""
     if GENERAL_REQUEST.search(question):
         return None
     if isinstance(chosen, list):
@@ -943,7 +852,6 @@ def _card_fields(chosen: Any, question: str) -> tuple[str, ...] | None:
 
 
 def _repeats_card(tip: str, row: dict[str, Any]) -> bool:
-    """A tip that restates the card's own hours, price, rating or services adds nothing."""
     text = tip.casefold()
     hours = str(row.get("hours_today") or "").casefold()
     price = money_label(row["average_price"], "MYR") if isinstance(row.get("average_price"), (int, float)) else None
@@ -956,13 +864,11 @@ def _repeats_card(tip: str, row: dict[str, Any]) -> bool:
     return any(repeated)
 
 
-# facility.category in categories.json -> bullet label on the profile card, in this order.
 FACILITY_GROUPS = {"service": "Services", "meal_type": "Meals", "drinks": "Drinks", "dietary": "Dietary",
                    "accessibility": "Accessibility"}
 
 
 def _facility_groups(facilities: list[str]) -> list[tuple[str, str]]:
-    """Facilities split by their category, e.g. ("Services", "Dine-in, Takeout") and ("Meals", "Breakfast")."""
     values = load_vocabulary()["columns"]["facility.name"]["values"]
     grouped: dict[str, list[str]] = {label: [] for label in FACILITY_GROUPS.values()}
     for name in facilities:
@@ -973,7 +879,6 @@ def _facility_groups(facilities: list[str]) -> list[tuple[str, str]]:
 
 
 def _hours_today(hours: Any, is_open: bool | None = None) -> str | None:
-    """ "Open now · today 07:30–22:30", "Closed now · today ...", or "Open today ..." when unknown."""
     if not isinstance(hours, str) or not hours.strip():
         return None
     if hours == "open 24 hours":
@@ -992,7 +897,6 @@ def _sentence(text: str) -> str:
 
 
 def _restaurant_fallback(rows: list[dict[str, Any]], card: bool, question: str = "") -> str:
-    """A natural answer written without the response model (timeout or invalid output)."""
     introduction = (f"Here's what I have on {rows[0]['restaurant_name']}:" if card
                     else "Here are a few places you could try:")
     return render_restaurants(rows, introduction, {}, card=card, fields=_card_fields(None, question) if card else None)

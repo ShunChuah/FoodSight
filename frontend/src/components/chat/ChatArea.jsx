@@ -18,7 +18,6 @@ function ChatArea({
   showGraphEvidence = true,
   pendingQuery = "",
 }) {
-  // No selected chat means the user is starting an unsaved draft conversation.
   const hasPendingQuery = Boolean(pendingQuery.trim());
   const messages = selectedChat?.messages ?? [];
   const latestMessage = messages.at(-1);
@@ -32,8 +31,6 @@ function ChatArea({
   const [explanationMessageId, setExplanationMessageId] = useState(null);
   const [sendError, setSendError] = useState("");
   const tabsFor = (message) => detailTabs(message, { showKnowledgeGraph: showGraphEvidence });
-  // Read from the chat on every render, so a graph that finishes while the panel is open replaces
-  // its skeleton, and turning graph evidence off can leave the open panel empty.
   const explanationMessage = messages.find((message) => message.id === explanationMessageId);
   const explanationTabs = explanationMessage ? tabsFor(explanationMessage) : [];
   const submissionInFlight = useRef(false);

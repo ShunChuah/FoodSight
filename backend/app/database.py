@@ -11,7 +11,6 @@ load_dotenv()
 
 from app import config  # noqa: E402  (reads the settings loaded above)
 
-# DATABASE_URL is optional; by default the chat tables use the same DB_* settings as the login tables.
 DATABASE_URL = os.getenv("DATABASE_URL") or URL.create(
     "postgresql+psycopg2",
     username=config.DB_USER,
@@ -21,7 +20,6 @@ DATABASE_URL = os.getenv("DATABASE_URL") or URL.create(
     database=config.DB_NAME,
 )
 
-# Accept common PostgreSQL URL formats and convert them for psycopg2.
 if isinstance(DATABASE_URL, str) and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 elif isinstance(DATABASE_URL, str) and DATABASE_URL.startswith("postgresql://"):
@@ -40,7 +38,6 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-# Login tables (async, from main). Separate names so they do not clash with the chat engine and Base above.
 auth_engine = create_async_engine(
     URL.create(
         "postgresql+asyncpg",

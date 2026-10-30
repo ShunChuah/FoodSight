@@ -7,7 +7,6 @@ from ..database import get_db
 from ..model import UserPreference
 from ..schemas import PreferencesRead, PreferencesUpdate
 
-# The logged-in user's own settings, saved so they come back on the next login.
 router = APIRouter(prefix="/preferences", tags=["preferences"])
 
 

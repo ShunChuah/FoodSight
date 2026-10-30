@@ -88,7 +88,6 @@ function ChatHistoryItem({
             onChange={(event) => setRenameValue(event.target.value)}
             onBlur={commitRename}
             onKeyDown={(event) => {
-              // Enter saves by blurring; Escape cancels by marking the ref.
               if (event.key === "Enter") {
                 event.preventDefault();
                 event.currentTarget.blur();

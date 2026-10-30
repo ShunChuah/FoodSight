@@ -1,8 +1,5 @@
-"""HTTP client for the LLM (OpenAI Responses/Chat Completions or Gemini-style APIs).
+# HTTP client for the LLM: task "query" writes the Cypher, "response" writes the answer (settings in .env).
 
-Two tasks use it: "query" (writing the Cypher, cypher_generation.py) and "response" (writing the answer,
-graph_answer.py). Each task has its own model and timeout settings in .env.
-"""
 import json
 import math
 import os
@@ -42,7 +39,6 @@ class LLMServiceError(Exception):
 
 
 def remaining_response_timeout(deadline: float | None) -> float | None:
-    """None means no deadline was supplied, or too little response time remains."""
     if deadline is None:
         return None
     remaining = deadline - perf_counter() - RESPONSE_DEADLINE_MARGIN_SECONDS
@@ -50,7 +46,6 @@ def remaining_response_timeout(deadline: float | None) -> float | None:
 
 
 def parse_json_object(raw: str | None) -> dict | None:
-    """Read an object from plain or Markdown-fenced model JSON."""
     if not isinstance(raw, str) or not raw:
         return None
     cleaned = raw.strip()
@@ -64,8 +59,8 @@ def parse_json_object(raw: str | None) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+# Read bounded answer text from model JSON.
 def parse_answer_json(raw: str | None, *, max_length: int) -> str | None:
-    """Read bounded answer text from model JSON."""
     payload = parse_json_object(raw)
     answer = payload.get("answer") if payload else None
     if not isinstance(answer, str):
@@ -82,11 +77,6 @@ def call_llm(
     timeout_seconds: float | None = None,
     response_schema: dict | None = None,
 ) -> str | None:
-    """Send one request and return the model's text. Raises LLMServiceError on any failure.
-
-    instructions: the fixed rules (cached by the provider); prompt: this request's data.
-    response_schema: a JSON schema the reply must follow (structured outputs, query task only).
-    """
     api_key = os.getenv("LLM_API_KEY", "").strip()
     model = _get_llm_model(task)
     url = _get_llm_url(model)
@@ -201,14 +191,11 @@ def _build_llm_request(
     response_schema: dict | None = None,
     instructions: str | None = None,
 ) -> tuple[dict, dict[str, str]]:
-    """Fixed rules go in the system/instructions slot; the request data goes in the user turn."""
     api_key = os.getenv("LLM_API_KEY", "").strip()
     style = _get_llm_style()
     headers = {"Content-Type": "application/json"}
-    # Answer generation always expects a JSON object, so ask the provider for one.
     response_json = task == "response" and os.getenv("LLM_RESPONSE_JSON_MODE", "true").strip().lower() == "true"
 
-    # LLM_API_STYLE: "content" (Gemini), "responses" (OpenAI Responses API) or "chat" (Chat Completions).
     if style == "content":
         headers["x-goog-api-key"] = api_key
         payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
@@ -238,12 +225,10 @@ def _build_llm_request(
 
 
 def _supports_reasoning_effort(model: str) -> bool:
-    """GPT-5 / GPT-5-mini / GPT-5-nano accept a reasoning effort (including "minimal")."""
     return bool(re.fullmatch(r"gpt-5(?:-(?:mini|nano))?(?:-\d{4}-\d{2}-\d{2})?", model))
 
 
 def _configure_reasoning(payload: dict, model: str, style: str, effort: str) -> None:
-    """How long the model may "think" before answering; lower is faster."""
     effort = effort.strip().lower()
     if effort not in {"minimal", "low", "medium", "high"} or not _supports_reasoning_effort(model):
         return
@@ -253,9 +238,8 @@ def _configure_reasoning(payload: dict, model: str, style: str, effort: str) -> 
         payload["reasoning_effort"] = effort
 
 
+# OpenAI's json_object mode rejects a request (HTTP 400) unless the input messages mention JSON.
 def _mention_json_in_input(payload: dict, style: str) -> None:
-    """OpenAI's json_object mode rejects a request (HTTP 400) unless the *input*
-    messages mention JSON; text in the separate instructions field doesn't count."""
     if style == "responses":
         uses_json_object = (payload.get("text") or {}).get("format", {}).get("type") == "json_object"
         if uses_json_object and "json" not in payload["input"].lower():
@@ -267,7 +251,6 @@ def _mention_json_in_input(payload: dict, style: str) -> None:
 
 
 def _configure_query_request(payload: dict, model: str, style: str, response_schema: dict | None = None) -> None:
-    """Settings for the Cypher request: output-token limit, structured JSON output, minimal reasoning for speed."""
     configured_limit = os.getenv("LLM_QUERY_MAX_OUTPUT_TOKENS", "1024").strip()
     try:
         token_limit = int(configured_limit)

@@ -1,6 +1,5 @@
 import api from "./client";
 
-// The logged-in account's saved theme: "light", "dark", or null if never chosen.
 export async function fetchThemePreference() {
   const response = await api.get("/preferences");
   return response.data.theme;

@@ -1,4 +1,3 @@
-"""Small text helpers shared by the rule-based checks."""
 import re
 
 

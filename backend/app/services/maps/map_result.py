@@ -1,11 +1,9 @@
-"""Map snapshot saved with each answer: one marker per restaurant in the answer."""
 from typing import Any
 
 from ...contracts import MapBounds, MapFeature, MapPoint, MapResult
 from ..shared.config import policy
 from ..shared.messages import response
 
-# Restaurant facts shown in the marker popup.
 MAP_PROPERTY_FIELDS = (
     "address", "area", "venue_type", "average_rating", "review_count", "cuisines", "price_tier",
     "average_price", "currency", "phone", "website", "hours_today", "facilities", "distance_m",
@@ -13,7 +11,6 @@ MAP_PROPERTY_FIELDS = (
 
 
 def build_map_result(records: list[dict[str, Any]]) -> MapResult:
-    """Markers for the restaurants in the answer; rows without coordinates (or area rows) are left out."""
     if not records:
         return MapResult(status="empty")
     features, seen, missing_coordinates = [], set(), False

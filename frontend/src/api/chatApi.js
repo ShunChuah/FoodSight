@@ -32,12 +32,10 @@ export async function sendChatMessage({
     preflight_token: preflight?.decisionToken ?? null,
   };
 
-  // chatId is null for a new draft, so the backend creates the session on send.
   const response = await api.post("/chats/messages", payload);
   return response.data.chat;
 }
 
-// { graphStatus, graphData } for an answer whose graph evidence was still being built.
 export async function fetchGraphEvidence(chatId, messageId) {
   const response = await api.get(`/chats/${chatId}/messages/${messageId}/graph`);
   return response.data;

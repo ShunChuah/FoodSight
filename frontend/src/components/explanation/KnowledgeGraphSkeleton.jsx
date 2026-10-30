@@ -1,6 +1,5 @@
 import "../../styles/explanation.css";
 
-// Shown while the graph evidence is still being built after the answer was sent.
 function KnowledgeGraphSkeleton() {
   return (
     <section className="kg-evidence-section" aria-busy="true">

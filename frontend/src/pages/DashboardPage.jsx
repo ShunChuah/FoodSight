@@ -21,8 +21,6 @@ import { useTheme } from "../context/ThemeContext.jsx";
 import "../styles/dashboard.css";
 
 function DashboardPage() {
-  // The theme is shared with the login pages (remembered in this browser) and saved to the account,
-  // so it comes back on the next login, on any browser.
   const { theme, setTheme } = useTheme();
   const darkMode = theme === "dark";
   const themeChangedRef = useRef(false);
@@ -46,7 +44,6 @@ function DashboardPage() {
   const preflightRef = useRef(null);
   const draftChatIdRef = useRef(null);
 
-  // Match backend ordering: pinned chats first, then first-query time descending.
   const getChatSortTime = (chat) => {
     const firstUserMessage = chat.messages?.find(
       (message) => message.type === "user",
@@ -94,7 +91,6 @@ function DashboardPage() {
     };
   }, []);
 
-  // Answers arrive before their graph evidence; fetch each pending graph once it is built.
   const pendingGraphKey = pendingGraphs(chats)
     .map(({ chatId, messageId }) => `${chatId}:${messageId}`)
     .join(",");
@@ -195,7 +191,6 @@ function DashboardPage() {
   };
 
   const handleNewChat = () => {
-    // Keeps this as an unsaved draft until the first query is sent.
     setSelectedChatId(null);
   };
 
@@ -205,7 +200,6 @@ function DashboardPage() {
   };
 
   const handleSearchFocused = () => {
-    // Reset the one-time focus request after Sidebar handles it.
     setShouldFocusSearch(false);
   };
 
@@ -228,7 +222,6 @@ function DashboardPage() {
   };
 
   const handleDeleteChat = async (chatId) => {
-    // Deletes from backend first, then removes it from the sidebar state.
     try {
       await deleteChatHistory(chatId);
       setChats((prevChats) => prevChats.filter((chat) => chat.id !== chatId));

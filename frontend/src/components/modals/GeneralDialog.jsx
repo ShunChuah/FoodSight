@@ -11,7 +11,6 @@ function GeneralDialog({
   onSecondary,
   onClose,
   destructive = false,
-  // While the primary action runs, the dialog can't be dismissed and its buttons are disabled.
   busy = false,
 }) {
   const preferredButtonRef = useRef(null);

@@ -21,7 +21,6 @@ function ChatInput({
   showSuggestions,
   disabled = false,
 }) {
-  // Picked once per mount, so the buttons don't reshuffle while the user reads them.
   const [queries] = useState(pickQuickQueries);
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -120,7 +119,6 @@ function ChatInput({
   };
 
   const handleSuggestionClick = (query) => {
-    // Put a quick query into the textarea so the user can edit before sending.
     stopRecording();
     setInput(query);
   };

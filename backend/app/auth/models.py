@@ -31,7 +31,6 @@ class User(SQLAlchemyBaseUserTable[int], Base):
 
     id: Mapped[int] = mapped_column("user_id", Integer, primary_key=True)
     hashed_password: Mapped[str] = mapped_column("password", Text, nullable=False)
-    # Empty only for the instant between a Google sign-up and UserManager.oauth_callback filling it.
     username: Mapped[str] = mapped_column(String(150), nullable=False, default="")
     oauth_accounts: Mapped[list[OAuthAccount]] = relationship("OAuthAccount", lazy="joined")
 

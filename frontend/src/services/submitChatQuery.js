@@ -1,4 +1,3 @@
-// Typed messages and quick replies share preflight, location handling, and one send.
 export async function submitChatQuery(query, {
   prepare, send, browser = globalThis.navigator,
   now = () => performance.now(), reportTiming = (message) => console.info(message),
@@ -26,7 +25,6 @@ export async function submitChatQuery(query, {
         return result;
       });
     } catch {
-      // The send endpoint can perform its own guardrail assessment.
       return await timed("send", () => send(query, null));
     }
     if (!preflight.isFnb || !preflight.locationRequired) {

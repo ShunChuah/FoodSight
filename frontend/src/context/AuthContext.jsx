@@ -3,8 +3,7 @@ import { api, setUnauthorizedHandler } from '../api/client.js'
 
 const AuthContext = createContext(null)
 
-// Remembers that this browser had a session, so a visitor who was never logged in
-// is not told their session expired. It holds no secret; the real session is the httpOnly cookie.
+// Marks that this browser had a session, so a never-logged-in visitor is not told their session expired.
 const SIGNED_IN_KEY = 'foodsight-signed-in'
 const SESSION_EXPIRED = 'Session expired, please log in again.'
 const SESSION_UNVERIFIED = 'We could not verify your session. Please log in again.'
@@ -42,7 +41,6 @@ export function AuthProvider({ children }) {
     refresh()
   }, [endSession, refresh])
 
-  // Nothing tells the browser when the session ends on the server, so re-check while logged in.
   const loggedIn = Boolean(user)
   useEffect(() => {
     if (!loggedIn) return

@@ -14,8 +14,6 @@ export function answerToSpeechText(answer = "") {
     .trim();
 }
 
-// Short utterances avoid voice-engine limits on long answers. Prefer sentence
-// boundaries, then word boundaries, without dropping any words or numbers.
 function speechChunks(text, maximum = 220) {
   const chunks = [];
   let remaining = text;
@@ -159,8 +157,6 @@ export function createAnswerSpeech(getEnvironment = browserSpeech) {
   };
 }
 
-// Speech synthesis is shared by the document, so all response cards share one
-// owner and one state. Starting a new answer resets the old card immediately.
 export const answerSpeech = createAnswerSpeech();
 
 if (import.meta.hot) import.meta.hot.dispose(() => answerSpeech.stop());

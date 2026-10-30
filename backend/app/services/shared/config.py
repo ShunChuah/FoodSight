@@ -1,4 +1,5 @@
-"""Search policy from query_assumptions.json, cached per process; restart after editing the file."""
+# Search policy from query_assumptions.json, read once per process: restart after editing it.
+
 import json
 import os
 from functools import lru_cache
@@ -36,7 +37,6 @@ def _positive_int(value: object) -> bool:
 
 
 def _validate(data: dict) -> None:
-    """Fail on the first request with a clear message when query_assumptions.json has a bad value."""
     if data["version"] != 1:
         raise ValueError("unsupported version")
     settings = data["policy"]
@@ -83,7 +83,6 @@ def _validate(data: dict) -> None:
     if not 1 <= modes["nearest_search"]["default_limit"] <= limits["maximum_limit"]:
         raise ValueError("nearest_search.default_limit must fit result bounds")
 
-    # Ranking metric names are checked where they are used (cypher_generation.RANKING_METRICS).
     ranking = settings["ranking"]
     if ranking["default_direction"] not in {"asc", "desc"}:
         raise ValueError("unsupported default ranking direction")

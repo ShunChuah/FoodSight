@@ -1,11 +1,11 @@
-"""Safety checks run on every generated Cypher query before execution (FR-53)."""
+# Safety checks run on every generated Cypher query before execution (FR-53).
+
 import re
 from dataclasses import dataclass
 from typing import Any
 
 from ..shared.config import policy
 
-# Clauses that could write to the graph or run procedures; a query containing any of them is rejected.
 READ_ONLY_CLAUSES = (
     "CALL", "CREATE", "DELETE", "DETACH", "DROP", "FOREACH", "LOAD CSV",
     "MERGE", "REMOVE", "SET", "UNION", "USE",
@@ -21,8 +21,6 @@ class SchemaRelationship:
 
 @dataclass
 class GraphSchema:
-    """Node labels with their properties, and the allowed (source)-[type]->(target) patterns."""
-
     nodes: dict[str, set[str]]
     relationships: list[SchemaRelationship]
 
@@ -32,8 +30,6 @@ def validate_cypher(
     schema: GraphSchema,
     parameters: dict[str, Any] | None = None,
 ) -> tuple[bool, str | None]:
-    """(True, None) when the query is safe to run, else (False, the reason)."""
-    # 1. Shape and safety: one read-only statement with a RETURN and a bounded LIMIT.
     if not cypher.strip():
         return False, "The generated query was empty."
     if not re.match(r"^\s*(OPTIONAL\s+)?MATCH\b", cypher, flags=re.IGNORECASE):
@@ -63,18 +59,15 @@ def validate_cypher(
     maximum = policy("results")["maximum_limit"]
     if limit_match and int(limit_match.group(1)) > maximum:
         return False, f"The query result limit cannot exceed {maximum}."
-    # Outer bound; cypher_generation.py applies stricter limits to model-written queries.
     if len(cypher) > 9000 or len(re.findall(r"\bMATCH\b", cypher, re.IGNORECASE)) > 20:
         return False, "The query exceeds the allowed complexity."
 
-    # 2. Every $parameter has a value.
     required_parameters = set(re.findall(r"\$([A-Za-z_]\w*)", cypher))
     supplied_parameters = set((parameters or {}).keys())
     missing_parameters = required_parameters - supplied_parameters
     if missing_parameters:
         return False, f"Missing parameters: {', '.join(sorted(missing_parameters))}."
 
-    # 3. Only labels and relationship types the ontology has.
     variable_labels = dict(
         re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*)", cypher)
     )
@@ -93,7 +86,6 @@ def validate_cypher(
             f"Unknown relationship types: {', '.join(sorted(unknown_relationships))}.",
         )
 
-    # 4. Relationships in the right direction, e.g. (Restaurant)-[:LOCATED_IN]->(Location), never the reverse.
     allowed_patterns = {
         (item.source, item.type, item.target) for item in schema.relationships
     }
@@ -127,14 +119,11 @@ def validate_cypher(
         )
         return False, f"Invalid relationship patterns: {rendered}."
 
-    # 5. Only properties each label really has.
     unknown_properties = []
     property_accesses = re.findall(
         r"\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)",
         cypher,
     )
-    # Optional imported properties use map access to avoid missing-property
-    # notifications, but must still belong to the declared schema contract.
     property_accesses += re.findall(r"properties\((\w+)\)\['(\w+)'\]", cypher)
     for variable, property_name in property_accesses:
         label = variable_labels.get(variable)

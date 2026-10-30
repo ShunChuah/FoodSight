@@ -7,13 +7,10 @@ import MapPreview from "../map/MapPreview";
 import { hasMapView } from "../../services/mapPresentation";
 import "../../styles/explanation.css";
 
-// `tabs` lists only the tabs with something to show (see detailTabs).
-// graphPending: the graph is still being built after the answer was sent.
 function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending = false, darkMode = false, onClose }) {
   const showMap = tabs.includes("map");
   const showKnowledge = tabs.includes("knowledge");
   const [selectedTab, setSelectedTab] = useState(tabs[0]);
-  // A tab can disappear while open (graph evidence turned off in Settings).
   const activeTab = tabs.includes(selectedTab) ? selectedTab : tabs[0];
   const displayedMapImage = mapImage;
   const [settledMapImage, setSettledMapImage] = useState(null);

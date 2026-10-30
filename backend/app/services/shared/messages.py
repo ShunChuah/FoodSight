@@ -1,4 +1,3 @@
-"""User-facing sentences from response_templates.json."""
 import json
 from functools import lru_cache
 from pathlib import Path
@@ -11,7 +10,6 @@ def load_response_templates() -> dict:
 
 
 def response(key: str, **values: object) -> str:
-    """response("errors.unsupported_capability", capabilities="recipes") -> the sentence with the value filled in."""
     section, name = key.split(".", 1)
     return load_response_templates()[section][name].format(**values)
 

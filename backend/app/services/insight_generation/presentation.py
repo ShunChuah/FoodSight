@@ -1,8 +1,6 @@
-"""How restaurant facts are written for people: distances, prices, price tiers and comparisons."""
 import math
 from typing import Any
 
-# Row field -> (comparison key, how the best value is chosen, description).
 COMPARISON_METRICS = {
     "average_price": ("lowest_average_price", min, "lowest average price"),
     "average_rating": ("highest_rating", max, "highest rating"),
@@ -15,7 +13,6 @@ PRICE_TIER_LABELS = {"budget": "budget-friendly", "mid": "mid-range", "premium":
 def distance_label(value: Any) -> str | None:
     if not _number(value):
         return None
-    # Display only: keep the original metres for radius checks and comparisons.
     if value < 25:
         return "less than 50 m"
     step = 50 if value < 500 else 100
@@ -38,7 +35,6 @@ def price_tier_label(value: Any) -> str | None:
 
 
 def comparison_evidence(rows: list[dict]) -> list[dict]:
-    """Which place is cheapest, best rated, closest or most reviewed among these rows; ties are kept."""
     result = []
     for field, (key, choose, label) in COMPARISON_METRICS.items():
         values = [row.get(field) for row in rows]

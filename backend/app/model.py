@@ -10,13 +10,11 @@ class ChatHistory(Base):
     __tablename__ = "chat_histories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    # Owner (auth.users.user_id). The foreign key is added by db/migrations/002_chat_owner.sql,
-    # because the auth tables belong to the login models, not to this Base.
+    # The foreign key is added by db/migrations/002_chat_owner.sql (the auth tables use another Base).
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # created_at is when the session row was created; updated_at changes on edits/messages.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -35,7 +33,6 @@ class ChatHistory(Base):
         back_populates="chat",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        # ID resolves ties for older user/assistant pairs that share a timestamp.
         order_by=lambda: (ChatMessage.created_at, ChatMessage.id),
     )
     query_state: Mapped["ChatQueryState | None"] = relationship(
@@ -44,8 +41,6 @@ class ChatHistory(Base):
 
 
 class ChatQueryState(Base):
-    """Per-chat flags kept between turns (title_generated: the model title was applied)."""
-
     __tablename__ = "chat_query_states"
 
     chat_id: Mapped[int] = mapped_column(
@@ -64,7 +59,6 @@ class ChatMessage(Base):
         index=True,
     )
 
-    # role is "user" for user queries and "assistant" for AI/system replies.
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -92,8 +86,6 @@ class ChatMessage(Base):
 
 
 class ChatMessageQuickReplies(Base):
-    """Quick-reply buttons offered with an assistant message."""
-
     __tablename__ = "chat_message_quick_replies"
 
     message_id: Mapped[int] = mapped_column(
@@ -103,8 +95,6 @@ class ChatMessageQuickReplies(Base):
 
 
 class ChatMessageMap(Base):
-    """Map snapshot saved with an assistant message."""
-
     __tablename__ = "chat_message_maps"
 
     message_id: Mapped[int] = mapped_column(
@@ -114,8 +104,6 @@ class ChatMessageMap(Base):
 
 
 class ChatMessageGraph(Base):
-    """Knowledge Graph Evidence ({"nodes", "edges"}) shown in View Details."""
-
     __tablename__ = "chat_message_graphs"
 
     message_id: Mapped[int] = mapped_column(
@@ -125,11 +113,6 @@ class ChatMessageGraph(Base):
 
 
 class ChatMessageGraphJob(Base):
-    """Knowledge Graph Evidence still being built after its answer was sent (status "pending"), or that failed.
-
-    Replaced by a ChatMessageGraph when the graph is ready; removed when there turns out to be nothing to draw.
-    """
-
     __tablename__ = "chat_message_graph_jobs"
 
     message_id: Mapped[int] = mapped_column(
@@ -142,8 +125,6 @@ class ChatMessageGraphJob(Base):
 
 
 class UserPreference(Base):
-    """Per-account settings that follow the user to any browser (theme: "light" or "dark")."""
-
     __tablename__ = "user_preferences"
 
     # auth.users.user_id; the foreign key is added by db/migrations/003_user_preferences.sql.

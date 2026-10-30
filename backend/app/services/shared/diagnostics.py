@@ -1,5 +1,3 @@
-"""[TIMING] log lines and KG_DEBUG output.
-"""
 import json
 import os
 from contextvars import ContextVar
@@ -12,7 +10,6 @@ _request_timing: ContextVar[dict | None] = ContextVar("request_timing", default=
 
 
 def trace_request(function):
-    """Isolate timing for concurrent synchronous FastAPI request handlers."""
     @wraps(function)
     def wrapped(*args, **kwargs):
         token = _request_timing.set({
@@ -30,8 +27,8 @@ def timing_token_fields() -> dict | None:
     return {key: context[key] for key in ("trace_id", "started_at")} if context else None
 
 
+# Continue the preflight request's timing in the send request (values come only from the signed token).
 def restore_request_timing(fields: dict | None) -> None:
-    """Continue the preflight request's timing in the send request (values come only from the signed token)."""
     context = _request_timing.get()
     if context is not None and fields:
         context.update(fields, monotonic_start=perf_counter() - max(0.0, time() - fields["started_at"]))
@@ -51,7 +48,6 @@ def log_timing(
     total_started_at: float | None = None,
     **fields: Any,
 ) -> None:
-    """Log durations in seconds using a monotonic clock."""
     completed_at = perf_counter()
     parts = [
         "[TIMING]",

@@ -1,4 +1,3 @@
-"""Data passed between the chat route, the Cypher pipeline and the map."""
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -25,9 +24,7 @@ AnswerStatus = Literal[
 
 @dataclass(frozen=True)
 class GuardrailDecision:
-    """The rule-based screen's verdict, made at preflight and reused at send."""
-
-    status: str  # ready | unsupported | out_of_scope
+    status: str
     scope: str | None = None
     message: str | None = None
     location_required: bool = False
@@ -36,11 +33,8 @@ class GuardrailDecision:
 
 @dataclass(frozen=True)
 class QueryPlan:
-    """A validated Cypher query and its parameters."""
-
     cypher: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
-    # RESTAURANT_DETAILS_FIELD when the user asked about one particular restaurant.
     requested_fields: tuple[str, ...] = ()
     result_limit: int = policy("results")["default_limit"]
 
@@ -84,8 +78,6 @@ class MapFeature:
 
 @dataclass(frozen=True)
 class MapResult:
-    """GeoJSON map snapshot saved with the answer."""
-
     status: MapStatus
     features: tuple[MapFeature, ...] = ()
     center: MapPoint | None = None
@@ -109,12 +101,9 @@ class MapResult:
 
 @dataclass
 class RetrievalResult:
-    """What the query step found; the answer step and the map read it."""
-
     status: RetrievalStatus
     query_plan: QueryPlan = field(default_factory=QueryPlan)
     records: list[dict[str, Any]] = field(default_factory=list)
-    # The reply itself without rows (an explanation, a question, a decline), or a note shown above the answer.
     message: str | None = None
     map_result: MapResult = field(default_factory=lambda: MapResult(status="empty"))
 

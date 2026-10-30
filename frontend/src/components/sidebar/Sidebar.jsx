@@ -29,7 +29,6 @@ function Sidebar({
   const [chatPendingDeletion, setChatPendingDeletion] = useState(null);
 
   const searchInputRef = useRef(null);
-  // Search filters by title only.
   const filteredChats = chats.filter((chat) =>
     chat.title.toLowerCase().includes(searchTerm.trim().toLowerCase()),
   );
@@ -52,7 +51,6 @@ function Sidebar({
   }, []);
 
   useEffect(() => {
-    // Used by the collapsed sidebar search button to focus this input.
     if (focusSearch && searchInputRef.current) {
       searchInputRef.current.focus();
       onSearchFocused?.();
@@ -126,7 +124,6 @@ function Sidebar({
                   setOpenMenuId(openMenuId === chat.id ? null : chat.id);
                 }}
                 onRename={(title) => {
-                  // ChatHistoryItem handles the inline input; parent saves to backend.
                   onRenameChat?.(chat.id, title);
                   setOpenMenuId(null);
                 }}

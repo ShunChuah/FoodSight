@@ -1,9 +1,5 @@
-"""Knowledge Graph Evidence is built after the answer has been sent, so the answer never waits for it.
+# Graph evidence is built in a worker thread after the answer is sent; the browser polls until it is ready.
 
-The chat route saves the answer with a pending ChatMessageGraphJob, then calls start_graph_job(): a worker
-thread builds the graph and saves it. The thread does not belong to the request, so the graph is finished
-even when the browser has moved on; the browser asks GET /chats/{chat}/messages/{message}/graph until then.
-"""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
@@ -31,7 +27,6 @@ def run_graph_job(
     build: Callable[[], dict | None],
     session_factory: Callable[[], AbstractContextManager[Session]] = SessionLocal,
 ) -> str:
-    """Build the graph and save it. Returns "ready", "empty" (nothing to draw), "failed" or "gone" (chat deleted)."""
     started_at = perf_counter()
     try:
         graph = build()
@@ -60,7 +55,6 @@ def run_graph_job(
 
 
 def graph_status(message: ChatMessage, now: datetime | None = None) -> str | None:
-    """"ready", "pending" or "failed"; None for an answer without graph evidence."""
     if message.graph_snapshot:
         return "ready"
     job = message.graph_job

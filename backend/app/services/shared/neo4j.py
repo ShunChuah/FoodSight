@@ -1,4 +1,3 @@
-"""Read-only Cypher execution on Neo4j."""
 import atexit
 import logging
 import math
@@ -19,7 +18,7 @@ class CypherExecutionResult:
     records: list[dict[str, Any]]
     status: str
     message: str | None = None
-    detail: str | None = None  # the database's own error text (never shown to users)
+    detail: str | None = None
 
 
 def execution_enabled() -> bool:
@@ -32,8 +31,6 @@ def execute_cypher(
     *,
     timeout_seconds: float | None = None,
 ) -> CypherExecutionResult:
-    """Run one query in a read-only session. Never raises: a failure comes back as its status,
-    with the database's error in `detail` so the Cypher model can correct the query."""
     started_at = perf_counter()
     if not execution_enabled():
         log_timing("neo4j.query", started_at, status="skipped_disabled", row_count=0)
@@ -89,7 +86,6 @@ def execute_cypher(
     return CypherExecutionResult(rows, execution_status)
 
 
-# Queries that touch the restaurant data most questions use (areas, cuisines, ratings, prices, profiles, hours).
 WARM_UP_QUERIES = (
     "MATCH (r:Restaurant)-[:LOCATED_IN]->(l:Location)-[:IN_AREA]->(a:Area) RETURN count(DISTINCT a) AS areas",
     "MATCH (r:Restaurant)-[:SERVES]->(c:Cuisine) RETURN count(c) AS cuisines",
@@ -101,10 +97,6 @@ WARM_UP_QUERIES = (
 
 
 def warm_up() -> None:
-    """Open the connection and load the graph into Neo4j's memory before the first question.
-
-    The first query on a cold database can take several seconds, which would eat the first user's time budget.
-    """
     for query in WARM_UP_QUERIES:
         execute_cypher(query)
 

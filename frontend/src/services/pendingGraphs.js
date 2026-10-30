@@ -1,8 +1,3 @@
-// Knowledge Graph Evidence is built after the answer is sent. These helpers find answers whose
-// graph is still pending, wait for it, and put the finished graph into the chat list.
-
-// Quick at first (the graph is usually ready within a second), then every few seconds. The
-// backend reports a graph pending for over two minutes as failed, so waiting stops after that.
 const WAIT_DELAYS_MS = [300, 700, 1500];
 const REPEAT_DELAY_MS = 3000;
 const MAX_WAIT_MS = 150000;
@@ -27,7 +22,6 @@ const wait = (ms, signal) => new Promise((resolve) => {
   signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
 });
 
-// Resolves with { graphStatus, graphData } once the graph is no longer pending, or null if stopped.
 export async function waitForGraph(fetchGraph, { signal, sleep = wait } = {}) {
   let waited = 0;
   for (let attempt = 0; waited < MAX_WAIT_MS; attempt += 1) {

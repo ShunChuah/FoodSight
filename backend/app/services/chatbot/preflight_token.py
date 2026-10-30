@@ -1,8 +1,5 @@
-"""Signed token carrying the preflight decision, so the send request can reuse it.
+# Signed (HMAC) preflight decision, so the send request reuses it and a client cannot edit it.
 
-Preflight screens the message (and tells the browser whether to ask for GPS); send then trusts the token
-instead of screening again. The HMAC signature stops a client from editing the decision.
-"""
 import base64
 import hashlib
 import hmac
@@ -21,7 +18,6 @@ def create_guardrail_token(
     chat_id: int | None,
     decision: GuardrailDecision,
 ) -> str:
-    # The token is only valid for this exact message in this chat, for TOKEN_TTL_SECONDS.
     payload = {
         "message_hash": _message_hash(message),
         "chat_id": chat_id,
@@ -51,7 +47,6 @@ def verify_guardrail_token(
 ) -> GuardrailDecision | None:
     if not token:
         return None
-    # Any problem (tampered, expired, other message or chat) returns None: the send route then screens again.
     try:
         encoded_payload, encoded_signature = token.split(".", maxsplit=1)
         supplied_signature = _decode(encoded_signature)

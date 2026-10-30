@@ -1,7 +1,5 @@
-"""Chat titles (FR-40): the user's first question, until the model suggests a better one."""
 import re
 
-# Generic titles are never used: the user's first question is the fallback instead.
 GENERIC_TITLES = {"New Chat", "F&B Assistance", "F&B Business Analysis"}
 
 
@@ -13,7 +11,6 @@ def create_temporary_chat_title(message: str) -> str:
 
 
 def generated_title(value: object, message: str) -> str | None:
-    """The model's title, cleaned; None when it is empty, generic or just repeats the question."""
     if not isinstance(value, str):
         return None
     title = " ".join(value.strip().split()).strip(" .?!:;,-")

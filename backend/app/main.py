@@ -22,8 +22,6 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="FoodSight API")
 
-# Allows the Vite/React frontend to call this backend during development.
-# Credentials are allowed so the login session cookie is sent with requests.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(dict.fromkeys([
@@ -41,7 +39,6 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(preferences_router)
 
-# Login, registration and the current user live under /api/v1.
 router = APIRouter(prefix="/api/v1")
 
 
@@ -62,7 +59,6 @@ async def health():
 router.include_router(auth_router)
 app.include_router(router)
 
-# Warm Neo4j up in the background so the first question does not pay for a cold database.
 threading.Thread(target=warm_up, daemon=True).start()
 
 

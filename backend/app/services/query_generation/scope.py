@@ -1,6 +1,5 @@
-"""Rule-based screen: answers clearly non-food requests, and food requests for data the graph does not have,
-before any LLM call. Everything else goes to Cypher generation, which declines unclear cases itself.
-"""
+# Rule-based screen before any LLM call: off-topic requests and food data the graph does not have.
+
 import re
 from dataclasses import dataclass
 
@@ -41,8 +40,6 @@ WEATHER_REQUEST = re.compile(
     r"(?:[.!?]*$|\s+(?:today|tomorrow|now|forecast|like|in|at|near|around)\b)"
 )
 
-# Food requests that need data the graph does not have. (Table bookings are not here: the graph records
-# which places take reservations.)
 UNSUPPORTED_CAPABILITY_PATTERNS = (
     (r"\brecipes?\b", "recipes"),
     (r"\bhow\s+to\s+(?:cook|make|prepare)\b", "cooking instructions"),
@@ -67,9 +64,9 @@ UNSUPPORTED_CAPABILITY_PATTERNS = (
 
 @dataclass(frozen=True)
 class ScopeDecision:
-    status: str  # supported | unsupported | out_of_scope
-    scope: str | None = None  # fnb_customer | fnb_analyst
-    reason: str | None = None  # the reply for an unsupported request
+    status: str
+    scope: str | None = None
+    reason: str | None = None
 
 
 def classify_query_scope(user_query: str, conversation_context: str = "No previous conversation.") -> ScopeDecision:
@@ -91,7 +88,6 @@ def has_fnb_signal(text: str) -> bool:
 
 
 def _fnb_scope(normalized: str, conversation_context: str, fnb_signal: bool) -> str | None:
-    """fnb_analyst for business questions, fnb_customer for other food questions; a follow-up takes the chat's."""
     if not fnb_signal:
         normalized = normalize_query_text(" ".join(
             line.removeprefix("User:") for line in conversation_context.splitlines() if line.startswith("User:")))
