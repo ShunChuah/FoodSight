@@ -1,10 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { CircleStop, ExternalLink, Mic, Send } from "lucide-react";
 import "../../styles/chat.css";
-import { quickQueries } from "../../../data/quickQueriesTemplate";
+import { QUICK_QUERY_COUNT, quickQueries } from "../../../data/quickQueriesTemplate";
 
 const MAX_MESSAGE_WORDS = 1000;
 const MAX_MESSAGE_CHARACTERS = 5000;
+
+function pickQuickQueries() {
+  const shuffled = [...quickQueries];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, QUICK_QUERY_COUNT);
+}
 
 function ChatInput({
   onSendQuery,
@@ -12,7 +21,8 @@ function ChatInput({
   showSuggestions,
   disabled = false,
 }) {
-  const queries = quickQueries;
+  // Picked once per mount, so the buttons don't reshuffle while the user reads them.
+  const [queries] = useState(pickQuickQueries);
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [micPermissionTooltip, setMicPermissionTooltip] = useState("");

@@ -1,5 +1,11 @@
 export const quickQueries = [
-  "Find affordable restaurants near me",
-  "Recommend cafes with high ratings in SS2",
-  "Find Japanese restaurants near me",
+  "What's good to eat near me?",
+  "Cheap and good food near me",
+  "Halal food near me",
+  "Family-friendly dinner spots in PJ",
+  "Best breakfast spots in PJ",
+  "Nice cafes to chill in PJ",
+  "Where can I get supper tonight?",
 ];
+
+export const QUICK_QUERY_COUNT = 3;
