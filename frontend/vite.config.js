@@ -10,6 +10,8 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  // One .env in the project root for the backend and the frontend; only VITE_* values reach the browser.
+  envDir: '..',
   server: {
     host: true,
     port: 5173,

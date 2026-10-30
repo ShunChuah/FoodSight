@@ -23,8 +23,6 @@ services:
     env_file:
       - path: .env
         required: false
-      - path: ./backend/.env
-        required: false
     environment:
       # Postgres runs on the host machine, not in a container.
       DB_HOST: host.docker.internal
@@ -42,9 +40,12 @@ services:
     build:
       context: ./frontend
     restart: unless-stopped
+    # Only the VITE_* values from .env, so the frontend container never sees the backend's secrets.
     environment:
-      VITE_API_URL: http://localhost:8000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+      VITE_MAP_TILE_URL: ${VITE_MAP_TILE_URL:-}
+      VITE_MAP_TILE_ATTRIBUTION: ${VITE_MAP_TILE_ATTRIBUTION:-}
     ports:
       - "5173:5173"
     depends_on:

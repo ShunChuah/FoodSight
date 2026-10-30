@@ -8,15 +8,14 @@ An AI-first Food &amp; Beverage location intelligence platform that transforms F
 
 ## Setup
 
-1. Create the environment files:
+1. Create the environment file (one `.env` in the project root, for the backend and the frontend):
 
    ```powershell
-   copy backend\.env.example backend\.env
-   copy frontend\.env.example frontend\.env
+   copy .env.example .env
    ```
 
-2. In `backend\.env`, set `LLM_API_KEY` (your OpenAI API key) and
-   `GUARDRAIL_TOKEN_SECRET` (any long random text).
+2. In `.env`, fill in section 1 ("Required"): `LLM_API_KEY` (your OpenAI API key), `AUTH_SECRET` and
+   `GUARDRAIL_TOKEN_SECRET` (any long random text), and your PostgreSQL password.
 
 3. Load the graph data into Neo4j. Put the Neo4j 5 Community dump at
    `neo4j\imports\neo4j.dump`, then run:
