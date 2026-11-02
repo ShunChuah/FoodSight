@@ -49,6 +49,7 @@ def generate_assistant_response(
     preflight_decision: GuardrailDecision | None = None,
     deadline: float | None = None,
     title_needed: bool | None = None,
+    on_answer: Callable[[str], None] | None = None,
 ) -> AssistantTurn:
     started_at = perf_counter()
     deadline = deadline or started_at + get_response_budget_seconds()
@@ -71,7 +72,8 @@ def generate_assistant_response(
     result = query_graph(user_query, conversation_context, location_context, deadline=deadline,
                          replies=replies, want_title=title_needed, may_clarify=may_clarify)
     log_timing("chat.retrieval", retrieval_started_at, status=result.status, total_started_at=started_at)
-    answer = generate_answer(user_query, result, conversation_context=conversation_context, deadline=deadline)
+    answer = generate_answer(user_query, result, conversation_context=conversation_context, deadline=deadline,
+                             on_answer=on_answer)
     log_timing("chat.pipeline.total", started_at, status=answer.status, used_llm=answer.used_llm)
     kg_debug("Final answer", answer.text)
     has_rows = result.status == "success" and bool(result.records)

@@ -1,9 +1,15 @@
+import json
 import os
+import queue
+import threading
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -304,6 +310,52 @@ def send_message(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> ChatSendResponse:
+    return _send_message(payload, db, user)
+
+
+@router.post("/messages/stream")
+def stream_message(
+    payload: ChatSendRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> StreamingResponse:
+    if not payload.message.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=user_response("interface.empty_message"),
+        )
+    if payload.chat_id:
+        get_chat_or_404(db, payload.chat_id, user.id)
+    events: queue.Queue = queue.Queue()
+    owner, bind = SimpleNamespace(id=user.id), db.get_bind()
+
+    @trace_request
+    def work() -> None:
+        try:
+            # Own session: the request's session can close before the stream ends.
+            with Session(bind=bind) as session:
+                sent = _send_message(payload, session, owner,
+                                     on_answer=lambda text: events.put({"type": "answer", "text": text}))
+            events.put({"type": "done", **jsonable_encoder(sent)})
+        except HTTPException as exc:
+            events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
+        except Exception as exc:
+            print(f"Streamed chat message failed: {exc}", flush=True)
+            events.put({"type": "error", "status": 500, "detail": user_response("errors.unexpected")})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=work, name="chat-send", daemon=True).start()
+
+    def lines():
+        while (event := events.get()) is not None:
+            yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -> ChatSendResponse:
     send_started_at = perf_counter()
     user_text = payload.message.strip()
     if not user_text:
@@ -351,6 +403,7 @@ def send_message(
             preflight_decision,
             deadline=send_started_at + get_response_budget_seconds(),
             title_needed=wants_title,
+            on_answer=on_answer,
         )
     except Exception as exc:
         generation_status = "error"

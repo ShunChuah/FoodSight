@@ -7,8 +7,8 @@ import re
 import socket
 import urllib.error
 import urllib.request
-from time import perf_counter
-from typing import Literal
+from time import monotonic, perf_counter
+from typing import Callable, Literal
 
 from dotenv import load_dotenv
 
@@ -69,6 +69,63 @@ def parse_answer_json(raw: str | None, *, max_length: int) -> str | None:
     return answer if answer and len(answer) <= max_length else None
 
 
+# The object a streamed reply holds so far (open strings and brackets closed), or None.
+def parse_partial_json(raw: str | None) -> dict | None:
+    complete = parse_json_object(raw)
+    if complete is not None or not raw:
+        return complete
+    text = raw.strip()
+    start = text.find("{")
+    if start < 0:
+        return None
+    text = text[start:]
+    cuts, in_string, escaped = [], False, False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == ",":
+            cuts.append(index)
+    candidates = [text, text.rstrip().rstrip(",")] + [text[:cut] for cut in reversed(cuts[-3:])]
+    for candidate in candidates:
+        payload = _closed(candidate)
+        if payload is not None:
+            return payload
+    return None
+
+
+def _closed(prefix: str) -> dict | None:
+    stack, in_string, escaped = [], False, False
+    for char in prefix:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append("}" if char == "{" else "]")
+        elif char in "}]" and stack:
+            stack.pop()
+    if escaped:
+        prefix = prefix[:-1]
+    closing = ('"' if in_string else "") + "".join(reversed(stack))
+    try:
+        payload = json.loads(prefix + closing)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def call_llm(
     prompt: str,
     instructions: str | None = None,
@@ -76,7 +133,9 @@ def call_llm(
     task: LLMTask = "query",
     timeout_seconds: float | None = None,
     response_schema: dict | None = None,
+    on_text: Callable[[str], None] | None = None,
 ) -> str | None:
+    # on_text gets the reply so far while it streams.
     api_key = os.getenv("LLM_API_KEY", "").strip()
     model = _get_llm_model(task)
     url = _get_llm_url(model)
@@ -92,6 +151,11 @@ def call_llm(
     payload, headers = _build_llm_request(
         prompt, model, task=task, response_schema=response_schema, instructions=instructions,
     )
+    stream = on_text is not None and _get_llm_style() in {"responses", "chat"}
+    if stream:
+        payload["stream"] = True
+        if _get_llm_style() == "chat":
+            payload["stream_options"] = {"include_usage": True}
     request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -108,7 +172,10 @@ def call_llm(
     print(f"[LLM] task={task} model={model} timeout_seconds={request_timeout:g}", flush=True)
     try:
         with urllib.request.urlopen(request, timeout=request_timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            if stream:
+                data, streamed_text = _read_stream(response, on_text, monotonic() + request_timeout)
+            else:
+                data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         print(f"LLM HTTP error {exc.code}: {error_body[:500]}", flush=True)
@@ -141,16 +208,52 @@ def call_llm(
 
     _log_token_usage(data, task, model)
     # A reply cut off by the output-token limit is unusable JSON, so treat it as a failure.
-    if data.get("status") == "incomplete" or any(
+    if data.get("status") in {"incomplete", "failed"} or any(
         choice.get("finish_reason") == "length" for choice in data.get("choices") or []
     ):
         raise LLMServiceError(
             "The LLM response was incomplete. Please try again."
         )
-    text = _extract_llm_text(data)
+    text = streamed_text.strip() or None if stream else _extract_llm_text(data)
     if not text:
         print(f"LLM returned no text: {json.dumps(data)[:500]}", flush=True)
+    elif on_text is not None and not stream:
+        on_text(text)
     return text
+
+
+# The whole stream must finish within the timeout, not just each read.
+def _read_stream(response, on_text: Callable[[str], None], deadline: float) -> tuple[dict, str]:
+    chat = _get_llm_style() == "chat"
+    text, final = "", {}
+    for line in response:
+        if monotonic() > deadline:
+            raise TimeoutError("The streamed reply took too long.")
+        line = line.decode("utf-8").strip()
+        if not line.startswith("data:"):
+            continue
+        body = line[5:].strip()
+        if body == "[DONE]":
+            break
+        event = json.loads(body)
+        if chat:
+            for choice in event.get("choices") or []:
+                delta = (choice.get("delta") or {}).get("content")
+                if delta:
+                    text += delta
+                    on_text(text)
+                if choice.get("finish_reason"):
+                    final["choices"] = [{"finish_reason": choice["finish_reason"]}]
+            if event.get("usage"):
+                final["usage"] = event["usage"]
+        elif event.get("type") == "response.output_text.delta":
+            text += event.get("delta") or ""
+            on_text(text)
+        elif event.get("type") in {"response.completed", "response.incomplete", "response.failed"}:
+            final = event.get("response") or {}
+        elif event.get("type") == "error":
+            raise LLMServiceError("The LLM service returned an error. Please try again.")
+    return final, text
 
 
 def _get_llm_model(task: LLMTask) -> str:

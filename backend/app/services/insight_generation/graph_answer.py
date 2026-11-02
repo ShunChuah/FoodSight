@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import date, datetime, time
 from functools import lru_cache
 from time import perf_counter
-from typing import Any
+from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...contracts import AnswerResult, QueryPlan, RetrievalResult
@@ -24,7 +24,14 @@ from ..query_generation.cypher_generation import (
 from ..query_generation.scope import has_fnb_signal
 from ..shared.config import policy
 from ..shared.diagnostics import kg_debug, log_timing
-from ..shared.llm import LLMServiceError, call_llm, parse_answer_json, parse_json_object, remaining_response_timeout
+from ..shared.llm import (
+    LLMServiceError,
+    call_llm,
+    parse_answer_json,
+    parse_json_object,
+    parse_partial_json,
+    remaining_response_timeout,
+)
 from ..shared.messages import response
 from ..shared.neo4j import CypherExecutionResult, execute_cypher, execution_enabled
 from .presentation import comparison_evidence, distance_label, money_label
@@ -605,14 +612,53 @@ def generate_answer(
     *,
     conversation_context: str = "No previous conversation.",
     deadline: float | None = None,
+    on_answer: Callable[[str], None] | None = None,
 ) -> AnswerResult:
+    # on_answer gets the full answer so far, not a delta.
     started_at = perf_counter()
-    result = _answer(user_query, retrieval, conversation_context, deadline)
+    result = _answer(user_query, retrieval, conversation_context, deadline, on_answer)
     log_timing("answer.generation", started_at, status=result.status, used_llm=result.used_llm)
     return result
 
 
-def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: str, deadline: float | None) -> AnswerResult:
+STREAM_INTERVAL_SECONDS = 0.1
+
+
+# Sends the partial reply in the final answer's layout.
+class _AnswerStream:
+    def __init__(self, on_answer: Callable[[str], None], render: Callable[[dict | None], str], note: str | None):
+        self.on_answer, self.render, self.note = on_answer, render, note
+        self.last, self.sent_at = "", 0.0
+
+    def __call__(self, raw: str) -> None:
+        if perf_counter() - self.sent_at < STREAM_INTERVAL_SECONDS:
+            return
+        try:
+            text = _without_markers(self.render(parse_partial_json(raw)))
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError):
+            return
+        if text and text != self.last:
+            self.last, self.sent_at = text, perf_counter()
+            self.on_answer(f"{self.note}\n\n{text}" if self.note else text)
+
+
+# Only the places the model has started describing.
+def _described_rows(payload: dict | None, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    numbers = [int(match.group(1)) for item in (payload or {}).get("restaurants") or []
+               if isinstance(item, dict) and "description" in item
+               and (match := re.fullmatch(r"R(\d+)", str(item.get("record_id", ""))))]
+    return rows[:max(numbers, default=0)]
+
+
+def _partial_summary(payload: dict | None) -> str:
+    answer = (payload or {}).get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        raise ValueError("no answer yet")
+    return clean_opening(answer)
+
+
+def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: str, deadline: float | None,
+            on_answer: Callable[[str], None] | None = None) -> AnswerResult:
     if retrieval.status == "no_results":
         return AnswerResult(status="no_results", text=retrieval.message or response("errors.no_results"))
     if retrieval.status == "clarification_required":
@@ -649,7 +695,13 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     try:
         output_format = (CARD_FORMAT if card else COMPARE_FORMAT if compare else LIST_FORMAT) \
             if restaurants else SUMMARY_FORMAT
-        raw = call_llm(prompt, ANSWER_INSTRUCTIONS + "\n\n" + output_format, task="response", timeout_seconds=timeout)
+        if restaurants:
+            partial = lambda payload: _render_model_answer(  # noqa: E731
+                payload, rows if card else _described_rows(payload, rows), card, user_query, compare)
+        else:
+            partial = _partial_summary
+        raw = call_llm(prompt, ANSWER_INSTRUCTIONS + "\n\n" + output_format, task="response", timeout_seconds=timeout,
+                       on_text=_AnswerStream(on_answer, partial, note) if on_answer else None)
         kg_debug("Answer model output", raw)
         if restaurants:
             answer = _render_model_answer(parse_json_object(raw), rows, card, user_query, compare)

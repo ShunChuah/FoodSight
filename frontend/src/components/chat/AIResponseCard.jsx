@@ -61,6 +61,7 @@ function AIResponseCard({
   hasDetails = false,
   onShowExplanation,
   isExplanationOpen = false,
+  streaming = false,
 }) {
   const speech = useAnswerSpeech(answer);
   const isSpeaking = speech.status === "speaking";
@@ -69,10 +70,10 @@ function AIResponseCard({
   const SpeechIcon = isSpeaking ? Pause : isPaused ? Play : Volume2;
 
   return (
-    <div className="ai-response-card">
+    <div className="ai-response-card" aria-busy={streaming}>
       <FormattedAnswer answer={answer} />
 
-      <div className="response-actions">
+      {!streaming && <div className="response-actions">
         {hasDetails && (
           <button
             className="show-explanation-action"
@@ -98,7 +99,7 @@ function AIResponseCard({
           <SpeechIcon aria-hidden="true" />
           <span>Speak Answer</span>
         </button>
-      </div>
+      </div>}
       {speech.notice && (
         <p className="speech-notice" id={speech.noticeId} role="status">
           {speech.notice}

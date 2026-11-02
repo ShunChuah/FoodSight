@@ -17,6 +17,7 @@ function ChatArea({
   darkMode = false,
   showGraphEvidence = true,
   pendingQuery = "",
+  streamingAnswer = "",
 }) {
   const hasPendingQuery = Boolean(pendingQuery.trim());
   const messages = selectedChat?.messages ?? [];
@@ -57,7 +58,7 @@ function ChatArea({
     requestAnimationFrame(() => {
       el.scrollTop = el.scrollHeight;
     });
-  }, [selectedChat?.id, selectedChat?.messages?.length, hasPendingQuery]);
+  }, [selectedChat?.id, selectedChat?.messages?.length, hasPendingQuery, streamingAnswer]);
 
   return (
     <main
@@ -89,7 +90,9 @@ function ChatArea({
                 {!hasSavedPendingUserMessage && (
                   <UserQuestionBubble text={pendingQuery} />
                 )}
-                {isSending && <AIResponseSkeleton />}
+                {isSending && (streamingAnswer
+                  ? <AIResponseCard answer={streamingAnswer} streaming />
+                  : <AIResponseSkeleton />)}
               </>
             )}
           </div>

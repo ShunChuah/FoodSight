@@ -18,6 +18,10 @@ export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler;
 }
 
+export function notifyUnauthorized() {
+  onUnauthorized();
+}
+
 for (const client of [chatApi, api]) {
   client.interceptors.response.use(
     (response) => response,

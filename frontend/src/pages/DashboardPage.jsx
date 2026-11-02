@@ -40,6 +40,7 @@ function DashboardPage() {
   const [isSending, setIsSending] = useState(false);
   const [pendingQuery, setPendingQuery] = useState("");
   const [pendingChatId, setPendingChatId] = useState(null);
+  const [streamingAnswer, setStreamingAnswer] = useState("");
   const isSendingRef = useRef(false);
   const preflightRef = useRef(null);
   const draftChatIdRef = useRef(null);
@@ -172,6 +173,7 @@ function DashboardPage() {
         location,
         locationPermissionDenied,
         preflight,
+        onAnswer: setStreamingAnswer,
       });
 
       const savedChat = await sendPromise;
@@ -187,6 +189,7 @@ function DashboardPage() {
       setIsSending(false);
       setPendingQuery("");
       setPendingChatId(null);
+      setStreamingAnswer("");
     }
   };
 
@@ -292,6 +295,7 @@ function DashboardPage() {
         darkMode={darkMode}
         showGraphEvidence={showGraphEvidence}
         pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
+        streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
       />
 
       {settingsOpen && (

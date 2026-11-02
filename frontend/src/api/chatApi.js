@@ -1,4 +1,5 @@
-import api from "./client";
+import api, { notifyUnauthorized } from "./client";
+import { readAnswerStream, streamError } from "../services/answerStream";
 
 export async function fetchChatHistories() {
   const response = await api.get("/chats");
@@ -21,6 +22,7 @@ export async function sendChatMessage({
   location,
   locationPermissionDenied = false,
   preflight = null,
+  onAnswer = null,
 }) {
   const payload = {
     chat_id: chatId ?? null,
@@ -32,8 +34,28 @@ export async function sendChatMessage({
     preflight_token: preflight?.decisionToken ?? null,
   };
 
+  // axios cannot read a streamed body.
+  if (onAnswer && typeof fetch === "function") {
+    return (await streamChatMessage(payload, onAnswer)).chat;
+  }
   const response = await api.post("/chats/messages", payload);
   return response.data.chat;
+}
+
+async function streamChatMessage(payload, onAnswer) {
+  const baseUrl = (api.defaults.baseURL ?? "").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/chats/messages/stream`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok || !response.body) {
+    if (response.status === 401) notifyUnauthorized();
+    const detail = await response.json().then((body) => body.detail).catch(() => undefined);
+    throw streamError(response.status, detail);
+  }
+  return readAnswerStream(response, onAnswer);
 }
 
 export async function fetchGraphEvidence(chatId, messageId) {
