@@ -2,14 +2,31 @@
 
 import json
 import os
+from datetime import timedelta, timezone, tzinfo
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 PROXIMITY_MODES = {"radius_search", "nearest_search", "walking_proxy", "distance_measurement", "delivery_search"}
+# Malaysia has no daylight saving, so a fixed +08:00 is exact if the timezone database is missing.
+MALAYSIA_TIME = timezone(timedelta(hours=8), "MYT")
+
+
+# The containers run on UTC, so opening hours and dates always use this zone.
+@lru_cache(maxsize=1)
+def app_timezone() -> tzinfo:
+    name = os.getenv("APP_TIMEZONE", "Asia/Kuala_Lumpur").strip() or "Asia/Kuala_Lumpur"
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        try:
+            return ZoneInfo("Asia/Kuala_Lumpur")
+        except ZoneInfoNotFoundError:
+            return MALAYSIA_TIME
 
 
 def get_query_assumptions_path() -> Path:

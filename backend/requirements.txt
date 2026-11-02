@@ -40,4 +40,4 @@ starlette==1.0.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 uvicorn==0.47.0
-tzdata>=2024.1; sys_platform == "win32"
+tzdata>=2024.1

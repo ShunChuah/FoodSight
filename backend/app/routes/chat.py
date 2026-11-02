@@ -1,11 +1,9 @@
 import json
-import os
 import queue
 import threading
 from datetime import datetime, timedelta, timezone
-from time import perf_counter
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.encoders import jsonable_encoder
@@ -55,6 +53,7 @@ from ..services.chatbot.titles import (
     generated_title,
 )
 from ..services.shared.diagnostics import log_request_timing, log_timing, timing_token_fields, trace_request
+from ..services.shared.config import app_timezone
 from ..services.shared.messages import response as user_response
 
 # Every route needs a verified user and only sees that user's chats.
@@ -63,11 +62,7 @@ TITLE_GENERATED = "title_generated"
 
 
 def get_display_timezone():
-    configured_timezone = os.getenv("APP_TIMEZONE", "Asia/Kuala_Lumpur").strip()
-    try:
-        return ZoneInfo(configured_timezone)
-    except ZoneInfoNotFoundError:
-        return ZoneInfo("Asia/Kuala_Lumpur")
+    return app_timezone()
 
 
 def to_display_time(value: datetime) -> datetime:

@@ -4,6 +4,7 @@ from typing import Any
 
 from ..shared.neo4j import execute_cypher
 from .graph_answer import _plain, _today
+from .presentation import hours_label
 
 MAX_RESTAURANTS = 10
 MAX_NODES = 80
@@ -105,4 +106,6 @@ def _caption(label: str | None, properties: dict) -> str:
     field = "name" if properties.get("name") not in (None, "") else (
         _today() if label == "OperatingHours" else CAPTION_PROPERTIES.get(label))
     value = properties.get(field) if field else None
+    if label == "OperatingHours":
+        value = hours_label(value)
     return str(value) if value not in (None, "") else str(label or "Node")

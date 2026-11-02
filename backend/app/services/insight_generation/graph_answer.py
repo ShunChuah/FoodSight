@@ -1,14 +1,12 @@
 # Runs the generated Cypher (query_graph) and writes the answer from its rows (generate_answer).
 
 import json
-import os
 import re
 from dataclasses import replace
 from datetime import date, datetime, time
 from functools import lru_cache
 from time import perf_counter
 from typing import Any, Callable
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...contracts import AnswerResult, QueryPlan, RetrievalResult
 from ..maps.map_result import build_map_result
@@ -22,7 +20,7 @@ from ..query_generation.cypher_generation import (
     returns_restaurants,
 )
 from ..query_generation.scope import has_fnb_signal
-from ..shared.config import policy
+from ..shared.config import app_timezone, policy
 from ..shared.diagnostics import kg_debug, log_timing
 from ..shared.llm import (
     LLMServiceError,
@@ -34,7 +32,7 @@ from ..shared.llm import (
 )
 from ..shared.messages import response
 from ..shared.neo4j import CypherExecutionResult, execute_cypher, execution_enabled
-from .presentation import comparison_evidence, distance_label, money_label
+from .presentation import comparison_evidence, distance_label, hours_label, money_label, time_label
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
@@ -65,7 +63,7 @@ DETAIL_COLUMNS = {
     "position", "restaurant_id", "restaurant_name", "venue_type", "business_status", "latitude", "longitude", "area",
     "average_rating", "review_count", "average_price", "price_tier", "halal_status", "restaurant_type", "good_for",
     "ambiance", "service_style", "hours", "cuisines", "facilities", "hours_today", "currency", "anchor_id",
-    "phone", "website", "address", "open_now", "weekly_hours",
+    "phone", "website", "address", "open_now", "opens_at", "weekly_hours",
 }
 
 ANSWER_INSTRUCTIONS = """
@@ -90,7 +88,8 @@ Rules:
   questions about another day. open_now says whether those regular hours cover this moment; say a
   place is open now only when open_now is true, and never promise it (holidays can differ). Say a place is open at a
   time the user asked about (for example after 11pm) only when its hours_today clearly include that time; otherwise
-  say which places close earlier.
+  say which places close earlier. When open_now is false, never just say it is closed: say when it opens (opens_at),
+  or leave the hours out if the user did not ask about time.
 - Never explain how you searched or what you assumed: no "Assuming ...", "I took ... to mean ...", matching,
   patterns, radii, filters or ranking methods. Just answer.
 - You see at most a handful of places. If the user asked for all or every place, say these are a few top picks and
@@ -193,13 +192,16 @@ def query_graph(
         return RetrievalResult(status="preview", query_plan=plan)
     wanted = time_asked(user_query, _now())
     best = _asks_best_rated(user_query, plan)
-    execution = _run(plan, deadline, more_candidates=bool(wanted or best) and returns_restaurants(plan.cypher))
+    prefer_open = not wanted and _prefers_open(user_query, plan)
+    widen = bool(wanted or best or prefer_open)
+    execution = _run(plan, deadline, more_candidates=widen and returns_restaurants(plan.cypher))
     if execution.status == "error" and execution.detail:
         retry = _keep_details(generate_cypher(user_query, conversation_context, location_context, deadline=deadline,
                                               previous=(plan.cypher, execution.detail)), generated)
         if retry.status == "success" and retry.plan:
             plan = retry.plan
-            execution = _run(plan, deadline)
+            # Same wider pool, or filtering by hours can leave nothing.
+            execution = _run(plan, deadline, more_candidates=widen and returns_restaurants(plan.cypher))
     if execution.status != "success":
         return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message)
     widened = None
@@ -214,15 +216,19 @@ def query_graph(
     if branches:
         return _clarification(replies, *branches)
     if rows and returns_restaurants(plan.cypher):
-        rows = _with_restaurant_details(rows if wanted or best else rows[:plan.result_limit], deadline)
+        pool = plan.result_limit * (OPEN_FIRST_POOL if prefer_open else 1)
+        rows = _with_restaurant_details(rows if wanted or best else rows[:pool], deadline)
         rows = _whole_word_matches(rows, plan)
         if best:
-            rows = _well_reviewed(rows)[:plan.result_limit if not wanted else None]
+            rows = _well_reviewed(rows)
         if wanted:
-            open_rows = [row for row in rows if open_now(row.get("hours_today"), wanted) is True]
-            if not open_rows:
+            rows = [row for row in rows
+                    if open_now(row.get("hours_today"), wanted, _yesterday(row.get("weekly_hours"), wanted)) is True]
+            if not rows:
                 return RetrievalResult(status="no_results", query_plan=plan, message=NOT_OPEN_THEN)
-            rows = open_rows[:plan.result_limit]
+        elif prefer_open:
+            rows = sorted(rows[:pool], key=lambda row: OPEN_FIRST.get(row.get("open_now"), 1))
+        rows = rows[:plan.result_limit]
     kg_debug("Cypher rows", rows)
     if not rows:
         unknown_area = _unknown_area_question(plan, deadline)
@@ -532,18 +538,16 @@ def _with_restaurant_details(rows: list[dict[str, Any]], deadline: float | None)
         detail["hours_today"] = "open 24 hours" if hours.get("is_24_7") else hours.get(today)
         detail["weekly_hours"] = {day: hours[day] for day in WEEKDAYS if hours.get(day)} \
             if not hours.get("is_24_7") else None
-        detail["open_now"] = open_now(detail["hours_today"], _now())
+        now = _now()
+        detail["open_now"] = open_now(detail["hours_today"], now, _yesterday(detail["weekly_hours"], now))
+        detail["opens_at"] = opens_next(detail["weekly_hours"], now) if detail["open_now"] is False else None
         detail["currency"] = "MYR"
         merged.append({**{k: v for k, v in row.items() if k not in DETAIL_COLUMNS}, **detail})
     return merged
 
 
 def _now() -> datetime:
-    try:
-        zone = ZoneInfo(os.getenv("APP_TIMEZONE", "Asia/Kuala_Lumpur").strip())
-    except ZoneInfoNotFoundError:
-        zone = ZoneInfo("Asia/Kuala_Lumpur")
-    return datetime.now(zone)
+    return datetime.now(app_timezone())
 
 
 def _today() -> str:
@@ -553,8 +557,22 @@ def _today() -> str:
 NOT_OPEN_THEN = ("None of the places I found are open at that time by their regular hours. Try a 24-hour place, "
                  "or ask me for places open late.")
 OPEN_NOW_WORDS = re.compile(r"\b(?:open (?:right )?now|currently open|still open|open at the moment)\b", re.IGNORECASE)
-LATE_WORDS = re.compile(r"\b(?:supper|late[- ]night)\b", re.IGNORECASE)
+LATE_WORDS = re.compile(r"\b(?:supper|late[- ]night|late at night|open(?:s|ing)? (?:till |until )?late)\b",
+                        re.IGNORECASE)
+LATE_HOUR, NIGHT_ENDS_HOUR = 23, 5
 CLOCK_TIME = re.compile(r"\b(?:after|past|at|by|around)\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+
+
+OPEN_FIRST_POOL = 2
+OPEN_FIRST = {True: 0, None: 1, False: 2}
+PLANNING_WORDS = re.compile(
+    r"\b(?:breakfast|brunch|lunch|dinner|tea ?time|morning|afternoon|evening|tonight|tomorrow|weekends?|later|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b", re.IGNORECASE)
+
+
+def _prefers_open(question: str, plan: QueryPlan) -> bool:
+    return not (PLANNING_WORDS.search(question or "") or RESTAURANT_DETAILS_FIELD in plan.requested_fields
+                or len(named_places(plan.parameters)) >= 2)
 
 
 def time_asked(question: str, now: datetime) -> datetime | None:
@@ -565,27 +583,53 @@ def time_asked(question: str, now: datetime) -> datetime | None:
     if OPEN_NOW_WORDS.search(question or ""):
         return now
     if LATE_WORDS.search(question or ""):
-        return now.replace(hour=23, minute=0, second=0, microsecond=0)
+        # During the night itself, supper means open right now.
+        if now.hour >= LATE_HOUR or now.hour < NIGHT_ENDS_HOUR:
+            return now
+        return now.replace(hour=LATE_HOUR, minute=0, second=0, microsecond=0)
     return None
 
 
 # A range past midnight ("18:00-02:00") counts until it ends, also from yesterday's hours.
-def open_now(hours_today: Any, now: datetime) -> bool | None:
+def open_now(hours_today: Any, now: datetime, hours_yesterday: Any = None) -> bool | None:
     if hours_today == "open 24 hours":
+        return True
+    minute = now.hour * 60 + now.minute
+    if any(end <= start and minute < end for start, end in _ranges(hours_yesterday)):
         return True
     if not isinstance(hours_today, str):
         return None
     if hours_today.strip().lower() == "closed":
         return False
-    ranges = re.findall(r"(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})", hours_today)
+    ranges = _ranges(hours_today)
     if not ranges:
         return None
+    return any(start <= minute < (end if end > start else 24 * 60) for start, end in ranges)
+
+
+def opens_next(weekly_hours: dict[str, Any] | None, now: datetime) -> str | None:
+    hours = weekly_hours or {}
     minute = now.hour * 60 + now.minute
-    for start_h, start_m, end_h, end_m in ranges:
-        start, end = int(start_h) * 60 + int(start_m), int(end_h) * 60 + int(end_m)
-        if start <= minute < (end if end > start else 24 * 60):
-            return True
-    return False
+    later = [start for start, _ in _ranges(hours.get(WEEKDAYS[now.weekday()])) if start > minute]
+    if later:
+        return f"{_clock(min(later))} today"
+    tomorrow = [start for start, _ in _ranges(hours.get(WEEKDAYS[(now.weekday() + 1) % 7]))]
+    return f"{_clock(min(tomorrow))} tomorrow" if tomorrow else None
+
+
+def _ranges(hours: Any) -> list[tuple[int, int]]:
+    if not isinstance(hours, str):
+        return []
+    return [(int(sh) * 60 + int(sm), int(eh) * 60 + int(em))
+            for sh, sm, eh, em in re.findall(r"(\d{1,2}):(\d{2})\s*[-–]\s*(\d{1,2}):(\d{2})", hours)]
+
+
+def _clock(minute: int) -> str:
+    return time_label(minute // 60, minute % 60)
+
+
+def _yesterday(weekly_hours: dict[str, Any] | None, moment: datetime) -> Any:
+    return (weekly_hours or {}).get(WEEKDAYS[(moment.weekday() - 1) % 7])
 
 
 def _plain(value: Any) -> Any:
@@ -739,13 +783,15 @@ def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False) -> list
             "ambiance": row.get("ambiance"),
             "service_style": row.get("service_style") if row.get("service_style") != "unknown" else None,
             "facilities": row.get("facilities"),
-            "hours_today": row.get("hours_today"),
+            "hours_today": hours_label(row.get("hours_today")),
             "open_now": row.get("open_now"),
+            "opens_at": row.get("opens_at"),
             "comparison_facts": [item["description"] for item in comparisons if row.get("restaurant_name") in item["names"]],
         }
         if card:
             item.update(phone=row.get("phone"), address=row.get("address"), website=row.get("website"),
-                        weekly_hours=row.get("weekly_hours"))
+                        weekly_hours={day: hours_label(hours) for day, hours in (row.get("weekly_hours") or {}).items()}
+                        or None)
         evidence.append({key: value for key, value in item.items() if value not in (None, "", [])})
     return evidence
 
@@ -812,7 +858,7 @@ def _fact_sentence(row: dict[str, Any]) -> str:
         facts.append(f"around {money_label(row['average_price'], 'MYR')} on average")
     if distance_label(row.get("distance_m")):
         facts.append(f"about {distance_label(row['distance_m'])} away")
-    hours = _hours_today(row.get("hours_today"), row.get("open_now"))
+    hours = _hours_today(row.get("hours_today"), row.get("open_now"), row.get("opens_at"))
     if hours:
         facts.append(hours[0].lower() + hours[1:])
     if not facts:
@@ -834,7 +880,7 @@ def _profile_card(row: dict[str, Any], description: str | None, tip: str | None 
         ("Price", f"Around {money_label(row['average_price'], 'MYR')} per person (estimated)"
          if isinstance(row.get("average_price"), (int, float)) else None),
         ("Distance", f"About {distance_label(row['distance_m'])} away" if distance_label(row.get("distance_m")) else None),
-        ("Hours", _hours_today(row.get("hours_today"), row.get("open_now"))),
+        ("Hours", _hours_today(row.get("hours_today"), row.get("open_now"), row.get("opens_at"))),
         ("Cuisine", ", ".join(row["cuisines"]) if row.get("cuisines") else None),
         ("Type", kind.capitalize() if kind else None),
         ("Halal", {"halal": "Listed as halal", "non-halal": "Listed as non-halal"}.get(row.get("halal_status"))),
@@ -905,7 +951,7 @@ def _card_fields(chosen: Any, question: str) -> tuple[str, ...] | None:
 
 def _repeats_card(tip: str, row: dict[str, Any]) -> bool:
     text = tip.casefold()
-    hours = str(row.get("hours_today") or "").casefold()
+    hours = str(hours_label(row.get("hours_today")) or "").casefold()
     price = money_label(row["average_price"], "MYR") if isinstance(row.get("average_price"), (int, float)) else None
     repeated = [
         bool(hours) and any(part.strip() in text for part in re.split(r"[-–,]", hours) if part.strip()),
@@ -930,14 +976,18 @@ def _facility_groups(facilities: list[str]) -> list[tuple[str, str]]:
     return [(label, ", ".join(names)) for label, names in grouped.items() if names]
 
 
-def _hours_today(hours: Any, is_open: bool | None = None) -> str | None:
+def _hours_today(hours: Any, is_open: bool | None = None, opens_at: str | None = None) -> str | None:
+    if is_open is False and opens_at:
+        return f"Closed now · opens {opens_at}"
+    if is_open and not (isinstance(hours, str) and _ranges(hours)) and hours != "open 24 hours":
+        return "Open now"  # still open from last night's hours; today's say closed or are unknown
     if not isinstance(hours, str) or not hours.strip():
         return None
     if hours == "open 24 hours":
         return "Open 24 hours"
     if hours.strip().lower() == "closed":
         return "Closed today"
-    today = re.sub(r"(?<=\d)-(?=\d)", "–", hours.strip())
+    today = hours_label(hours.strip())
     if is_open is None:
         return f"Open today {today}"
     return f"{'Open now' if is_open else 'Closed now'} · today {today}"

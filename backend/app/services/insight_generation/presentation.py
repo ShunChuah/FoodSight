@@ -1,4 +1,5 @@
 import math
+import re
 from typing import Any
 
 COMPARISON_METRICS = {
@@ -25,6 +26,18 @@ def money_label(value: Any, currency: str | None) -> str | None:
         return None
     prefix = "RM" if currency == "MYR" else f"{currency} " if currency else ""
     return prefix + (f"{value:.0f}" if value == int(value) else f"{value:.2f}")
+
+
+# Stored hours are 24-hour ranges; answers show "9:00 am – 2:00 pm".
+def time_label(hour: int, minute: int) -> str:
+    return f"{(hour % 12) or 12}:{minute:02d} {'am' if hour % 24 < 12 else 'pm'}"
+
+
+def hours_label(hours: Any) -> Any:
+    if not isinstance(hours, str):
+        return hours
+    text = re.sub(r"\b(\d{1,2}):(\d{2})\b", lambda match: time_label(int(match[1]), int(match[2])), hours)
+    return re.sub(r"(?<=[ap]m)\s*[-–]\s*(?=\d)", " – ", text)
 
 
 def price_tier_label(value: Any) -> str | None:
