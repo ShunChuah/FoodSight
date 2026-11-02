@@ -7,6 +7,7 @@ from functools import lru_cache
 from time import perf_counter
 from typing import Any
 
+from .cache import GRAPH_ROWS
 from .diagnostics import kg_debug, log_timing
 from .messages import response
 
@@ -30,6 +31,7 @@ def execute_cypher(
     parameters: dict[str, Any] | None = None,
     *,
     timeout_seconds: float | None = None,
+    cache: bool = True,
 ) -> CypherExecutionResult:
     started_at = perf_counter()
     if not execution_enabled():
@@ -45,6 +47,9 @@ def execute_cypher(
         kg_debug("Neo4j execution skipped", "Neo4j connection settings are missing")
         log_timing("neo4j.query", started_at, status="skipped_config", row_count=0)
         return CypherExecutionResult([], "skipped_config", response("errors.unavailable"))
+    cached = GRAPH_ROWS.get(uri, database, cypher, parameters or {}) if cache else None
+    if cached is not None:
+        return CypherExecutionResult([dict(row) for row in cached], "success")
 
     rows: list[dict[str, Any]] = []
     execution_status = "success"
@@ -83,7 +88,9 @@ def execute_cypher(
             timeout_s=round(effective_timeout, 3),
             error_code=error_code,
         )
-    return CypherExecutionResult(rows, execution_status)
+    if cache:
+        GRAPH_ROWS.set(rows, uri, database, cypher, parameters or {})
+    return CypherExecutionResult([dict(row) for row in rows], execution_status)
 
 
 WARM_UP_QUERIES = (
@@ -97,8 +104,9 @@ WARM_UP_QUERIES = (
 
 
 def warm_up() -> None:
+    # Never cached: the point is to open the connection.
     for query in WARM_UP_QUERIES:
-        execute_cypher(query)
+        execute_cypher(query, cache=False)
 
 
 def _query_timeout() -> float:

@@ -11,6 +11,7 @@ from time import perf_counter
 from typing import Any
 
 from ...contracts import QueryPlan
+from ..shared.cache import QUERY_REPLIES
 from ..shared.config import policy
 from ..shared.diagnostics import kg_debug, log_timing
 from ..shared.llm import LLMServiceError, call_llm, parse_json_object
@@ -393,23 +394,33 @@ def generate_cypher(
     return result
 
 
+CACHED_STATUSES = ("success", "clarify", "explain", "cannot_answer")
+
+
 def _generate(question, conversation_context, location_context, deadline, previous, want_title,
               may_clarify=True) -> CypherResult:
-    timeout = MAX_GENERATION_SECONDS
-    if deadline is not None:
-        timeout = min(timeout, deadline - perf_counter() - RESERVED_AFTER_GENERATION_SECONDS)
-        if timeout < MIN_GENERATION_SECONDS:
-            return CypherResult("skipped_deadline")
-    try:
-        raw = call_llm(
-            question_prompt(question, conversation_context, location_context, previous, want_title, may_clarify),
-            schema_prompt(),
-            task="query",
-            timeout_seconds=timeout,
-            response_schema=TITLED_RESPONSE_SCHEMA if want_title else RESPONSE_SCHEMA,
-        )
-    except LLMServiceError as exc:
-        return CypherResult(exc.code or "llm_error", error=str(exc))
+    prompt = question_prompt(question, conversation_context, location_context, previous, want_title, may_clarify)
+    # Only first attempts are cached: a retry's prompt carries the rejected query.
+    raw = QUERY_REPLIES.get(prompt, want_title) if not previous else None
+    if raw is None:
+        timeout = MAX_GENERATION_SECONDS
+        if deadline is not None:
+            timeout = min(timeout, deadline - perf_counter() - RESERVED_AFTER_GENERATION_SECONDS)
+            if timeout < MIN_GENERATION_SECONDS:
+                return CypherResult("skipped_deadline")
+        try:
+            raw = call_llm(prompt, schema_prompt(), task="query", timeout_seconds=timeout,
+                           response_schema=TITLED_RESPONSE_SCHEMA if want_title else RESPONSE_SCHEMA)
+        except LLMServiceError as exc:
+            return CypherResult(exc.code or "llm_error", error=str(exc))
+        result = _read_reply(raw, question, conversation_context, location_context, want_title)
+        if not previous and result.status in CACHED_STATUSES:
+            QUERY_REPLIES.set(raw, prompt, want_title)
+        return result
+    return _read_reply(raw, question, conversation_context, location_context, want_title)
+
+
+def _read_reply(raw, question, conversation_context, location_context, want_title) -> CypherResult:
     payload = parse_json_object(raw)
     if not payload or not isinstance(payload.get("cypher"), str):
         return CypherResult("invalid_json", error="The model did not return the expected JSON.")

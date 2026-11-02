@@ -20,6 +20,7 @@ from ..query_generation.cypher_generation import (
     returns_restaurants,
 )
 from ..query_generation.scope import has_fnb_signal
+from ..shared.cache import ANSWER_REPLIES
 from ..shared.config import app_timezone, policy
 from ..shared.diagnostics import kg_debug, log_timing
 from ..shared.llm import (
@@ -744,8 +745,12 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
                 payload, rows if card else _described_rows(payload, rows), card, user_query, compare)
         else:
             partial = _partial_summary
-        raw = call_llm(prompt, ANSWER_INSTRUCTIONS + "\n\n" + output_format, task="response", timeout_seconds=timeout,
-                       on_text=_AnswerStream(on_answer, partial, note) if on_answer else None)
+        instructions = ANSWER_INSTRUCTIONS + "\n\n" + output_format
+        # The same evidence gets the cached reply; a reply is stored only once it renders.
+        cached = ANSWER_REPLIES.get(prompt, instructions)
+        raw = cached if cached is not None else call_llm(
+            prompt, instructions, task="response", timeout_seconds=timeout,
+            on_text=_AnswerStream(on_answer, partial, note) if on_answer else None)
         kg_debug("Answer model output", raw)
         if restaurants:
             answer = _render_model_answer(parse_json_object(raw), rows, card, user_query, compare)
@@ -754,6 +759,8 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
             answer = clean_opening(answer) if answer else answer
         if not answer:
             raise ValueError("invalid_response_json")
+        if cached is None:
+            ANSWER_REPLIES.set(raw, prompt, instructions)
     except (LLMServiceError, ValueError, TypeError) as exc:
         kg_debug("Answer used the written-out fallback", {"reason": str(exc)})
         return AnswerResult(status="fallback", text=fallback)
