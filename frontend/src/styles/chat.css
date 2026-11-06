@@ -334,8 +334,7 @@
   gap: 10px;
 }
 
-.skeleton-line,
-.skeleton-button {
+.skeleton-line {
   background: linear-gradient(90deg, #f1f1f3 25%, #e4e4e7 50%, #f1f1f3 75%);
   background-size: 200% 100%;
   animation: skeleton-loading 1.4s ease-in-out infinite;
@@ -348,20 +347,6 @@
 
 .skeleton-line-long {
   width: 100%;
-}
-
-.skeleton-actions {
-  margin-top: 2px;
-}
-
-.skeleton-button {
-  width: 118px;
-  height: 36px;
-  border-radius: 10px;
-}
-
-.skeleton-button-secondary {
-  width: 132px;
 }
 
 @keyframes skeleton-loading {
@@ -550,8 +535,7 @@
   color: var(--dark-text);
 }
 
-[data-theme="dark"] .skeleton-line,
-[data-theme="dark"] .skeleton-button {
+[data-theme="dark"] .skeleton-line {
   background: linear-gradient(
     90deg,
     var(--dark-skeleton-start) 25%,
