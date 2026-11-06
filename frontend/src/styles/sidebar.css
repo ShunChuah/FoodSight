@@ -235,6 +235,33 @@
   text-align: left;
 }
 
+.chat-history-content h4.is-scrolling {
+  text-overflow: clip;
+}
+
+.chat-history-content h4.is-scrolling .chat-history-title-text {
+  display: inline-block;
+  animation: chat-title-scroll var(--title-scroll-duration, 4s) ease-in-out infinite alternate;
+}
+
+@keyframes chat-title-scroll {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+
+  85%,
+  100% {
+    transform: translateX(var(--title-scroll-distance, 0));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-history-content h4.is-scrolling .chat-history-title-text {
+    animation: none;
+  }
+}
+
 .chat-history-rename-input {
   width: 100%;
   height: 24px;

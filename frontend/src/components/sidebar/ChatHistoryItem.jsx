@@ -19,9 +19,22 @@ function ChatHistoryItem({
   const moreButtonRef = useRef(null);
   const renameInputRef = useRef(null);
   const renameCancelledRef = useRef(false);
+  const titleRef = useRef(null);
   const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(title);
+  const [titleScroll, setTitleScroll] = useState(null);
+
+  const showFullTitle = () => {
+    const heading = titleRef.current;
+    const hidden = heading ? heading.scrollWidth - heading.clientWidth : 0;
+    if (hidden > 0) {
+      setTitleScroll({
+        "--title-scroll-distance": `-${hidden}px`,
+        "--title-scroll-duration": `${Math.max(3, hidden / 30)}s`,
+      });
+    }
+  };
 
   useEffect(() => {
     if (menuOpen && moreButtonRef.current) {
@@ -76,6 +89,8 @@ function ChatHistoryItem({
           onClick(event);
         }
       }}
+      onMouseEnter={showFullTitle}
+      onMouseLeave={() => setTitleScroll(null)}
     >
       <div className="chat-history-content">
         {isRenaming ? (
@@ -100,7 +115,14 @@ function ChatHistoryItem({
             }}
           />
         ) : (
-          <h4>{title}</h4>
+          <h4
+            ref={titleRef}
+            className={titleScroll ? "is-scrolling" : undefined}
+            style={titleScroll || undefined}
+            title={title}
+          >
+            <span className="chat-history-title-text">{title}</span>
+          </h4>
         )}
         <p>
           {date} &middot; {time}
