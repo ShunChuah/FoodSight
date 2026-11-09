@@ -3,14 +3,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import datetime, timedelta, timezone
-from time import perf_counter
 from typing import Callable
 
 from sqlalchemy.orm import Session
 
 from ...database import SessionLocal
 from ...model import ChatMessage, ChatMessageGraph, ChatMessageGraphJob
-from ..shared.diagnostics import log_timing
 
 # A job still pending after this long was lost (the server restarted while building it), so it counts as failed.
 GRAPH_JOB_TIMEOUT = timedelta(minutes=2)
@@ -27,7 +25,6 @@ def run_graph_job(
     build: Callable[[], dict | None],
     session_factory: Callable[[], AbstractContextManager[Session]] = SessionLocal,
 ) -> str:
-    started_at = perf_counter()
     try:
         graph = build()
         outcome = "ready" if graph else "empty"
@@ -50,7 +47,6 @@ def run_graph_job(
     except Exception as exc:
         print(f"Knowledge Graph Evidence could not be saved for message {message_id}: {exc}", flush=True)
         outcome = "failed"
-    log_timing("chat.graph_evidence", started_at, status=outcome, message_id=message_id)
     return outcome
 
 

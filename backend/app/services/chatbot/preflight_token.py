@@ -8,7 +8,7 @@ import os
 import time
 
 from ...contracts import GuardrailDecision
-from ..shared.diagnostics import restore_request_timing, timing_token_fields
+from ..shared.diagnostics import preflight_timing_fields, restore_request_timing
 
 TOKEN_TTL_SECONDS = 300
 
@@ -24,10 +24,11 @@ def create_guardrail_token(
         "status": decision.status,
         "scope": decision.scope,
         "message": decision.message,
-        "location_required": decision.location_required,
+        "location_kind": decision.location_kind,
         "detected_location": decision.detected_location,
+        "suggestions": list(decision.suggestions),
         "expires_at": int(time.time()) + TOKEN_TTL_SECONDS,
-        "timing": timing_token_fields(),
+        "timing": preflight_timing_fields(),
     }
     encoded_payload = _encode(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
@@ -71,17 +72,23 @@ def verify_guardrail_token(
 
     status = payload.get("status")
     scope = payload.get("scope")
-    if status not in {"ready", "unsupported", "out_of_scope"}:
+    if status not in {"ready", "unsupported", "out_of_scope", "outside_coverage"}:
         return None
-    if scope not in {None, "fnb_customer", "fnb_analyst"}:
+    if scope not in {None, "fnb"}:
+        return None
+    if payload.get("location_kind", "anywhere") not in {"near_user", "named", "outside", "anywhere"}:
+        return None
+    suggestions = payload.get("suggestions") or []
+    if not isinstance(suggestions, list) or not all(isinstance(item, str) for item in suggestions):
         return None
     restore_request_timing(payload.get("timing"))
     return GuardrailDecision(
         status=status,
         scope=scope,
         message=payload.get("message"),
-        location_required=bool(payload.get("location_required")),
+        location_kind=payload.get("location_kind") or "anywhere",
         detected_location=payload.get("detected_location"),
+        suggestions=tuple(suggestions),
     )
 
 

@@ -27,8 +27,14 @@ class GuardrailDecision:
     status: str
     scope: str | None = None
     message: str | None = None
-    location_required: bool = False
+    # near_user, named, outside or anywhere.
+    location_kind: str = "anywhere"
     detected_location: str | None = None
+    suggestions: tuple[str, ...] = ()
+
+    @property
+    def location_required(self) -> bool:
+        return self.location_kind == "near_user"
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,8 @@ class QueryPlan:
     parameters: dict[str, Any] = field(default_factory=dict)
     requested_fields: tuple[str, ...] = ()
     result_limit: int = policy("results")["default_limit"]
+    business: bool = False
+    intent: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

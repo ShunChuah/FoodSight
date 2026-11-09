@@ -52,13 +52,19 @@ from ..services.chatbot.titles import (
     create_temporary_chat_title,
     generated_title,
 )
-from ..services.shared.diagnostics import log_request_timing, log_timing, timing_token_fields, trace_request
+from ..services.shared.diagnostics import (
+    log_request_summary,
+    log_timing,
+    timing_token_fields,
+    trace_request,
+)
 from ..services.shared.config import app_timezone
 from ..services.shared.messages import response as user_response
 
 # Every route needs a verified user and only sees that user's chats.
 router = APIRouter(prefix="/chats", tags=["chats"])
 TITLE_GENERATED = "title_generated"
+SEARCH_STATE = "search"
 
 
 def get_display_timezone():
@@ -253,6 +259,7 @@ def create_chat_history(
     return serialize_chat(chat)
 
 
+# Rule-based screen; its decisionToken lets /messages skip screening again.
 @router.post("/preflight", response_model=ChatPreflightResponse)
 @trace_request
 def preflight_message(
@@ -260,7 +267,6 @@ def preflight_message(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> ChatPreflightResponse:
-    preflight_started_at = perf_counter()
     user_text = payload.message.strip()
     if not user_text:
         raise HTTPException(
@@ -273,18 +279,13 @@ def preflight_message(
     decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
     response = ChatPreflightResponse(
         status=decision.status,
-        isFnb=decision.scope in {"fnb_customer", "fnb_analyst"},
+        isFnb=decision.scope == "fnb",
         scope=decision.scope,
         message=decision.message,
         locationRequired=decision.location_required,
         detectedLocation=decision.detected_location,
         traceId=timing_token_fields()["trace_id"],
         decisionToken=create_guardrail_token(user_text, payload.chat_id, decision),
-    )
-    log_timing(
-        "chat.preflight.total",
-        preflight_started_at,
-        decision=decision.status,
     )
     return response
 
@@ -367,13 +368,7 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
         guardrail_source = "reassessed"
         prior_messages = build_llm_messages(prior_chat) if prior_chat else []
         preflight_decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
-    log_timing(
-        "chat.send.guardrails",
-        guardrail_started_at,
-        total_started_at=send_started_at,
-        source=guardrail_source,
-        decision=preflight_decision.status,
-    )
+    log_timing("chat.send.guardrails", guardrail_started_at, source=guardrail_source)
 
     session_title = create_temporary_chat_title(user_text)
     first_turn = not payload.chat_id or not prior_chat.messages
@@ -386,10 +381,9 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
     wants_title = title_needed(chat, first_turn)
 
     llm_messages = build_llm_messages(chat, user_text)
+    saved_state = chat.query_state.state if chat.query_state else {}
     now = datetime.now(timezone.utc)
 
-    generation_started_at = perf_counter()
-    generation_status = "success"
     try:
         turn = generate_assistant_response(
             llm_messages,
@@ -398,22 +392,15 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
             preflight_decision,
             deadline=send_started_at + get_response_budget_seconds(),
             title_needed=wants_title,
+            chat_state=saved_state.get(SEARCH_STATE),
             on_answer=on_answer,
         )
     except Exception as exc:
-        generation_status = "error"
         print(f"Assistant response generation failed: {exc}", flush=True)
         turn = AssistantTurn(user_response("errors.unexpected"))
     title = generated_title(turn.chat_title, user_text) if wants_title else None
     if title:
         chat.title = title
-    log_timing(
-        "chat.send.generation",
-        generation_started_at,
-        status=generation_status,
-        total_started_at=send_started_at,
-    )
-    log_request_timing("chat.request.answer_ready", status=generation_status)
 
     assistant_created_at = max(
         datetime.now(timezone.utc),
@@ -441,11 +428,13 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
         created_at=assistant_created_at,
     )
 
-    if title:
+    updates = {**({TITLE_GENERATED: True} if title else {}),
+               **({SEARCH_STATE: turn.state} if turn.state is not None else {})}
+    if updates:
         if chat.query_state:
-            chat.query_state.state = {**chat.query_state.state, TITLE_GENERATED: True}
+            chat.query_state.state = {**chat.query_state.state, **updates}
         else:
-            chat.query_state = ChatQueryState(state={TITLE_GENERATED: True})
+            chat.query_state = ChatQueryState(state=updates)
 
     chat.updated_at = assistant_created_at
     db.add(user_message)
@@ -463,17 +452,8 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
     )
     if turn.build_graph:
         start_graph_job(assistant_message.id, turn.build_graph)
-    log_timing(
-        "chat.send.persist",
-        persist_started_at,
-        total_started_at=send_started_at,
-    )
-    log_timing(
-        "chat.send.total",
-        send_started_at,
-        status="degraded" if generation_status == "error" else "success",
-    )
-    log_request_timing("chat.request.total", status="degraded" if generation_status == "error" else "success")
+    log_timing("chat.send.persist", persist_started_at)
+    log_request_summary(user_text)
     return response
 
 

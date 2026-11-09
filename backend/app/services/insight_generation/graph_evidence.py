@@ -12,23 +12,18 @@ MAX_NODES = 80
 RESTAURANT_SUBGRAPH = """
 UNWIND range(0, size($ids) - 1) AS position
 MATCH (r:Restaurant) WHERE r.restaurant_id = $ids[position]
-CALL {
-  WITH r
+CALL (r) {
   RETURN r AS a, null AS rel, null AS b
   UNION
-  WITH r
-  MATCH (r)-[rel:LOCATED_IN|LOCATED_AT|PRICED_AT|HAS_PRICE_RANGE|HAS_RATING|HAS_PROFILE|HAS_HOURS|SERVES|HAS_FACILITY]->(b)
+  MATCH (r)-[rel:LOCATED_IN|PRICED_AT|HAS_RATING|HAS_PROFILE|HAS_HOURS|SERVES|HAS_FACILITY]->(b)
   RETURN r AS a, rel, b
   UNION
-  WITH r
-  MATCH (r)-[:LOCATED_IN]->(a:Location)-[rel:IN_AREA|LOCATED_IN]->(b:Area)
+  MATCH (r)-[:LOCATED_IN]->(a:Location)-[rel:IN_AREA]->(b:Area)
   RETURN a, rel, b
   UNION
-  WITH r
-  MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)-[rel:IN_CITY|PART_OF]->(b:City)
+  MATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)-[rel:IN_CITY]->(b:City)
   RETURN a, rel, b
   UNION
-  WITH r
   MATCH (r)-[rel:COMPETES_WITH]-(other:Restaurant) WHERE other.restaurant_id IN $anchors
   RETURN startNode(rel) AS a, rel, endNode(rel) AS b
 }
@@ -41,7 +36,7 @@ ORDER BY position, type, target_label, target_id
 AREA_SUBGRAPH = """
 UNWIND range(0, size($areas) - 1) AS position
 MATCH (a:Area) WHERE a.name = $areas[position]
-OPTIONAL MATCH (a)-[rel:IN_CITY|PART_OF]->(b:City)
+OPTIONAL MATCH (a)-[rel:IN_CITY]->(b:City)
 RETURN elementId(a) AS source_id, labels(a)[0] AS source_label, properties(a) AS source_properties,
        type(rel) AS type,
        elementId(b) AS target_id, labels(b)[0] AS target_label, properties(b) AS target_properties

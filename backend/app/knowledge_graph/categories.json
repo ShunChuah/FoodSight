@@ -1,20 +1,19 @@
 {
-  "description": "FoodSight category definitions. The single place where every column with a fixed set of values is defined: what the column means and every allowed value. Scrapers, cleaners, the profiler and the validator read their value lists from this file through src/categories.py. To add, rename or remove a value, edit this file only. PostgreSQL CHECK constraints cannot read it: when an 'active' list changes, add a migration in db/migrations/ to match.",
+  "description": "FoodSight category definitions. The single place where every column with a fixed set of values is defined: what the column means and every allowed value. Scrapers, cleaners, the profiler and the validator read their value lists from this file through src/categories.py. To add, rename or remove a value, edit this file only: no migration is needed. Every list here is enforced by the validator (validate_data.py); the database has no CHECK copy of any list (migration 017 removed the last ones).",
   "legend": {
     "meaning": "The one question this column answers.",
     "rules": "Only where picking needs guidance: how to choose between values and how to combine them. The AI is given these together with the list.",
     "filled_by": "Where the value comes from. osm = OpenStreetMap. google = Google Places. ai = picked by the AI profiler from the list here. lookup = not picked; it follows from another value (a cuisine's category follows from its name; a price tier follows from the average meal price).",
     "pick": "one = exactly one value. many = several values per restaurant. Cuisines and facilities are stored one per row in their link table; target_segment and ambiance are stored in the same column as plain text, separated by a comma and a space (families, students).",
     "max": "Only when pick is many: the most values allowed. At least one is always required.",
-    "status": "active = the pipeline already uses and enforces this list. planned = agreed but not enforced yet, because the stored data still holds the old free text.",
-    "values": "Every allowed value with its one-line definition. A value that is not listed is not accepted. Cuisine and facility values carry extra facts: category, origin_country (the single country the food comes from, or null when there is none) and includes (older or narrower labels that are folded into this value). Amenity type values carry osm: the OpenStreetMap labels, written key=value, that produce the value. Price tier values carry min_price: the lowest avg_meal_price, in RM, that belongs to the tier."
+    "counted_as_open": "Only for restaurant.business_status: the values of restaurants that may still be trading. Only these are put in food clusters (run_6_clustering.py) and can have competitors (COMPETES_WITH).",
+    "values": "Every allowed value with its one-line definition. A value that is not listed is not accepted. Cuisine and facility values carry extra facts: category, origin_country (the single country the food comes from, or null when there is none) and includes (older or narrower labels that are folded into this value). Amenity type values carry osm: the OpenStreetMap labels, written key=value, that produce the value. Nearby kind and station type values carry osm too, where key=* means any value of the key and & joins conditions that must all hold; nearby kinds also carry radius_m (how far from the restaurant's pin, in metres, a place still counts as near) and column (the nearby_context column that holds the count). Facility values carry google: the Google Place Details field that produces the value when it is true (a dot means a field inside an object, such as parkingOptions.freeParkingLot). Price tier values carry min_price: the lowest avg_meal_price, in RM, that belongs to the tier; and google_level: the Google priceLevel values that mean this tier (a starting match, to be checked against real Google price bands)."
   },
   "columns": {
     "restaurant.amenity_type": {
       "meaning": "What kind of food and drink place OpenStreetMap says it is. Each value lists the OpenStreetMap labels (osm) that produce it, and the scraper collects exactly those labels. When a place carries more than one, a cuisine label wins, then an amenity label, then a shop label.",
       "filled_by": "osm",
       "pick": "one",
-      "status": "active",
       "values": {
         "restaurant": {
           "definition": "Sit-down place that sells full meals.",
@@ -82,82 +81,324 @@
       }
     },
     "restaurant.business_status": {
-      "meaning": "Whether the place is trading, as reported by Google. A restaurant with no Google match is recorded as OPERATIONAL.",
+      "meaning": "Whether the place is trading, as reported by Google. A restaurant with no Google match, or one Google gives no status for, is UNKNOWN.",
       "filled_by": "google",
       "pick": "one",
-      "status": "active",
+      "counted_as_open": [
+        "OPERATIONAL",
+        "UNKNOWN"
+      ],
       "values": {
         "OPERATIONAL": "Open for business.",
-        "CLOSED_TEMPORARILY": "Closed for now and expected to reopen.",
-        "PERMANENTLY_CLOSED": "Closed for good."
+        "TEMPORARILY_CLOSED": "Closed for now and expected to reopen.",
+        "PERMANENTLY_CLOSED": "Closed for good.",
+        "FUTURE_OPENING": "Listed on Google but not open yet.",
+        "UNKNOWN": "Not known: Google has no match for the place (it may be open or closed), or gave no status."
       }
     },
     "area.type": {
       "meaning": "The kind of area. Every area is one of the city's official numbered sections (OpenStreetMap admin_level 10), so there is one value. The familiar places inside a section are listed in its name, such as PJU 6 (Bandar Utama, Damansara Residensi).",
       "filled_by": "osm",
       "pick": "one",
-      "status": "active",
       "values": {
         "quarter": "Numbered section of the city, such as SS2, PJS 5 or Seksyen 14."
       }
     },
+    "nearby_place.kind": {
+      "meaning": "What kind of place near a restaurant this is. Stored in public.nearby_place.kind, one row per place; it is also the kind of each row in data/1_raw/osm_nearby_raw.csv, and run_5_validation.py checks it before loading. For each restaurant, nearby_context stores how many places of each kind are within radius_m of its pin (in the column named by column), and the nearest station. Each kind lists the OpenStreetMap labels (osm) that produce it, written key=value; key=* means any value of that key (office=* is every kind of office), and & joins conditions that must all hold (amenity=place_of_worship&religion=muslim). When a place carries labels of two kinds, the first kind listed here wins. parts_inside: true means OpenStreetMap often maps the parts of one place as places of the same kind (a university's faculties and departments, a school's hall and blocks, a hospital's lobby); a place whose pin lies inside the outline of a bigger place of the same kind is then a part of it and is not counted. Offices, hotels and malls do not have it: a company inside an office tower, or two hotels in one resort, are separate places.",
+      "filled_by": "osm",
+      "pick": "one",
+      "values": {
+        "school": {
+          "definition": "A primary or secondary school.",
+          "osm": [
+            "amenity=school"
+          ],
+          "radius_m": 500,
+          "column": "schools_500m",
+          "parts_inside": true
+        },
+        "university": {
+          "definition": "A university or college.",
+          "osm": [
+            "amenity=university",
+            "amenity=college"
+          ],
+          "radius_m": 1000,
+          "column": "universities_1km",
+          "parts_inside": true
+        },
+        "hospital": {
+          "definition": "A hospital.",
+          "osm": [
+            "amenity=hospital"
+          ],
+          "radius_m": 1000,
+          "column": "hospitals_1km",
+          "parts_inside": true
+        },
+        "mall": {
+          "definition": "A shopping mall.",
+          "osm": [
+            "shop=mall"
+          ],
+          "radius_m": 500,
+          "column": "malls_500m"
+        },
+        "hotel": {
+          "definition": "A hotel.",
+          "osm": [
+            "tourism=hotel"
+          ],
+          "radius_m": 500,
+          "column": "hotels_500m"
+        },
+        "station": {
+          "definition": "A train station (LRT, MRT, KTM or monorail). Not counted: the nearest one is stored, with its distance and nearby_context.station_type.",
+          "osm": [
+            "railway=station",
+            "railway=halt"
+          ]
+        },
+        "office": {
+          "definition": "An office of any kind: a company, government office, coworking space and so on. OpenStreetMap maps only some offices, so compare counts between places rather than reading them as true totals.",
+          "osm": [
+            "office=*"
+          ],
+          "radius_m": 500,
+          "column": "offices_500m"
+        }
+      }
+    },
+    "nearby_context.station_type": {
+      "meaning": "What kind of train line the restaurant's nearest station serves. Each value lists the OpenStreetMap station labels (osm) that produce it. A station whose type OpenStreetMap does not give is Other.",
+      "filled_by": "osm",
+      "pick": "one",
+      "values": {
+        "LRT": {
+          "definition": "Light rail: the Kelana Jaya, Ampang, Sri Petaling and Shah Alam lines.",
+          "osm": [
+            "station=light_rail"
+          ]
+        },
+        "MRT": {
+          "definition": "Mass rapid transit: the Kajang and Putrajaya lines.",
+          "osm": [
+            "station=subway"
+          ]
+        },
+        "KTM": {
+          "definition": "KTM trains: Komuter and ETS.",
+          "osm": [
+            "station=train"
+          ]
+        },
+        "Monorail": {
+          "definition": "The KL Monorail.",
+          "osm": [
+            "station=monorail"
+          ]
+        },
+        "Other": {
+          "definition": "A train station whose type OpenStreetMap does not give.",
+          "osm": []
+        }
+      }
+    },
     "facility.name": {
-      "meaning": "A service or feature the restaurant offers, as reported by Google. A restaurant can have several; each one is a row in restaurant_facility.",
+      "meaning": "A service or feature the restaurant offers, as reported by Google (Places API (New)). Saved only when Google says yes: a no or no answer means no row. A restaurant can have several; each one is a row in restaurant_facility. \"google\" is the Place Details field it comes from (a dot means a field inside an object).",
       "filled_by": "google",
       "pick": "many",
-      "status": "active",
       "values": {
         "Dine-in": {
           "definition": "Customers can eat at the premises.",
-          "category": "service"
+          "category": "service",
+          "google": "dineIn"
         },
         "Takeout": {
           "definition": "Food can be ordered to take away.",
-          "category": "service"
+          "category": "service",
+          "google": "takeout"
         },
         "Delivery": {
           "definition": "Food can be delivered.",
-          "category": "service"
+          "category": "service",
+          "google": "delivery"
         },
         "Curbside Pickup": {
           "definition": "Orders can be collected from the car outside.",
-          "category": "service"
+          "category": "service",
+          "google": "curbsidePickup"
         },
         "Reservations": {
           "definition": "A table can be booked ahead.",
-          "category": "service"
+          "category": "service",
+          "google": "reservable"
         },
         "Breakfast": {
           "definition": "Serves breakfast.",
-          "category": "meal_type"
+          "category": "meal_type",
+          "google": "servesBreakfast"
         },
         "Brunch": {
           "definition": "Serves brunch.",
-          "category": "meal_type"
+          "category": "meal_type",
+          "google": "servesBrunch"
         },
         "Lunch": {
           "definition": "Serves lunch.",
-          "category": "meal_type"
+          "category": "meal_type",
+          "google": "servesLunch"
         },
         "Dinner": {
           "definition": "Serves dinner.",
-          "category": "meal_type"
+          "category": "meal_type",
+          "google": "servesDinner"
         },
         "Beer": {
           "definition": "Serves beer.",
-          "category": "drinks"
+          "category": "drinks",
+          "google": "servesBeer"
         },
         "Wine": {
           "definition": "Serves wine.",
-          "category": "drinks"
+          "category": "drinks",
+          "google": "servesWine"
+        },
+        "Cocktails": {
+          "definition": "Serves cocktails.",
+          "category": "drinks",
+          "google": "servesCocktails"
+        },
+        "Coffee": {
+          "definition": "Serves coffee.",
+          "category": "drinks",
+          "google": "servesCoffee"
+        },
+        "Dessert": {
+          "definition": "Serves desserts.",
+          "category": "menu",
+          "google": "servesDessert"
         },
         "Vegetarian Options": {
           "definition": "Has vegetarian dishes on the menu.",
-          "category": "dietary"
+          "category": "dietary",
+          "google": "servesVegetarianFood"
+        },
+        "Outdoor Seating": {
+          "definition": "Has seats outside.",
+          "category": "amenity",
+          "google": "outdoorSeating"
+        },
+        "Restroom": {
+          "definition": "Has a toilet for customers.",
+          "category": "amenity",
+          "google": "restroom"
+        },
+        "Good for Children": {
+          "definition": "Suitable for bringing children.",
+          "category": "suitability",
+          "google": "goodForChildren"
+        },
+        "Kids Menu": {
+          "definition": "Has a menu for children.",
+          "category": "suitability",
+          "google": "menuForChildren"
+        },
+        "Good for Groups": {
+          "definition": "Suitable for groups of people.",
+          "category": "suitability",
+          "google": "goodForGroups"
+        },
+        "Live Sports": {
+          "definition": "Shows sports matches on screen.",
+          "category": "suitability",
+          "google": "goodForWatchingSports"
+        },
+        "Live Music": {
+          "definition": "Has live music.",
+          "category": "suitability",
+          "google": "liveMusic"
+        },
+        "Dogs Allowed": {
+          "definition": "Dogs are allowed inside.",
+          "category": "suitability",
+          "google": "allowsDogs"
         },
         "Wheelchair Accessible": {
           "definition": "The entrance can be used by a wheelchair.",
-          "category": "accessibility"
+          "category": "accessibility",
+          "google": "accessibilityOptions.wheelchairAccessibleEntrance"
+        },
+        "Wheelchair Seating": {
+          "definition": "Has seating that fits a wheelchair.",
+          "category": "accessibility",
+          "google": "accessibilityOptions.wheelchairAccessibleSeating"
+        },
+        "Wheelchair Restroom": {
+          "definition": "Has a toilet a wheelchair user can use.",
+          "category": "accessibility",
+          "google": "accessibilityOptions.wheelchairAccessibleRestroom"
+        },
+        "Wheelchair Parking": {
+          "definition": "Has parking for wheelchair users.",
+          "category": "accessibility",
+          "google": "accessibilityOptions.wheelchairAccessibleParking"
+        },
+        "Free Parking Lot": {
+          "definition": "Has a free car park.",
+          "category": "parking",
+          "google": "parkingOptions.freeParkingLot"
+        },
+        "Paid Parking Lot": {
+          "definition": "Has a car park that charges a fee.",
+          "category": "parking",
+          "google": "parkingOptions.paidParkingLot"
+        },
+        "Free Street Parking": {
+          "definition": "Free parking on the street nearby.",
+          "category": "parking",
+          "google": "parkingOptions.freeStreetParking"
+        },
+        "Paid Street Parking": {
+          "definition": "Paid parking on the street nearby.",
+          "category": "parking",
+          "google": "parkingOptions.paidStreetParking"
+        },
+        "Free Garage Parking": {
+          "definition": "Free parking in a covered car park or building.",
+          "category": "parking",
+          "google": "parkingOptions.freeGarageParking"
+        },
+        "Paid Garage Parking": {
+          "definition": "Paid parking in a covered car park or building.",
+          "category": "parking",
+          "google": "parkingOptions.paidGarageParking"
+        },
+        "Valet Parking": {
+          "definition": "Staff park the car for the customer.",
+          "category": "parking",
+          "google": "parkingOptions.valetParking"
+        },
+        "Credit Card": {
+          "definition": "Accepts credit cards.",
+          "category": "payment",
+          "google": "paymentOptions.acceptsCreditCards"
+        },
+        "Debit Card": {
+          "definition": "Accepts debit cards.",
+          "category": "payment",
+          "google": "paymentOptions.acceptsDebitCards"
+        },
+        "Contactless Payment": {
+          "definition": "Accepts tap-to-pay with a card or phone.",
+          "category": "payment",
+          "google": "paymentOptions.acceptsNfc"
+        },
+        "Cash Only": {
+          "definition": "Accepts cash only.",
+          "category": "payment",
+          "google": "paymentOptions.acceptsCashOnly"
         }
       }
     },
@@ -165,22 +406,27 @@
       "meaning": "The group a facility belongs to.",
       "filled_by": "lookup",
       "pick": "one",
-      "status": "active",
       "values": {
         "service": "How the customer can get the food.",
         "meal_type": "Which meals of the day are served.",
-        "drinks": "Which alcoholic drinks are served.",
+        "drinks": "Which drinks are served, such as beer, wine, cocktails or coffee.",
+        "menu": "Other food on the menu besides meals, such as desserts.",
         "dietary": "Which special diets are catered for.",
-        "accessibility": "Access for people with disabilities."
+        "amenity": "Comforts at the premises, such as outdoor seating or a restroom.",
+        "suitability": "Who or what the place suits: children, groups, sports fans, live music, dogs.",
+        "accessibility": "Access for people with disabilities.",
+        "parking": "Where customers can park.",
+        "payment": "How customers can pay."
       }
     },
     "cuisine.name": {
       "meaning": "What food is served: a food tradition (Chinese, Malay, Thai) or, when one product is the whole business, that product (Pizza, Coffee, Seafood).",
       "rules": [
         "Pick 1 to 3 values, most important first.",
+        "Write each cuisine as its own item in the list, exactly as listed, for example [\"Fried Chicken\", \"Korean\"]. Never join two names in one item.",
         "Pick the most specific name, and do not add a broad one (Western, Malaysian, Fusion) that it already covers.",
         "Product values (Pizza, Burgers, Fried Chicken, Sandwiches, Coffee, Bubble Tea, Tea & Juice, Alcohol, Desserts, Bakery, Snacks, Seafood, Healthy, Vegetarian, Hot Pot & BBQ) are used only when that product is the main business.",
-        "A product value already implies its usual tradition. Add a tradition next to it only when it differs from the usual one: KFC is Fried Chicken; Kyochon is Fried Chicken + Korean; Domino's is Pizza; a Korean BBQ place is Hot Pot & BBQ + Korean.",
+        "A product value already implies its usual tradition. Add a tradition as a second value only when it differs from the usual one: KFC is Fried Chicken; Kyochon is Fried Chicken and Korean (two values); Domino's is Pizza; a Korean BBQ place is Hot Pot & BBQ and Korean (two values).",
         "If a place serves two or three traditions side by side (Chinese and Thai dishes on one menu), list each one. A mix of local Malay, Chinese and Indian dishes is Malaysian, not three separate values. Use Fusion only when traditions are mixed inside the dishes, or the menu is pan-Asian or international.",
         "Chinese food has four values, one per origin: Chinese (Malaysia), Chinese (China), Chinese (Hong Kong) and Chinese (Taiwan). Pick the most suitable one. When a Chinese place does not clearly fit one, use Chinese (Malaysia), because most Chinese places in Petaling Jaya serve local Chinese food.",
         "An alias listed under two values means the place gets both values."
@@ -188,7 +434,6 @@
       "filled_by": "ai",
       "pick": "many",
       "max": 3,
-      "status": "planned",
       "values": {
         "Chinese (Malaysia)": {
           "definition": "Local Malaysian Chinese food such as chicken rice, bak kut teh, wantan mee, economy rice, zi char and Hainanese kopitiam dishes. A traditional kopitiam whose stalls sell Chinese hawker dishes belongs here. Also use this when a Chinese place does not clearly fit one of the other three Chinese values.",
@@ -580,7 +825,7 @@
           ]
         },
         "Coffee": {
-          "definition": "Coffee is the main product. A cafe with a full meal menu is classified by its food (for example Western + Coffee).",
+          "definition": "Coffee is the main product. A cafe with a full meal menu is classified by its food (for example two values, Western and Coffee).",
           "category": "Drinks, Desserts & Snacks",
           "origin_country": null,
           "includes": [
@@ -762,10 +1007,9 @@
       }
     },
     "cuisine.category": {
-      "meaning": "The broad group a cuisine belongs to. Use it to zoom out, for example to compare Western against East Asian places in one area. Each cuisine has exactly one category, set in cuisine.name above. A restaurant with several cuisines has the category of each one, so a Korean BBQ place (Hot Pot & BBQ + Korean) is both Other and East Asian.",
+      "meaning": "The broad group a cuisine belongs to. Use it to zoom out, for example to compare Western against East Asian places in one area. Each cuisine has exactly one category, set in cuisine.name above. A restaurant with several cuisines has the category of each one, so a Korean BBQ place (Hot Pot & BBQ and Korean) is both Other and East Asian.",
       "filled_by": "lookup",
       "pick": "one",
-      "status": "planned",
       "values": {
         "East Asian": "Food traditions of China, Japan, Korea and Taiwan.",
         "Southeast Asian": "Food traditions of Malaysia, Thailand, Vietnam, Indonesia, the Philippines, Myanmar and the rest of Southeast Asia.",
@@ -777,26 +1021,29 @@
       }
     },
     "price_range.tier": {
-      "meaning": "The price band that price_range.avg_meal_price falls in. The AI estimates avg_meal_price (what one person usually pays for a meal, in RM). The code then sets the tier from min_price below, so the tier and the price always agree.",
+      "meaning": "The price band that price_range.avg_meal_price (what one person usually pays for a meal, in RM) falls in. avg_meal_price is the middle of Google's price band (priceRange, e.g. RM20-40 gives RM30; an open top band such as RM100+ gives its start) when Google has one. A wide band whose middle falls in another tier than Google's price level (such as RM20-100 for a Moderate KFC, middle RM60 = upscale) uses the AI's estimate instead, kept inside the band. Otherwise the AI estimates it; when Google gives only a price level (priceLevel), the estimate is kept inside the range of the tier whose google_level lists it. The code then sets the tier from min_price below, so the tier and the price always agree.",
       "filled_by": "lookup",
       "pick": "one",
-      "status": "active",
       "values": {
         "budget": {
           "definition": "Under RM20 per person.",
-          "min_price": 0
+          "min_price": 0,
+          "google_level": ["PRICE_LEVEL_FREE", "PRICE_LEVEL_INEXPENSIVE"]
         },
         "mid": {
           "definition": "RM20 to RM59 per person.",
-          "min_price": 20
+          "min_price": 20,
+          "google_level": ["PRICE_LEVEL_MODERATE"]
         },
         "upscale": {
           "definition": "RM60 to RM149 per person.",
-          "min_price": 60
+          "min_price": 60,
+          "google_level": ["PRICE_LEVEL_EXPENSIVE"]
         },
         "luxury": {
           "definition": "RM150 or more per person.",
-          "min_price": 150
+          "min_price": 150,
+          "google_level": ["PRICE_LEVEL_VERY_EXPENSIVE"]
         }
       }
     },
@@ -804,11 +1051,20 @@
       "meaning": "Whether a Muslim customer can eat here.",
       "filled_by": "ai",
       "pick": "one",
-      "status": "active",
       "values": {
         "halal": "Halal-certified, Muslim-owned, or clearly a halal kind of food such as Malay or mamak.",
         "non-halal": "Serves pork or lard, or alcohol is a main part of the business.",
         "unknown": "Not enough information to decide."
+      }
+    },
+    "business_profile.evidence_level": {
+      "meaning": "How much the AI had to work with when it wrote the profile, so the profile, cuisines and price estimate can be trusted accordingly. Set by profile_data.py when the AI is asked, never by the AI, and saved with its answer.",
+      "filled_by": "lookup",
+      "pick": "one",
+      "values": {
+        "high": "Matched on Google, and the AI read 3 to 5 reviews.",
+        "medium": "Matched on Google, but the AI read fewer than 3 reviews. It still had Google's type, price and rating.",
+        "low": "No Google match. The AI had only OpenStreetMap's name and tags."
       }
     },
     "business_profile.restaurant_type": {
@@ -818,7 +1074,6 @@
       ],
       "filled_by": "ai",
       "pick": "one",
-      "status": "planned",
       "values": {
         "kopitiam": "Traditional coffee shop with local drinks, toast and simple meals, often hosting several food stalls. Includes modern kopitiam chains.",
         "mamak": "Indian Muslim eatery known for roti canai, nasi kandar and teh tarik, usually open late or 24 hours.",
@@ -848,7 +1103,6 @@
       ],
       "filled_by": "ai",
       "pick": "one",
-      "status": "planned",
       "values": {
         "table_service": "Staff take the order at the table, or by QR code, and bring the food.",
         "counter_service": "Order and pay at a counter or stall, then collect or wait for the food.",
@@ -863,7 +1117,6 @@
       "meaning": "Who runs the business and how large it is.",
       "filled_by": "ai",
       "pick": "one",
-      "status": "planned",
       "values": {
         "independent": "A single outlet, or a small family business with two or three outlets.",
         "local_chain": "Malaysian brand with many outlets, such as OldTown White Coffee, Secret Recipe or Marrybrown.",
@@ -876,7 +1129,6 @@
       "filled_by": "ai",
       "pick": "many",
       "max": 3,
-      "status": "planned",
       "values": {
         "families": "Parents with children, or several generations eating together.",
         "students": "School, college or university students.",
@@ -903,7 +1155,6 @@
       "filled_by": "ai",
       "pick": "many",
       "max": 2,
-      "status": "planned",
       "values": {
         "no_frills": "Basic and functional: plain tables, little decoration.",
         "casual": "Relaxed and ordinary: comfortable, with nothing special in the decor.",
@@ -929,7 +1180,6 @@
       ],
       "filled_by": "ai",
       "pick": "one",
-      "status": "active",
       "values": {
         "positive": "Mostly satisfied: praises the place, would return or recommend it, or complaints are minor.",
         "mixed": "Clear praise and clear complaints of similar weight, such as good food but bad service.",

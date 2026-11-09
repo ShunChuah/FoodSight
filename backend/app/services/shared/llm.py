@@ -5,14 +5,19 @@ import math
 import os
 import re
 import socket
+import ssl
 import urllib.error
 import urllib.request
 from time import monotonic, perf_counter
 from typing import Callable, Literal
 
+import certifi
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Bundled CA roots, so an outdated system certificate store cannot break LLM calls.
+SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 LLMTask = Literal["query", "response"]
 TASK_MODEL_ENV = {
@@ -29,6 +34,8 @@ TASK_DEFAULT_TIMEOUTS = {
 }
 MIN_RESPONSE_BUDGET_SECONDS = 1.25
 RESPONSE_DEADLINE_MARGIN_SECONDS = 0.25
+# One key per task, so OpenAI reuses the cached prompt.
+PROMPT_CACHE_KEYS = {"query": "foodsight-query", "response": "foodsight-response"}
 
 
 class LLMServiceError(Exception):
@@ -57,16 +64,6 @@ def parse_json_object(raw: str | None) -> dict | None:
     except json.JSONDecodeError:
         return None
     return payload if isinstance(payload, dict) else None
-
-
-# Read bounded answer text from model JSON.
-def parse_answer_json(raw: str | None, *, max_length: int) -> str | None:
-    payload = parse_json_object(raw)
-    answer = payload.get("answer") if payload else None
-    if not isinstance(answer, str):
-        return None
-    answer = answer.strip()
-    return answer if answer and len(answer) <= max_length else None
 
 
 # The object a streamed reply holds so far (open strings and brackets closed), or None.
@@ -169,9 +166,8 @@ def call_llm(
         if timeout_seconds is not None
         else configured_timeout
     )
-    print(f"[LLM] task={task} model={model} timeout_seconds={request_timeout:g}", flush=True)
     try:
-        with urllib.request.urlopen(request, timeout=request_timeout) as response:
+        with urllib.request.urlopen(request, timeout=request_timeout, context=SSL_CONTEXT) as response:
             if stream:
                 data, streamed_text = _read_stream(response, on_text, monotonic() + request_timeout)
             else:
@@ -319,6 +315,7 @@ def _build_llm_request(
         payload = {"model": model, "messages": [*messages, {"role": "user", "content": prompt}]}
         if response_json:
             payload["response_format"] = {"type": "json_object"}
+    payload["prompt_cache_key"] = PROMPT_CACHE_KEYS[task]
     if task == "query":
         _configure_query_request(payload, model, style, response_schema)
     else:

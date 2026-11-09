@@ -1,6 +1,6 @@
 services:
   neo4j:
-    image: neo4j:5-community
+    image: neo4j:2026.10.1-community
     restart: unless-stopped
     environment:
       NEO4J_AUTH: neo4j/foodsight123

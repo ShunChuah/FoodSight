@@ -3,8 +3,8 @@ import { CircleStop, ExternalLink, Mic, Send } from "lucide-react";
 import "../../styles/chat.css";
 import { QUICK_QUERY_COUNT, quickQueries } from "../../../data/quickQueriesTemplate";
 
-const MAX_MESSAGE_WORDS = 1000;
-const MAX_MESSAGE_CHARACTERS = 5000;
+const MAX_MESSAGE_CHARACTERS = 1000;
+const MESSAGE_LIMIT_NOTICE = `Your message is too long. Please keep it under ${MAX_MESSAGE_CHARACTERS.toLocaleString("en-US")} characters.`;
 
 function pickQuickQueries() {
   const shuffled = [...quickQueries];
@@ -28,12 +28,7 @@ function ChatInput({
   const textareaRef = useRef(null);
   const recognitionRef = useRef(null);
   const isMessageEmpty = !input.trim();
-  const wordCount = input.trim() ? input.trim().split(/\s+/).length : 0;
-  const isMessageTooLong =
-    wordCount > MAX_MESSAGE_WORDS || input.length > MAX_MESSAGE_CHARACTERS;
-  const messageLimitNotice = wordCount > MAX_MESSAGE_WORDS
-    ? "Your message is too long. Please keep it under 1,000 words."
-    : "Your message is too long. Please keep it under 5,000 characters.";
+  const isMessageTooLong = input.length > MAX_MESSAGE_CHARACTERS;
   const sendDisabled =
     disabled
     || isRecording
@@ -210,7 +205,7 @@ function ChatInput({
               isMessageEmpty || isMessageTooLong ? "has-tooltip" : ""
             }`}
             data-tooltip={
-              isMessageTooLong ? messageLimitNotice : "Please enter a message."
+              isMessageTooLong ? MESSAGE_LIMIT_NOTICE : "Please enter a message."
             }
           >
             <button
@@ -218,7 +213,7 @@ function ChatInput({
               type="button"
               title={
                 isMessageTooLong
-                  ? messageLimitNotice
+                  ? MESSAGE_LIMIT_NOTICE
                   : isMessageEmpty
                     ? ""
                     : "Send"

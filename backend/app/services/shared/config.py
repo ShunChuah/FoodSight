@@ -53,13 +53,23 @@ def _positive_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def _names(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(name, str) and name.strip() for name in value)
+
+
 def _validate(data: dict) -> None:
     if data["version"] != 1:
         raise ValueError("unsupported version")
     settings = data["policy"]
-    city = settings["coverage"]["city"]
+    coverage = settings["coverage"]
+    city = coverage["city"]
     if not isinstance(city, str) or not city.strip():
         raise ValueError("coverage.city must name a supported city")
+    if not _names(coverage["popular_areas"]):
+        raise ValueError("coverage.popular_areas must list area names")
+    for region in coverage["outside_places"]:
+        if not _names(region["places"]) or ("nearby_areas" in region and not _names(region["nearby_areas"])):
+            raise ValueError("coverage.outside_places need places, and nearby_areas when given, as lists of names")
 
     alternatives = settings["alternatives"]
     if not isinstance(alternatives["enabled"], bool):

@@ -19,11 +19,15 @@
   },
   "interface": {
     "empty_message": "Please type a message first.",
-    "message_limit": "That message is a bit long. Please keep it under {maximum} words.",
+    "message_limit": "That message is a bit long. Please keep it under {maximum} characters.",
     "chat_not_found": "Sorry, I couldn’t find that chat.",
     "empty_title": "Please enter a title."
   },
   "location": {
     "permission": "I can find {venue} near you if you share your location. Is that okay?"
+  },
+  "coverage": {
+    "outside_nearby": "Sorry, I only know food and drink places in {city} for now, so I can’t look in {place}. The closest areas I cover are {areas}. Tap one below to search there, or tell me another area in PJ.",
+    "outside_far": "Sorry, I only know food and drink places in {city} for now, so I can’t look in {place}. If you’re ever in PJ, {areas} have lots of places to eat. Tap one below to search there, or tell me another area in PJ."
   }
 }

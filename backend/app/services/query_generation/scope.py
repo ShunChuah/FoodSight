@@ -2,9 +2,11 @@
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from ..shared.messages import response
 from ..shared.text import contains_phrase, normalize_query_text
+from .cypher_generation import load_vocabulary
 
 FNB_ENTITY_TERMS = {
     "bakery", "beverage", "beverages", "boba", "breakfast", "brunch",
@@ -12,14 +14,6 @@ FNB_ENTITY_TERMS = {
     "dinner", "dining", "dish", "dishes", "drink", "drinks", "eat", "fastfood", "food",
     "hungry", "lunch", "meal", "menu", "restaurant", "restaurants", "supper",
     "want to drink", "want to eat", "what should i eat", "what to eat",
-}
-
-ANALYST_INTENT_PHRASES = {
-    "business opportunity", "competitor", "competitors", "competition",
-    "market", "market gap", "market saturation", "open a", "open new",
-    "opening a", "restaurant density", "saturation", "suitable area",
-    "target segment", "underserved", "where is suitable",
-    "where should i open",
 }
 
 NON_FNB_TERMS = {
@@ -59,7 +53,10 @@ UNSUPPORTED_CAPABILITY_PATTERNS = (
     (r"\bhow\s+much\s+(?:budget|money|capital)\b", "startup budget"),
     (r"\bstartup\s+budget\b", "startup budget"),
     (r"\bstarting\s+budget\b", "startup budget"),
+    (r"\bhow\s+much\s+(?:can|could|does|do|will|would)\b.*\b(?:make|earn)\b", "revenue"),
+    (r"\bfoot\s*traffic\b|\bfootfall\b|\bhow\s+busy\b", "foot traffic"),
 )
+NO_FOOD_WORD_NEEDED = {"foot traffic"}
 
 
 @dataclass(frozen=True)
@@ -76,15 +73,30 @@ def classify_query_scope(user_query: str, conversation_context: str = "No previo
     fnb_signal = has_fnb_signal(user_query)
     unsupported = _unsupported_capabilities(normalized)
     scope = _fnb_scope(normalized, conversation_context, fnb_signal)
-    if fnb_signal and unsupported:
+    if unsupported and (fnb_signal or NO_FOOD_WORD_NEEDED.intersection(unsupported)):
         return ScopeDecision(status="unsupported", scope=scope,
                              reason=response("errors.unsupported_capability", capabilities=", ".join(unsupported)))
     # Missing keywords are not evidence that the request is unrelated: the model decides.
-    return ScopeDecision(status="supported", scope=scope or "fnb_customer")
+    return ScopeDecision(status="supported", scope=scope or "fnb")
 
 
 def has_fnb_signal(text: str) -> bool:
     return contains_phrase(normalize_query_text(text), FNB_ENTITY_TERMS)
+
+
+@lru_cache(maxsize=1)
+def _food_terms() -> re.Pattern:
+    terms = {"food", "eat", "eats", "drink", "drinks", "dish", "dishes", "meal", "meals", "dinner", "lunch", "breakfast"}
+    for column in load_vocabulary()["columns"].values():
+        for value, detail in column["values"].items():
+            terms.add(value.replace("_", " "))
+            terms.update(detail.get("includes", []) if isinstance(detail, dict) else [])
+    pattern = "|".join(sorted((re.escape(term.casefold()) for term in terms if len(term) > 2), key=len, reverse=True))
+    return re.compile(rf"(?<!\w)(?:{pattern})(?!\w)")
+
+
+def about_food(text: str) -> bool:
+    return has_fnb_signal(text) or bool(_food_terms().search(text.casefold()))
 
 
 def _fnb_scope(normalized: str, conversation_context: str, fnb_signal: bool) -> str | None:
@@ -93,7 +105,7 @@ def _fnb_scope(normalized: str, conversation_context: str, fnb_signal: bool) -> 
             line.removeprefix("User:") for line in conversation_context.splitlines() if line.startswith("User:")))
         if not contains_phrase(normalized, FNB_ENTITY_TERMS):
             return None
-    return "fnb_analyst" if contains_phrase(normalized, ANALYST_INTENT_PHRASES) else "fnb_customer"
+    return "fnb"
 
 
 def _unsupported_capabilities(normalized: str) -> list[str]:

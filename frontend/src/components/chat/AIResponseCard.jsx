@@ -4,7 +4,7 @@ import useAnswerSpeech from "../../hooks/useAnswerSpeech";
 import "../../styles/chat.css";
 
 function formatInlineText(text) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g);
 
   return parts.map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
@@ -16,7 +16,9 @@ function formatInlineText(text) {
         </strong>
       );
     }
-
+    if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) {
+      return <em key={`${part}-${index}`}>{part.slice(1, -1)}</em>;
+    }
     return part;
   });
 }
@@ -27,6 +29,34 @@ function FormattedAnswer({ answer }) {
   return (
     <div className="ai-response-content">
       {blocks.map((block, index) => {
+        if (block.type === "table") {
+          return (
+            <div className="ai-response-table-wrap" key={`table-${index}`}>
+              <table className="ai-response-table">
+                <thead>
+                  <tr>
+                    {block.header.map((cell, cellIndex) => (
+                      <th key={cellIndex} style={{ textAlign: block.align[cellIndex] || "left" }}>
+                        {formatInlineText(cell)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => (
+                        <td key={cellIndex} style={{ textAlign: block.align[cellIndex] || "left" }}>
+                          {formatInlineText(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
         if (block.type === "bullets") {
           return (
             <ul className="ai-response-list" key={`bullets-${index}`}>

@@ -6,10 +6,9 @@ from pydantic import BaseModel, Field, field_validator
 from .services.shared.messages import response
 
 
-MAX_MESSAGE_WORDS = 1000
-MAX_MESSAGE_CHARACTERS = 5000
-ScopeType = Literal["fnb_customer", "fnb_analyst"]
-GuardrailStatus = Literal["ready", "unsupported", "out_of_scope"]
+MAX_MESSAGE_CHARACTERS = 1000
+ScopeType = Literal["fnb"]
+GuardrailStatus = Literal["ready", "unsupported", "out_of_scope", "outside_coverage"]
 GraphStatus = Literal["pending", "ready", "failed"]
 
 
@@ -22,17 +21,13 @@ class ChatMessageInput(BaseModel):
 
     @field_validator("message", mode="before")
     @classmethod
-    def validate_message_words(cls, value: str) -> str:
+    def validate_message_length(cls, value: str) -> str:
         if not isinstance(value, str):
             return value
         if not value.strip():
             raise ValueError(response("interface.empty_message"))
-        if len(value.split()) > MAX_MESSAGE_WORDS:
-            raise ValueError(
-                response("interface.message_limit", maximum=f"{MAX_MESSAGE_WORDS:,}")
-            )
         if len(value) > MAX_MESSAGE_CHARACTERS:
-            raise ValueError(f"Your message is too long. Please keep it under {MAX_MESSAGE_CHARACTERS:,} characters.")
+            raise ValueError(response("interface.message_limit", maximum=f"{MAX_MESSAGE_CHARACTERS:,}"))
         return value
 
 

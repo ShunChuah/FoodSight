@@ -19,9 +19,8 @@ from .cypher_validation import GraphSchema, SchemaRelationship, validate_cypher
 from .proximity import coordinates_from_context, default_radius, explicit_radius_meters
 
 RESTAURANT_DETAILS_FIELD = "restaurant_details"
-MAX_GENERATION_SECONDS = 9.0
 MIN_GENERATION_SECONDS = 2.5
-RESERVED_AFTER_GENERATION_SECONDS = 4.0
+RESERVED_AFTER_GENERATION_SECONDS = 2.5
 MAX_QUERY_LENGTH = 6000
 MAX_MATCH_CLAUSES = 10
 RESTAURANT_LIMIT = 5
@@ -33,18 +32,39 @@ RATED_MINIMUM_REVIEWS = 20
 RANKING_METRICS = {
     "Restaurant.average_rating": "highest rt.rating_score (Rating)",
     "Restaurant.review_count": "most rt.total_reviews (Rating)",
-    "PriceRange.avg_price": "lowest avg_price (PriceRange)",
+    "PriceRange.avg_meal_price": "lowest p.avg_meal_price (PriceRange)",
     "Location.distance_m": "shortest distance_m (needs the user's position or a named starting place)",
 }
 
 ACTIONS = ("query", "clarify", "explain", "decline")
 MAX_OPTIONS = 4
+RECOMMENDATION = policy("recommendation")
+STUDY_OBJECTIVES = ["balanced", *policy("market_study")["objectives"]]
+PRICE_POSITIONS = ["none", "budget", "mid", "premium"]
+
+# What a restaurant search is after, named by the model so the app can rank by it.
+INTENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category": {"type": "string", "enum": [*RECOMMENDATION["categories"], "none"]},
+        "preferences": {"type": "array", "items": {"type": "string", "enum": list(RECOMMENDATION["preferences"])}},
+        "budget": {"type": "boolean"},
+        "location_study": {"type": "boolean"},
+        "areas": {"type": "array", "items": {"type": "string"}},
+        "objective": {"type": "string", "enum": STUDY_OBJECTIVES},
+        "price_position": {"type": "string", "enum": PRICE_POSITIONS},
+    },
+    "required": ["category", "preferences", "budget", "location_study", "areas", "objective", "price_position"],
+    "additionalProperties": False,
+}
 
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
         "action": {"type": "string", "enum": list(ACTIONS)},
         "details": {"type": "boolean"},
+        "business": {"type": "boolean"},
+        "intent": INTENT_SCHEMA,
         "reply": {"type": "string"},
         "options": {"type": "array", "items": {"type": "string"}},
         "cypher": {"type": "string"},
@@ -63,7 +83,7 @@ RESPONSE_SCHEMA = {
             "additionalProperties": False,
         }},
     },
-    "required": ["action", "details", "reply", "options", "cypher", "parameters"],
+    "required": ["action", "details", "business", "intent", "reply", "options", "cypher", "parameters"],
     "additionalProperties": False,
 }
 TITLED_RESPONSE_SCHEMA = {
@@ -86,25 +106,18 @@ TASK = """You turn one question about food and drink places in Petaling Jaya int
 Use only the graph described below. Read the vocabularies carefully: filters on a categorical property must use its exact values."""
 
 OUTPUT_RULES = """# Output rules
-- The query starts with MATCH or OPTIONAL MATCH. Never use CALL, UNION, CREATE, MERGE, SET, DELETE, REMOVE, DETACH, DROP, FOREACH or LOAD CSV.
 - Every value taken from the user (names, words, numbers) goes in parameters and is referenced as $name. Vocabulary values may be written inline as quoted strings.
 - When rows are restaurants, return one row per restaurant with r.restaurant_id AS restaurant_id, plus only values
   you computed or that explain the match (for example distance_m, a count, or t.name AS competitor_of).
   Do not return names, locations, areas, ratings, prices, cuisines, halal status, facilities or hours:
   the application adds them for every restaurant_id. Use the number of restaurants under Defaults.
-  Never return more than {restaurant_limit} restaurants, even if the user asks for more.
 - When rows are areas or other groups, return a.name AS area_name (or the group value) plus counts or averages with short
   descriptive aliases. Use LIMIT 5 unless the user asks for a number, up to {group_limit}.
-- Always end with a LIMIT, even for a single count or value (LIMIT 1).
-- Opening hours are free text, so never filter on them for "open now" or "open late": return the closest or best
-  places as usual (with h.is_24_7 = true only when the user wants 24 hours); the app works out which are open now.
-- Apply ORDER BY and LIMIT as early as possible (in a WITH) so later matches only touch the kept rows.
+- For "open now", "open late" or a time: return the closest or best places as usual (h.is_24_7 = true only when the
+  user wants 24 hours); the app checks the opening hours.
 - Every condition the user asked for goes in a WHERE right after a MATCH or a WITH, or in a MATCH pattern.
-  A WHERE right after OPTIONAL MATCH never removes rows: use OPTIONAL MATCH only for values you display,
-  and its WHERE may only mention variables that OPTIONAL MATCH introduces.
-- When the query starts from a restaurant the user named (for example its competitors or places near it), return the
-  restaurant_id of the result restaurants, plus that starting restaurant's id and name
-  (t.restaurant_id AS anchor_id, t.name AS competitor_of or t.name AS near_place).
+- avg(), sum(), min(), max() and count() aggregate over rows and skip nulls. Never pass them a list; group with RETURN or WITH instead.
+- After RETURN DISTINCT or a RETURN with an aggregation, ORDER BY may only use the returned aliases, never x.property.
 - Restaurant names the user types rarely match the stored name exactly ("ZUS Coffee SS2" is stored as
   "ZUS Coffee - SS2, Petaling Jaya"). Match them word by word against the name and area together:
   WITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label WHERE all(word IN $name_words WHERE label CONTAINS word),
@@ -112,30 +125,52 @@ OUTPUT_RULES = """# Output rules
   they are the only words). For several named places use $places, a list of word lists, with any(words IN $places ...).
 - Meanings: popular or famous = most reviews (total_reviews). Hidden gems = rating_score of at least 4.5 with
   20 to 300 reviews.
+  Competitors of a restaurant concept serve meals: leave out drinks shops, dessert shops, bakeries and cafes unless
+  the concept is one of them.
   Competition or competitors in an area or cuisine = places of the same kind there; use COMPETES_WITH only when the
   user names one restaurant. Muslim-friendly = halal_status 'halal'.
+- Location studies come first: any question about which area suits an F&B concept (where to open one, which area
+  has the least or most competition for it, which areas are underserved for it, the strongest existing market for it,
+  or whether named areas suit it) sets intent location_study true and returns only the concept's direct competitors:
+  every active restaurant matching its cuisine, kind and halal requirement, as RETURN DISTINCT r.restaurant_id AS
+  restaurant_id with no ORDER BY and LIMIT 5 (the app reads them all). Never use Area, IN_AREA, counts, shares or a
+  price, customer or atmosphere filter for these, even for one named area: the app compares the areas itself.
+- Other business questions (competition, gaps, shares, segments) are answered with area or group rows:
+  counts, shares and averages of active restaurants, not lists of places. Match every active restaurant first (never
+  filter that MATCH to the kind) and count the kind with count(DISTINCT CASE WHEN ... THEN r END) in the same WITH,
+  so totals, shares and zero counts are right; a cuisine is CASE WHEN EXISTS {{ (r)-[:SERVES]->(:Cuisine {{name: 'Thai'}}) }}. Saturated or crowded: compare the area's share with all of PJ's, and return PJ's own counts and share under the same aliases with a pj_ prefix (cafes and pj_cafes, all_restaurants and pj_all_restaurants).
+  Cuisines missing from one
+  area: start from (c:Cuisine) and OPTIONAL MATCH the restaurants. Pricing a planned outlet: one row with its
+  competitors' count and lowest, average and highest price in that area, the area's average price and the same
+  kind's average across PJ, so there is a benchmark even without competitors. Several groups (cuisines, tiers,
+  statuses) come from one query, one row per group; never UNION. Areas ranked by an average (rating, price) need at
+  least 10 restaurants. Comparing areas the user names: only those areas, one row each. Sentiment over time: count
+  each sentiment per period (for example per year of v.published_at).
 - Questions about what people say, praise or complain about: query Review (text, sentiment, individual_rating) and
   return r.name AS restaurant, v.sentiment AS sentiment, v.individual_rating AS stars, left(v.text, 300) AS review,
   up to 10 rows. Never return author_name.
-- A dish the user names (char kuey teow, roti canai): match the menu and, since many places are named after their
-  dish, the restaurant name too:
-  WHERE toLower(r.name) CONTAINS $dish OR EXISTS {{ MATCH (r)-[:HAS_DISH]->(d:Dish) WHERE toLower(d.name) CONTAINS $dish }}.
-- Distance in metres: point.distance(point({{latitude: l.latitude, longitude: l.longitude}}), point({{latitude: $latitude, longitude: $longitude}})). There is no distance() function.
-- avg(), sum(), min(), max() and count() aggregate over rows and skip nulls. Never pass them a list; group with RETURN or WITH instead.
-- After RETURN DISTINCT or a RETURN with an aggregation, ORDER BY may only use the returned aliases, never x.property.
-- Sort so the most relevant rows come first (for example by rating, review count or distance). Sort descending with coalesce(x, 0) so missing values come last.
-- Do not write comments in the query.
+- A dish the user names (roti canai, char kuey teow): menus are not recorded. Match both the cuisine whose Covers list
+  names it and, since many places are named after their dish, the restaurant name:
+  WHERE EXISTS {{ MATCH (r)-[:SERVES]->(:Cuisine {{name: 'Indian Muslim'}}) }} OR toLower(r.name) CONTAINS $dish.
 
 # Choosing the action
 Write every reply as a friendly local food guide talking to a customer, in plain words: never mention vocabularies,
 datasets, properties, queries or the graph. When an action does not use a field, set it to "" or [].
-- query (the usual action): write the Cypher. When a vague word in the request changes the results and has a sensible
-  default, do not ask: just use the default (for example cheap = budget, or the Defaults above).
+- query (the usual action): write the Cypher in cypher, never in reply. When a vague word in the request changes
+  the results and has a sensible default, do not ask: just use the default (for example cheap = budget, or the
+  Defaults above).
   details is true only when the user asks about one particular restaurant they named or referred to (more about it,
   its hours, phone, address, location, halal status or booking); it is false for searches, lists and comparisons.
+  With details true, find the place and return only r.restaurant_id: the app adds its profile, hours, facilities,
+  rating and contact details, so never OPTIONAL MATCH them.
+  business is true when the user asks as a business owner, operator or analyst (opening or running a place,
+  competitors, pricing, market research such as counts, shares, brands, closures or what customers say across
+  places), also in a follow-up; false for diners choosing where to eat.
 - clarify: only when the request can mean clearly different things, no default is safe, and the answers would differ
   a lot (for example "BBQ" could mean cooking at the table or barbecued dishes; "coffee shop" could mean a cafe or a
-  kopitiam). reply is one short question; options are 2-{max_options} short answers the user can tap, written as
+  kopitiam), or a business question about the user's own place that you cannot identify (for example "a second
+  outlet" without its brand or cuisine). A restaurant named with its area ("ZUS Coffee SS2") is specific: never ask
+  which branch. reply is one short question; options are 2-{max_options} short answers the user can tap, written as
   the user would say them. Ask at most one question. Never ask for something the user already said or that the
   conversation already answered, and never ask for the user's location when their position is available.
 - explain: a general food or drink question that needs no particular place (for example what a dish is, or the
@@ -143,12 +178,15 @@ datasets, properties, queries or the graph. When an action does not use a field,
   vocabulary definitions above. Do not name or recommend particular places. Never use explain for questions about
   places, reviews or numbers in Petaling Jaya: query them.
 - decline: the question is not about food and drink, or it needs information the graph does not have. If it needs
-  a category value that is not in its vocabulary (for example Wi-Fi, parking or a drive-through), never use a different
-  value as a stand-in (Dine-in is not Wi-Fi, Curbside Pickup is not a drive-through): decline. reply is one friendly sentence saying what you cannot help with. options may offer up to
+  a category value that is not in its vocabulary (for example Wi-Fi or a drive-through), never use a different
+  value as a stand-in (Dine-in is not Wi-Fi, Curbside Pickup is not a drive-through): decline. reply is one friendly sentence saying what you cannot help with;
+  for a business question, add one short sentence on what you can compare instead (for example competitors, prices or
+  ratings in that area). options may offer up to
   {max_options} food and drink requests you can answer instead, written as the user would ask them; otherwise [].
   When the question is not about food or drink at all, options must be [].
 - A place clearly outside Petaling Jaya (for example Kuala Lumpur city centre, Subang Jaya or Shah Alam): decline,
-  say you cover Petaling Jaya only, and offer nearby Petaling Jaya areas as options.
+  say you cover Petaling Jaya only, and offer the user's request in nearby Petaling Jaya areas as options
+  (for example "Nasi lemak in SS 2"). Never search such a place as an Area.
 Return JSON only."""
 
 
@@ -170,15 +208,53 @@ def ontology_path() -> Path:
     return path if path.is_absolute() else Path(__file__).resolve().parents[3] / path
 
 
+NOT_SHOWN = "Not in chatbot_schema.json."
+
+
 @lru_cache(maxsize=1)
-def load_ontology() -> dict:
-    return json.loads(ontology_path().read_text(encoding="utf-8"))
+def load_chatbot_schema() -> dict:
+    path = ontology_path().parent / os.getenv("CHATBOT_SCHEMA_FILE", "chatbot_schema.json")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @lru_cache(maxsize=1)
 def load_vocabulary() -> dict:
-    source = ontology_path().parent / load_ontology()["vocabulary_source"]
+    source = ontology_path().parent / load_chatbot_schema()["vocabulary_source"]
     return json.loads(source.read_text(encoding="utf-8"))
+
+
+# ontology.json (the data pipeline's structure) merged with chatbot_schema.json (what the query model is shown).
+@lru_cache(maxsize=1)
+def load_ontology() -> dict:
+    structure = json.loads(ontology_path().read_text(encoding="utf-8"))
+    return merge_schema(structure, load_chatbot_schema(), load_vocabulary()["columns"])
+
+
+# Anything chatbot_schema.json does not list is hidden; a vocabulary defaults to the column <table>.<property>.
+def merge_schema(structure: dict, chatbot: dict, columns: dict) -> dict:
+    unknown = [label for label in chatbot["nodes"] if label not in structure["nodes"]]
+    unknown += [name for name in chatbot["relationships"] if name not in structure["relationships"]]
+    nodes = {}
+    for label, node in structure["nodes"].items():
+        described = chatbot["nodes"].get(label)
+        names = [node["key"], *node["properties"], *node.get("points", {}), *node.get("derived", {})]
+        specs = (described or {}).get("properties", {})
+        unknown += [f"{label}.{name}" for name in specs if name not in names]
+        properties = {}
+        for name in names:
+            spec = dict(specs.get(name) or {"hide_from_prompt": NOT_SHOWN})
+            if "vocabulary" not in spec and f"{node.get('table')}.{name}" in columns:
+                spec["vocabulary"] = f"{node['table']}.{name}"
+            properties[name] = spec
+        extra = {"description": described["description"]} if described and described.get("description") else {}
+        nodes[label] = {**node, **extra, **({} if described else {"hide_from_prompt": NOT_SHOWN}),
+                        "properties": properties}
+    if unknown:
+        raise ValueError(f"chatbot_schema.json names what ontology.json does not have: {', '.join(unknown)}")
+    relationships = {name: {**rel, **chatbot["relationships"].get(name, {"hide_from_prompt": NOT_SHOWN})}
+                     for name, rel in structure["relationships"].items()}
+    rules = {key: value for key, value in chatbot.items() if key not in ("description", "nodes", "relationships")}
+    return {**rules, "nodes": nodes, "relationships": relationships}
 
 
 @lru_cache(maxsize=1)
@@ -198,9 +274,13 @@ def ontology_graph_schema() -> GraphSchema:
         for name, rel in ontology["relationships"].items()
     ]
     for name, rel in ontology["relationships"].items():
-        if rel["pattern"].endswith(f"]-(:{rel['to']})"):
+        if rel.get("undirected"):
             relationships.append(SchemaRelationship(rel["to"], name, rel["from"]))
     return GraphSchema(nodes=nodes, relationships=relationships)
+
+
+def relationship_pattern(name: str, rel: dict) -> str:
+    return f"(:{rel['from']})-[:{name}]-{'' if rel.get('undirected') else '>'}(:{rel['to']})"
 
 
 @lru_cache(maxsize=1)
@@ -236,6 +316,54 @@ def normalise_area_patterns(cypher: str, parameters: dict[str, Any]) -> dict[str
     return parameters
 
 
+# Cuisine nodes hold source labels; each counts as the categories.json value whose Covers list names it.
+CUISINE_NAMES, CUISINE_CATEGORIES = "cuisine_names", "cuisine_categories"
+CUISINE_MAP = re.compile(r"\(\s*(\w*)\s*:\s*Cuisine\s*\{([^}]*)\}\s*\)")
+MAP_ENTRY = re.compile(r"(\w+)\s*:\s*('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"|\$\w+|[^,]+)")
+PATH_START = re.compile(r"\(\s*\w+\s*(?::\s*\w+\s*)?\)\s*<?-\s*\[[^\]]*\]\s*->?\s*$")
+SUBQUERY = re.compile(r"\b(?:EXISTS|COUNT|COLLECT)\s*\{", re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def cuisine_labels() -> dict[str, dict[str, str]]:
+    names, categories = {}, {}
+    for value, detail in load_vocabulary()["columns"]["cuisine.name"]["values"].items():
+        for label in (value, *detail.get("includes", [])):
+            names.setdefault(label.lower(), value)
+            categories.setdefault(label.lower(), detail.get("category"))
+    return {CUISINE_NAMES: names, CUISINE_CATEGORIES: categories}
+
+
+def translate_cuisines(cypher: str, parameters: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    if not re.search(r":\s*Cuisine\b", cypher):
+        return cypher, parameters
+    parts, done = [], 0
+    for number, match in enumerate(CUISINE_MAP.finditer(cypher), 1):
+        before = cypher[:match.start()]
+        clauses = [" ".join(m.group(1).upper().split()) for m in CLAUSE.finditer(before)]
+        subquery = max((m.end() for m in SUBQUERY.finditer(before)), default=-1) > before.rfind("}")
+        # Only a MATCH pattern may name a new node; elsewhere a pattern is wrapped in EXISTS { MATCH ... }.
+        expression = not subquery and (not clauses or clauses[-1] not in ("MATCH", "OPTIONAL MATCH"))
+        path = PATH_START.search(before) if expression else None
+        if expression and not path:
+            continue
+        variable = match.group(1) or f"cuisine_{number}"
+        conditions = " AND ".join(f"{variable}.{prop} = {value.strip()}" for prop, value in MAP_ENTRY.findall(match.group(2)))
+        node = f"({variable}:Cuisine WHERE {conditions})"
+        parts += [cypher[done:path.start() if path else match.start()],
+                  f"EXISTS {{ MATCH {path.group(0)}{node} }}" if path else node]
+        done = match.end()
+    rewritten = "".join(parts) + cypher[done:]
+    variables = set(re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*Cuisine\b", rewritten))
+    if not variables:
+        return rewritten, parameters
+    names = "|".join(map(re.escape, variables))
+    rewritten = re.sub(rf"\b({names})\.(name|category)\b", lambda m: (
+        f"coalesce(${CUISINE_NAMES if m.group(2) == 'name' else CUISINE_CATEGORIES}[toLower({m.group(1)}.name)], "
+        f"{m.group(1)}.{m.group(2)})"), rewritten)
+    return rewritten, {**parameters, **cuisine_labels()}
+
+
 @lru_cache(maxsize=1)
 def schema_prompt() -> str:
     ontology = load_ontology()
@@ -245,13 +373,18 @@ def schema_prompt() -> str:
 
     lines += ["", "# Nodes"]
     for label, node in ontology["nodes"].items():
+        if node.get("hide_from_prompt"):
+            continue
         lines.append(f"## {label}: {node.get('description', '')}".rstrip(": "))
         for prop, spec in node["properties"].items():
-            lines.append("- " + _property_line(prop, spec, columns))
+            if not spec.get("hide_from_prompt"):
+                lines.append("- " + _property_line(prop, spec, columns, node))
 
     lines += ["", "# Relationships (use exactly these directions)"]
-    for rel in ontology["relationships"].values():
-        lines.append(f"- {rel['pattern']} [{rel['cardinality']}] {rel['description']}")
+    for name, rel in ontology["relationships"].items():
+        if name not in hidden_relationships():
+            extra = f" Properties: {', '.join(rel['properties'])}." if rel.get("properties") else ""
+            lines.append(f"- {relationship_pattern(name, rel)} [{rel['cardinality']}] {rel['description']}{extra}")
 
     definitions = {k: v for k, v in ontology.get("business_definitions", {}).items() if not k.startswith("_")}
     if definitions:
@@ -277,6 +410,8 @@ def schema_prompt() -> str:
                 continue
             if example.get("details"):
                 lines.append("details: true")
+            if example.get("intent"):
+                lines.append("intent: " + json.dumps(example["intent"], ensure_ascii=False))
             lines.append(f"Parameters: {json.dumps(example.get('parameters') or {}, ensure_ascii=False)}")
             lines.append("Cypher:\n" + example["cypher"])
     return "\n".join(lines)
@@ -298,8 +433,11 @@ def defaults_prompt() -> str:
         f"{venues}, walking distance {_km(proximity['walking_radius_meters'])}, delivery "
         f"{_km(proximity['delivery_radius_meters'])}). When the user gives a distance, use $radius_m with their value "
         "instead. Never add a distance filter otherwise: a search in an area or in all of Petaling Jaya has none.",
-        "- Near a mall, station or landmark (not a restaurant): it has no coordinates, so match restaurants whose name "
-        "or area contains it, with the spellings people use (1 Utama: '1 utama', '1utama', 'bandar utama').",
+        "- Near a named mall, school, university, hospital, hotel or office: (r)-[n:NEAR]->(np:NearbyPlace) WHERE "
+        "toLower(np.name) CONTAINS toLower($place), nearest first by n.distance_m. Near a named train station: "
+        "(r)-[s:NEAREST_STATION]->(st:NearbyPlace) WHERE toLower(st.name) CONTAINS toLower($place) AND s.distance_m "
+        f"<= ${DEFAULT_RADIUS}. Any other landmark has no pin: match restaurants whose name or area contains it, with "
+        "the spellings people use (1 Utama: '1 utama', '1utama', 'bandar utama').",
         f"- Nearest or closest: ORDER BY distance_m without a radius filter, LIMIT {nearest} unless the user asks for more.",
         f"- Best, top rated, highly rated or good: highest rt.rating_score among places with "
         f"rt.total_reviews >= ${DEFAULT_MIN_REVIEWS}, ties broken by rt.total_reviews. When the user gives a number "
@@ -307,6 +445,22 @@ def defaults_prompt() -> str:
         "- Ranking words: " + "; ".join(f"{', '.join(words)} = {RANKING_METRICS[metric]}"
                                         for metric, words in choices.items()) + ".",
         f"- When the user does not say how to rank places, rank by {RANKING_METRICS[ranking['default_field']]}.",
+        "- intent says what a search for places is after, so the app can rank the matches (anything else: category "
+        "none, no preferences, budget false, location_study false, areas [], objective balanced, price_position none). "
+        "category: only a kind of place the user names ("
+        + ", ".join(RECOMMENDATION["categories"]) + "); none for restaurants, food or places in general. "
+        "preferences: the mood, occasion and who-it-suits wishes, from " + "; ".join(
+            f"{name} ({', '.join(entry['terms'][:4])})" for name, entry in RECOMMENDATION["preferences"].items())
+        + ". budget: true when they want it cheap or affordable. location_study: true when the user asks where "
+        "to open an F&B outlet, which area suits a concept, which area has the least competition or the strongest "
+        "existing market for one, or whether named areas suit one; then areas are the areas they named, as written "
+        "([] for all of PJ); objective is exposure for more customers or visibility, low_competition for fewer "
+        "competitors, strongest_market for the strongest existing market, otherwise balanced; price_position is "
+        "budget, mid or premium when they say so, otherwise none.",
+        "- Preferences go in intent, not in the Cypher: match only the kind of place and the user's requirements, and "
+        "the app ranks by the preferences. Filter on ambiance, target_segment or a facility only when the user makes "
+        "it a requirement (\"must have a kids menu\", \"only places with outdoor seating\"). A long message still "
+        "gets one short query for its main question: never try to cover every detail in the Cypher.",
         f"- Number of restaurants: LIMIT {results['discovery_limit']}; LIMIT {results['default_limit']} when the user "
         f"asks for a few; the number the user asks for, up to {RESTAURANT_LIMIT}.",
         f"- Never put ${DEFAULT_RADIUS} or ${DEFAULT_MIN_REVIEWS} in parameters: the app sets them.",
@@ -318,12 +472,19 @@ def _km(metres: int | float) -> str:
     return f"{metres / 1000:g} km" if metres >= 1000 else f"{metres:g} m"
 
 
-def _property_line(prop: str, spec: dict, columns: dict) -> str:
+DEFINED_VOCABULARIES = {"price_range.tier", "business_profile.halal_status"}
+
+
+def _first_sentence(text: str) -> str:
+    return re.split(r"(?<=[.!?])\s+", text.strip(), maxsplit=1)[0]
+
+
+def _property_line(prop: str, spec: dict, columns: dict, node: dict) -> str:
     facts = [spec["type"]]
-    if spec.get("nullable"):
-        facts.append("nullable")
-    if spec.get("unique"):
+    if prop == node.get("key"):
         facts.append("unique")
+    elif prop not in node.get("required", []) and prop not in node.get("derived", {}):
+        facts.append("nullable")
     if spec.get("match") == "fuzzy":
         facts.append("free text")
     for key in ("format", "unit", "range"):
@@ -336,14 +497,42 @@ def _property_line(prop: str, spec: dict, columns: dict) -> str:
     if not column:
         return line
     col = columns[column]
-    line += f"\n  Vocabulary {column}: {col['meaning']}"
-    for value, detail in col["values"].items():
-        definition = detail if isinstance(detail, str) else detail.get("definition", "")
+    line += f"\n  Vocabulary {column}: {_first_sentence(col['meaning'])}"
+    values = col["values"]
+    if column not in DEFINED_VOCABULARIES and not any(isinstance(d, dict) and d.get("includes") for d in values.values()):
+        return line + "\n    " + ", ".join(f"'{value}'" for value in values)
+    for value, detail in values.items():
+        line += f"\n    '{value}'"
+        if column in DEFINED_VOCABULARIES:
+            line += f": {detail if isinstance(detail, str) else detail.get('definition', '')}"
         includes = detail.get("includes") if isinstance(detail, dict) else None
-        line += f"\n    '{value}': {definition}"
         if includes:
             line += f" Covers: {', '.join(includes)}."
     return line
+
+
+# Questions that read like "where should I open ..." get a reminder of the short competitor query, so the first
+# attempt is right; long business briefs otherwise tend to come back as one large aggregate query.
+LOCATION_STUDY = re.compile(
+    r"\b(?:where (?:should|can|could|do|would) (?:i|we) (?:open|start|set up|put)"
+    r"|which (?:area|location|part of pj)s? (?:is|would|should|offers?|suits?|has the (?:least|fewest|lowest) compet)"
+    r"|(?:best|good|right) (?:area|location|spot) (?:to|for)|least competition|(?:fewer|less|fewest) competit"
+    r"|strongest .{0,30}market|suitable for (?:a|an|my|our)\b|open(?:ing)? (?:a|an|my|our|first|new)\b"
+    r".{0,80}\b(?:cafe|café|restaurant|shop|stall|outlet|kiosk|bakery|eatery))",
+    re.IGNORECASE)
+# "Who would I compete with if I open ..." asks for the competitors themselves, not an area comparison.
+COMPETITOR_LIST = re.compile(r"\bwho (?:would|will|do|does|should) (?:i|we) compete\b|\bcompete with\b", re.IGNORECASE)
+# "Is SS2 saturated with cafes?", "how many ..." or "what share ...": the figures of an area, not a comparison of areas.
+AREA_FIGURES = re.compile(r"\b(?:saturated|crowded|oversupplied|how many|what share|what percentage|proportion of)\b",
+                          re.IGNORECASE)
+NOT_LOCATION_STUDY_HINT = (
+    "This is not a location study: set intent location_study false and answer it as one of the other business "
+    "questions, with the competitors as a list of places, or the area's counts and shares with PJ's own figures "
+    "alongside.")
+LOCATION_STUDY_HINT = (
+    "This reads like a location study: set intent location_study true and return only the concept's direct "
+    "competitors, filtered on hard requirements (cuisine, kind of place, halal), never on customers, price, "
+    "atmosphere or area. Everything else in the message goes in intent.")
 
 
 def question_prompt(
@@ -353,11 +542,14 @@ def question_prompt(
     previous: tuple[str, str] | None = None,
     want_title: bool = False,
     may_clarify: bool = True,
+    chat_state: str = "",
 ) -> str:
     parts = []
     if conversation_context and conversation_context != "No previous conversation.":
         parts.append("Previous conversation (use it to resolve follow-ups such as 'what about halal ones?'):\n"
                      + conversation_context)
+    if chat_state:
+        parts.append(chat_state)
     area = re.search(r"^User location area:\s*(.+)$", location_context or "", flags=re.IGNORECASE | re.MULTILINE)
     if coordinates_from_context(location_context):
         parts.append("The user's position is available as $latitude and $longitude (WGS84). "
@@ -367,6 +559,10 @@ def question_prompt(
     else:
         parts.append("The user's position is not available: never use $latitude, $longitude or a distance filter.")
     parts.append(f"Question: {question}")
+    if COMPETITOR_LIST.search(question) or AREA_FIGURES.search(question):
+        parts.append(NOT_LOCATION_STUDY_HINT)
+    elif LOCATION_STUDY.search(question):
+        parts.append(LOCATION_STUDY_HINT)
     if not may_clarify:
         parts.append(NO_SECOND_QUESTION)
     if want_title:
@@ -387,9 +583,11 @@ def generate_cypher(
     previous: tuple[str, str] | None = None,
     want_title: bool = False,
     may_clarify: bool = True,
+    chat_state: str = "",
 ) -> CypherResult:
     started_at = perf_counter()
-    result = _generate(question, conversation_context, location_context, deadline, previous, want_title, may_clarify)
+    result = _generate(question, conversation_context, location_context, deadline, previous, want_title, may_clarify,
+                       chat_state)
     log_timing("cypher.generation", started_at, status=result.status, retry=bool(previous))
     return result
 
@@ -398,14 +596,16 @@ CACHED_STATUSES = ("success", "clarify", "explain", "cannot_answer")
 
 
 def _generate(question, conversation_context, location_context, deadline, previous, want_title,
-              may_clarify=True) -> CypherResult:
-    prompt = question_prompt(question, conversation_context, location_context, previous, want_title, may_clarify)
+              may_clarify=True, chat_state="") -> CypherResult:
+    prompt = question_prompt(question, conversation_context, location_context, previous, want_title, may_clarify,
+                             chat_state)
     # Only first attempts are cached: a retry's prompt carries the rejected query.
     raw = QUERY_REPLIES.get(prompt, want_title) if not previous else None
     if raw is None:
-        timeout = MAX_GENERATION_SECONDS
+        # LLM_QUERY_TIMEOUT_SECONDS caps the call; the answer's deadline can only shorten it.
+        timeout = None
         if deadline is not None:
-            timeout = min(timeout, deadline - perf_counter() - RESERVED_AFTER_GENERATION_SECONDS)
+            timeout = deadline - perf_counter() - RESERVED_AFTER_GENERATION_SECONDS
             if timeout < MIN_GENERATION_SECONDS:
                 return CypherResult("skipped_deadline")
         try:
@@ -470,7 +670,9 @@ def _read_reply(raw, question, conversation_context, location_context, want_titl
     # Fixed after validation, so the check sees the model's own query.
     parameters = normalise_area_patterns(cypher, parameters)
     details = payload.get("details") is True
-    return CypherResult("success", plan=build_plan(cypher, parameters, details), cypher=cypher, chat_title=title,
+    plan = build_plan(cypher, parameters, details, business=payload.get("business") is True,
+                      intent=payload.get("intent") if isinstance(payload.get("intent"), dict) else None)
+    return CypherResult("success", plan=plan, cypher=cypher, chat_title=title,
                         details=details)
 
 
@@ -490,7 +692,22 @@ def apply_defaults(cypher: str, parameters: dict[str, Any], question: str,
         parameters[DEFAULT_RADIUS] = _default_radius(question, conversation_context)
     if re.search(rf"\${DEFAULT_MIN_REVIEWS}\b", cypher):
         parameters[DEFAULT_MIN_REVIEWS] = policy("ranking").get("rated_minimum_reviews", RATED_MINIMUM_REVIEWS)
-    return cypher, parameters
+    return _without_unasked_24_7(cypher, question), parameters
+
+
+TWENTY_FOUR_HOURS = re.compile(r"\b24\s*(?:/\s*7|[- ]?h(?:ou)?rs?\b|h\b)|round[- ]the[- ]clock|all[- ]night|non[- ]?stop",
+                               re.IGNORECASE)
+
+
+def _without_unasked_24_7(cypher: str, question: str) -> str:
+    if "is_24_7" not in cypher or TWENTY_FOUR_HOURS.search(question or ""):
+        return cypher
+    flag = r"\w+\.is_24_7\s*=\s*true\b"
+    cypher = re.sub(r"\s*\{\s*is_24_7\s*:\s*true\s*\}|,\s*is_24_7\s*:\s*true\b|\bis_24_7\s*:\s*true\s*,\s*", "", cypher,
+                    flags=re.IGNORECASE)
+    cypher = re.sub(rf"\bWHERE\s+{flag}\s+AND\s+", "WHERE ", cypher, flags=re.IGNORECASE)
+    cypher = re.sub(rf"\s+AND\s+{flag}", "", cypher, flags=re.IGNORECASE)
+    return re.sub(rf"\s*\bWHERE\s+{flag}(?!\s*(?:OR|AND)\b)", "", cypher, flags=re.IGNORECASE)
 
 
 def _radius_parameters(cypher: str) -> list[str]:
@@ -541,13 +758,16 @@ def clean_cypher(cypher: str) -> str:
     return cypher.strip().rstrip(";").strip()
 
 
-def build_plan(cypher: str, parameters: dict[str, Any], details: bool = False) -> QueryPlan:
+def build_plan(cypher: str, parameters: dict[str, Any], details: bool = False, business: bool = False,
+               intent: dict[str, Any] | None = None) -> QueryPlan:
     maximum = RESTAURANT_LIMIT if returns_restaurants(cypher) else GROUP_LIMIT
     limits = [int(value) for value in re.findall(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)]
     return QueryPlan(
         cypher=cypher, parameters=parameters,
         result_limit=min([maximum, *limits]),
         requested_fields=(RESTAURANT_DETAILS_FIELD,) if details else (),
+        business=business,
+        intent=intent or {},
     )
 
 
@@ -608,6 +828,7 @@ def repair_cypher(cypher: str) -> str:
     if required != cypher:
         kg_debug("Cypher repaired (OPTIONAL MATCH with a filter became MATCH)", required)
         cypher = required
+    cypher = _optional_rating(cypher)
     if not (returns_restaurants(cypher) and order_by_issues(cypher)):
         return cypher
     *head, final = re.split(r"(\bRETURN\b)", cypher, flags=re.IGNORECASE)
@@ -616,6 +837,17 @@ def repair_cypher(cypher: str) -> str:
     repaired = "".join(head) + re.sub(r"^\s*DISTINCT\b", "", final, count=1, flags=re.IGNORECASE)
     kg_debug("Cypher repaired (removed RETURN DISTINCT)", repaired)
     return repaired
+
+
+RATING_MATCH = re.compile(r"(?<!OPTIONAL )\bMATCH\s+\((\w+)\)-\[:HAS_RATING\]->\((\w+):Rating\)(?=\s)")
+
+
+# A rating used only to sort or show is optional: a required one silently drops every place without a rating.
+def _optional_rating(cypher: str) -> str:
+    match = RATING_MATCH.search(cypher)
+    if not match or re.search(rf"\b{match[2]}\.\w+\s*(?:>=|<=|<>|=|>|<|IS\b|IN\b)", cypher):
+        return cypher
+    return cypher[:match.start()] + "OPTIONAL " + cypher[match.start():]
 
 
 # Junk the model leaves on a pattern ("-[]-()"), which silently removes rows.
@@ -710,6 +942,8 @@ def check_cypher(cypher: str, parameters: dict[str, Any]) -> str | None:
                  "(for example RETURN chains, independents, total).")
     if valid and "`" in cypher:
         valid, error = False, "Do not use backticks: write labels, relationship types and properties as plain names."
+    if valid and re.search(r"::\s*\w", re.sub(QUOTED, "''", cypher)):
+        valid, error = False, "Cypher has no :: casts. Compare the value directly (is_24_7 = true) or use toString()."
     if valid and re.search(r"\bRETURN\s+(?:DISTINCT\s+)?-?\d+(?:\.\d+)?\s*(?:LIMIT\b|$)",
                            re.split(r"(?=\bRETURN\b)", cypher, flags=re.IGNORECASE)[-1], flags=re.IGNORECASE):
         valid, error = False, "RETURN named columns (for example a.name AS area_name, count(r) AS places), not a number."
@@ -719,7 +953,7 @@ def check_cypher(cypher: str, parameters: dict[str, Any]) -> str | None:
     if valid:
         issues = (limit_issues(cypher) + order_by_issues(cypher) + optional_match_filter_issues(cypher)
                   + vocabulary_issues(cypher, parameters) + aggregate_issues(cypher) + undirected_pattern_issues(cypher)
-                  + parameter_issues(cypher, parameters))
+                  + parameter_issues(cypher, parameters) + hidden_property_issues(cypher))
         if issues:
             valid, error = False, " ".join(issues)
     log_timing("cypher.validation", started_at, status="success" if valid else "invalid")
@@ -794,6 +1028,33 @@ def _filtering_optional_matches(cypher: str) -> list[tuple[int, list[str]]]:
     return found
 
 
+@lru_cache(maxsize=1)
+def hidden_labels() -> set[str]:
+    return {label for label, node in load_ontology()["nodes"].items() if node.get("hide_from_prompt")}
+
+
+@lru_cache(maxsize=1)
+def hidden_relationships() -> set[str]:
+    return {name for name, rel in load_ontology()["relationships"].items()
+            if rel.get("hide_from_prompt") or rel["from"] in hidden_labels() or rel["to"] in hidden_labels()}
+
+
+@lru_cache(maxsize=1)
+def hidden_properties() -> set[tuple[str, str]]:
+    return {(label, prop) for label, node in load_ontology()["nodes"].items()
+            for prop, spec in node["properties"].items() if spec.get("hide_from_prompt")}
+
+
+def hidden_property_issues(cypher: str) -> list[str]:
+    variables = dict(re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*)", cypher))
+    used = {(variables.get(variable), prop) for variable, prop in re.findall(r"\b(\w+)\.(\w+)", cypher)}
+    used |= {(label, prop) for label, body in re.findall(r"\(\s*\w*\s*:\s*(\w+)\s*\{([^}]*)\}", cypher)
+             for prop in re.findall(r"(\w+)\s*:", body)}
+    names = sorted(f"{label}.{prop}" for label, prop in used if (label, prop) in hidden_properties())
+    names += sorted(set(re.findall(r":\s*(\w+)", cypher)) & (hidden_labels() | hidden_relationships()))
+    return [f"{', '.join(names)} cannot be used in a query: leave it out."] if names else []
+
+
 def vocabulary_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
     bindings = vocabulary_bindings()
     variables = dict(re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*([A-Za-z_]\w*)", cypher))
@@ -816,9 +1077,9 @@ def vocabulary_issues(cypher: str, parameters: dict[str, Any]) -> list[str]:
     for variable, prop, name in re.findall(r"\b(\w+)\.(\w+)\s*(?:=|<>|\bIN\b)\s*\$(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, parameters.get(name))
     for single, double, variable, prop in re.findall(
-            rf"(?:{QUOTED})\s+IN\s+split\(\s*(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
+            rf"(?:{QUOTED})\s+IN\s+(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, single or double)
-    for name, variable, prop in re.findall(r"\$(\w+)\s+IN\s+split\(\s*(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
+    for name, variable, prop in re.findall(r"\$(\w+)\s+IN\s+(\w+)\.(\w+)", cypher, flags=re.IGNORECASE):
         add(variable, prop, parameters.get(name))
     for variable, label, body in re.findall(r"\(\s*(\w*)\s*:\s*(\w+)\s*\{([^}]*)\}", cypher):
         for prop, single, double, name in re.findall(rf"(\w+)\s*:\s*(?:(?:{QUOTED})|\$(\w+))", body):

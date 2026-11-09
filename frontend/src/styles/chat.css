@@ -328,6 +328,30 @@
   white-space: nowrap;
 }
 
+.ai-response-table-wrap {
+  overflow-x: auto;
+}
+
+.ai-response-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #09090b;
+}
+
+.ai-response-table th,
+.ai-response-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #e4e4e7;
+  white-space: nowrap;
+}
+
+.ai-response-table th {
+  font-weight: 600;
+  background: #f4f4f5;
+}
+
 .ai-response-skeleton {
   display: flex;
   flex-direction: column;
@@ -481,8 +505,18 @@
 [data-theme="dark"] .voice-btn,
 [data-theme="dark"] .user-question-bubble,
 [data-theme="dark"] .ai-response-summary,
-[data-theme="dark"] .ai-response-list {
+[data-theme="dark"] .ai-response-list,
+[data-theme="dark"] .ai-response-table {
   color: var(--dark-text);
+}
+
+[data-theme="dark"] .ai-response-table th,
+[data-theme="dark"] .ai-response-table td {
+  border-bottom-color: var(--dark-border);
+}
+
+[data-theme="dark"] .ai-response-table th {
+  background: var(--dark-hover);
 }
 
 [data-theme="dark"] .speak-action {

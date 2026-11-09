@@ -8,6 +8,8 @@ export function answerToSpeechText(answer = "") {
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/!?\[([^\]]+)\]\([^\n)]+\)/g, "$1")
     .replace(/\[R\d+\]/g, "")
+    .replace(/^[ \t]*\|[ \t:|-]+\|[ \t]*$/gm, "")
+    .replace(/^[ \t]*\|(.*)\|[ \t]*$/gm, (_, cells) => `${cells.split("|").map((cell) => cell.trim()).join(", ")}.`)
     .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|>\s*)/gm, "")
     .replace(/[*_`~]/g, "")
     .replace(/\s+/g, " ")

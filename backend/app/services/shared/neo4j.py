@@ -32,10 +32,11 @@ def execute_cypher(
     *,
     timeout_seconds: float | None = None,
     cache: bool = True,
+    purpose: str | None = None,
 ) -> CypherExecutionResult:
     started_at = perf_counter()
     if not execution_enabled():
-        log_timing("neo4j.query", started_at, status="skipped_disabled", row_count=0)
+        log_timing("neo4j.query", started_at, status="skipped_disabled", row_count=0, purpose=purpose)
         return CypherExecutionResult([], "skipped_disabled")
 
     uri = os.getenv("NEO4J_URI", "").strip()
@@ -45,7 +46,7 @@ def execute_cypher(
     if not uri or not user or not password:
         logger.warning("Neo4j connection settings are missing")
         kg_debug("Neo4j execution skipped", "Neo4j connection settings are missing")
-        log_timing("neo4j.query", started_at, status="skipped_config", row_count=0)
+        log_timing("neo4j.query", started_at, status="skipped_config", row_count=0, purpose=purpose)
         return CypherExecutionResult([], "skipped_config", response("errors.unavailable"))
     cached = GRAPH_ROWS.get(uri, database, cypher, parameters or {}) if cache else None
     if cached is not None:
@@ -57,7 +58,7 @@ def execute_cypher(
     effective_timeout = min(configured_timeout, timeout_seconds) if timeout_seconds is not None else configured_timeout
     error_code = None
     if effective_timeout <= 0:
-        log_timing("neo4j.query", started_at, status="skipped_deadline", row_count=0, timeout_s=0)
+        log_timing("neo4j.query", started_at, status="skipped_deadline", row_count=0, timeout_s=0, purpose=purpose)
         return CypherExecutionResult([], "error", response("errors.retrieval"))
     try:
         from neo4j import READ_ACCESS, Query
@@ -87,6 +88,7 @@ def execute_cypher(
             configured_timeout_s=configured_timeout,
             timeout_s=round(effective_timeout, 3),
             error_code=error_code,
+            purpose=purpose,
         )
     if cache:
         GRAPH_ROWS.set(rows, uri, database, cypher, parameters or {})

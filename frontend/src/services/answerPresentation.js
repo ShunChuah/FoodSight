@@ -15,6 +15,17 @@ export function parseAnswer(answer) {
       flushParagraph();
       continue;
     }
+    // A markdown table: "| a | b |" rows, with a "|---|---:|" line after the header.
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      flushParagraph();
+      const cells = line.trim().slice(1, -1).split("|").map((cell) => cell.trim());
+      const previous = blocks.at(-1);
+      if (cells.every((cell) => /^:?-{2,}:?$/.test(cell))) {
+        if (previous?.type === "table") previous.align = cells.map((cell) => (cell.endsWith(":") ? "right" : "left"));
+      } else if (previous?.type === "table") previous.rows.push(cells);
+      else blocks.push({ type: "table", header: cells, rows: [], align: [] });
+      continue;
+    }
     const numbered = line.match(/^\s*(\d+)[.)]\s+(.+)$/);
     const bullet = line.match(/^\s*[-*]\s+(.+)$/);
     if (bullet) {

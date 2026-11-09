@@ -2,7 +2,6 @@ import math
 import re
 
 from ..shared.config import policy
-from ..shared.text import contains_phrase, normalize_query_text
 
 USER_REFERENCE = re.compile(r"^(?:the\s+)?(?:me|here|my|your|user(?:['’]s)?|current|device|browser|gps)(?:\b|_)", re.I)
 
@@ -83,7 +82,9 @@ def extract_explicit_location(user_query: str) -> str | None:
             r"([a-z0-9][a-z0-9 .,'-]{1,80}?)"
             r"(?=\s+(?:for|with|under|below|above|that|serving|open|"
             r"by|ranked|sorted|ordered|compared|versus|vs|than|and|or|but|which|who|"
-            r"target|targets|serve|serves|offer|offers|have|has|are|is|do|does)\b|[?!.,]|$)"
+            r"target|targets|serve|serves|offer|offers|have|has|are|is|do|does|"
+            # Chat fillers and times after the place: "in ss2 pls", "in SS2 tonight lah".
+            r"pls|please|plz|lah|leh|ah|tonight|today|tomorrow|now|near|nearby)\b|[?!.,]|\s*[^\w\s.,'-]|$)"
         ),
         user_query,
         flags=re.IGNORECASE,
@@ -102,20 +103,3 @@ def extract_explicit_location(user_query: str) -> str | None:
         if is_user_reference(location) or re.match(r"^\d+(?:\.\d+)?\s*(?:km|m|kilometres?|kilometers?|metres?|meters?)\b", location, flags=re.IGNORECASE)
         else location
     )
-
-
-POSITION_MODES = ("radius_search", "nearest_search", "walking_proxy", "distance_measurement")
-USER_POSITION_TERMS = {"near me", "around me", "close to me", "current location", "around here"}
-
-
-def location_requirement(user_query: str) -> tuple[bool, str | None]:
-    normalized = normalize_query_text(user_query)
-    modes = policy("proximity")["modes"]
-    terms = {term for mode in POSITION_MODES for term in modes.get(mode, {}).get("terms", [])}
-    proximity = contains_phrase(normalized, terms) or explicit_radius_meters(normalized) is not None
-    named_place = extract_explicit_location(user_query)
-    if named_place and contains_phrase(normalize_query_text(named_place), terms | USER_POSITION_TERMS):
-        named_place = None
-    if named_place and not contains_phrase(normalized, USER_POSITION_TERMS):
-        return False, named_place
-    return proximity, named_place
