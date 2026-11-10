@@ -100,6 +100,7 @@ TITLE_RULE = (
     "conversation's topic), for example \"Halal Japanese Food In SS 2\", "
     "\"McDonald's Competitors\" or \"Cheap Eats Near You\". Never repeat the question word for word."
 )
+NO_TITLE_RULE = "This chat already has a title: set chat_title to \"\"."
 
 # Fixed prompt text, identical for every question so the provider can cache it.
 TASK = """You turn one question about food and drink places in Petaling Jaya into one read-only Neo4j 5 Cypher query.
@@ -578,8 +579,7 @@ def question_prompt(
         parts.append(LOCATION_STUDY_HINT)
     if not may_clarify:
         parts.append(NO_SECOND_QUESTION)
-    if want_title:
-        parts.append(TITLE_RULE)
+    parts.append(TITLE_RULE if want_title else NO_TITLE_RULE)
     if previous:
         parts.append("Your previous query was rejected. Return a corrected query.\n"
                      f"Previous query:\n{previous[0]}\nError: {previous[1]}")
@@ -623,7 +623,8 @@ def _generate(question, conversation_context, location_context, deadline, previo
                 return CypherResult("skipped_deadline")
         try:
             raw = call_llm(prompt, schema_prompt(), task="query", timeout_seconds=timeout,
-                           response_schema=TITLED_RESPONSE_SCHEMA if want_title else RESPONSE_SCHEMA)
+                           # One response format for every call, so all questions share one prompt cache.
+                           response_schema=TITLED_RESPONSE_SCHEMA)
         except LLMServiceError as exc:
             return CypherResult(exc.code or "llm_error", error=str(exc))
         result = _read_reply(raw, question, conversation_context, location_context, want_title)
