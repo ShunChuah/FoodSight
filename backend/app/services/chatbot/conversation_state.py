@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from ...contracts import QueryPlan
-from ..insight_generation.graph_answer import filters_on_area, named_places
+from ..insight_generation.graph_query import filters_on_area, named_places
 from ..query_generation.cypher_generation import allowed_values, load_vocabulary, vocabulary_bindings
 
 STATE_VERSION = 1

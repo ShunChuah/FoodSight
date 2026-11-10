@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..auth.backend import current_user
 from ..auth.models import User
+from ..rate_limit import limit_chat
 from ..database import get_db
 from ..model import (
     ChatHistory,
@@ -299,7 +300,7 @@ def get_chat_history(
     return serialize_chat(get_chat_or_404(db, chat_id, user.id))
 
 
-@router.post("/messages", response_model=ChatSendResponse)
+@router.post("/messages", response_model=ChatSendResponse, dependencies=[Depends(limit_chat)])
 @trace_request
 def send_message(
     payload: ChatSendRequest,
@@ -309,7 +310,7 @@ def send_message(
     return _send_message(payload, db, user)
 
 
-@router.post("/messages/stream")
+@router.post("/messages/stream", dependencies=[Depends(limit_chat)])
 def stream_message(
     payload: ChatSendRequest,
     db: Session = Depends(get_db),

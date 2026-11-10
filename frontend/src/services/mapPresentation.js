@@ -1,8 +1,9 @@
 import { pointFeatures } from "./mapGeometry.js";
+import { mapOverlays } from "./mapOverlays.js";
 
 export function hasMapView(data, legacyImage = null) {
   if (data?.map_mode === "none") return false;
-  return Boolean(legacyImage || pointFeatures(data).length);
+  return Boolean(legacyImage || pointFeatures(data).length || mapOverlays(data).length);
 }
 
 export function cuisineText(value) {

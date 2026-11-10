@@ -84,6 +84,24 @@ class MapFeature:
         }
 
 
+MapOverlayKind = Literal["area", "radius", "density"]
+
+
+# A spatial overlay drawn under the markers. area: a Polygon outline; radius: the search centre as a Point, with
+# radius_m in properties when the search had one; density: a MultiPoint of places for a heatmap.
+@dataclass(frozen=True)
+class MapOverlay:
+    overlay_id: str
+    kind: MapOverlayKind
+    label: str
+    geometry: dict[str, Any]
+    properties: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.overlay_id, "kind": self.kind, "label": self.label, "geometry": self.geometry,
+                "properties": self.properties}
+
+
 @dataclass(frozen=True)
 class MapResult:
     status: MapStatus
@@ -91,16 +109,18 @@ class MapResult:
     center: MapPoint | None = None
     bounds: MapBounds | None = None
     message: str | None = None
+    overlays: tuple[MapOverlay, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
-            "version": 2,
+            "version": 3,
             "map_mode": "restaurant_markers",
             "feature_collection": {
                 "type": "FeatureCollection",
                 "features": [feature.to_geojson() for feature in self.features],
             },
+            "overlays": [overlay.to_dict() for overlay in self.overlays],
             "center": self.center.to_dict() if self.center else None,
             "bounds": self.bounds.to_dict() if self.bounds else None,
             "message": self.message,

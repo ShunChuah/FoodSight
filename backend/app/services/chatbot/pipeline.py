@@ -7,8 +7,9 @@ from time import perf_counter
 from typing import Callable
 
 from ...contracts import GuardrailDecision
-from ..insight_generation.graph_answer import generate_answer, query_graph
+from ..insight_generation.answer_writer import generate_answer
 from ..insight_generation.graph_evidence import build_graph_evidence
+from ..insight_generation.graph_query import query_graph
 from ..query_generation.coverage import coverage_reply
 from ..query_generation.location import resolve_location
 from ..query_generation.scope import classify_query_scope

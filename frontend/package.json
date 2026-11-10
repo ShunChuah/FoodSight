@@ -11,15 +11,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@arcgis/core": "4.34.8",
     "axios": "^1.20.0",
     "cytoscape": "3.33.1",
     "cytoscape-fcose": "2.2.0",
-    "leaflet": "^1.9.4",
     "lucide-react": "^1.16.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-hook-form": "^7.89.0",
-    "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.18.4"
   },
   "devDependencies": {

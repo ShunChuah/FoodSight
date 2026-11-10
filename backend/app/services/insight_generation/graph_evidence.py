@@ -1,9 +1,8 @@
-# Knowledge Graph Evidence: the Neo4j subgraph an answer was built from, drawn as stored.
-
 from typing import Any
 
 from ..shared.neo4j import execute_cypher
-from .graph_answer import _plain, _today
+from .graph_reads import _plain
+from .opening_hours import weekday_today
 from .presentation import hours_label
 
 MAX_RESTAURANTS = 10
@@ -99,7 +98,7 @@ def build_graph_evidence(records: list[dict[str, Any]]) -> dict | None:
 
 def _caption(label: str | None, properties: dict) -> str:
     field = "name" if properties.get("name") not in (None, "") else (
-        _today() if label == "OperatingHours" else CAPTION_PROPERTIES.get(label))
+        weekday_today() if label == "OperatingHours" else CAPTION_PROPERTIES.get(label))
     value = properties.get(field) if field else None
     if label == "OperatingHours":
         value = hours_label(value)

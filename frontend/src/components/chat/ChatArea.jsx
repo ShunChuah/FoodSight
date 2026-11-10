@@ -5,8 +5,9 @@ import AIResponseCard from "./AIResponseCard";
 import AIResponseSkeleton from "./AIResponseSkeleton";
 import UserQuestionBubble from "./UserQuestionBubble";
 import AIExplanationPanel from "../explanation/AIExplanationPanel";
-import { submitChatQuery } from "../../services/submitChatQuery";
+import { sendErrorText, submitChatQuery } from "../../services/submitChatQuery";
 import { detailTabs, isGraphPending } from "../../services/detailsPresentation";
+import { hasMapView } from "../../services/mapPresentation";
 import "../../styles/chat.css";
 
 function ChatArea({
@@ -35,6 +36,16 @@ function ChatArea({
   const explanationMessage = messages.find((message) => message.id === explanationMessageId);
   const explanationTabs = explanationMessage ? tabsFor(explanationMessage) : [];
   const submissionInFlight = useRef(false);
+  const wasSending = useRef(isSending);
+
+  // A new answer with a map opens it straight away; answers already in a chat stay closed until asked for.
+  useEffect(() => {
+    const finished = wasSending.current && !isSending;
+    wasSending.current = isSending;
+    if (finished && latestMessage?.type === "assistant" && hasMapView(latestMessage.mapData, latestMessage.mapImage)) {
+      setExplanationMessageId(latestMessage.id);
+    }
+  }, [isSending, latestMessage]);
 
   const handleSubmit = async (query) => {
     if (!query.trim() || isSending || submissionInFlight.current) return false;
@@ -43,8 +54,8 @@ function ChatArea({
     try {
       await submitChatQuery(query, { prepare: onPrepareQuery, send: onSendQuery });
       return true;
-    } catch {
-      setSendError("Your message couldn't be sent. Please try again.");
+    } catch (error) {
+      setSendError(sendErrorText(error));
       return false;
     } finally {
       submissionInFlight.current = false;

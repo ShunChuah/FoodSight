@@ -69,3 +69,10 @@ async function browserLocation(browser) {
     longitude: position.coords.longitude,
   } };
 }
+
+const SEND_FAILED = "Your message couldn't be sent. Please try again.";
+
+export function sendErrorText(error) {
+  const detail = error?.response?.data?.detail;
+  return error?.response?.status === 429 && typeof detail === "string" ? detail : SEND_FAILED;
+}

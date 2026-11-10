@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Waypoints, Map, PlayCircle, X } from "lucide-react";
 import KnowledgeGraphEvidence from "./KnowledgeGraphEvidence";
 import KnowledgeGraphSkeleton from "./KnowledgeGraphSkeleton";
 import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
-import MapPreview from "../map/MapPreview";
+
+// The ArcGIS SDK is large, so it loads only when a map is opened.
+const MapPreview = lazy(() => import("../map/MapPreview"));
 import { hasMapView } from "../../services/mapPresentation";
 import "../../styles/explanation.css";
 
@@ -56,7 +58,9 @@ function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending =
       <div className="explanation-content">
         {activeTab === "map" ? (
           <section className="map-evidence-section" role="tabpanel">
-            {hasMapView(mapData) ? <MapPreview mapData={mapData} /> : (
+            {hasMapView(mapData) ? (
+              <Suspense fallback={<ExplanationMapSkeleton />}><MapPreview mapData={mapData} darkMode={darkMode} /></Suspense>
+            ) : (
             <div className={`explanation-map-frame${displayedMapImage ? "" : " is-empty"}`}>
               {displayedMapImage && isMapLoading && <ExplanationMapSkeleton />}
               {displayedMapImage ? (
