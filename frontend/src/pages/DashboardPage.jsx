@@ -9,6 +9,7 @@ import { pendingGraphs, waitForGraph, withGraphEvidence } from "../services/pend
 import {
   createChatHistory,
   deleteChatHistory,
+  stopChatTurn,
   fetchChatHistories,
   fetchGraphEvidence,
   preflightChatMessage,
@@ -45,6 +46,7 @@ function DashboardPage() {
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [processingStage, setProcessingStage] = useState(null);
   const [retryingMessageId, setRetryingMessageId] = useState(null);
+  const [isStopping, setIsStopping] = useState(false);
   const [chatLoadFailed, setChatLoadFailed] = useState(false);
   const [chatLoadAttempt, setChatLoadAttempt] = useState(0);
   const [notice, setNotice] = useState("");
@@ -182,7 +184,7 @@ function DashboardPage() {
     setPendingChatId(chatId);
     setPendingQuery(query);
     const controller = new AbortController();
-    stopRef.current = controller;
+    stopRef.current = { controller, turnId: null };
     try {
       const preflight =
         preflightRef.current?.query === query
@@ -198,6 +200,9 @@ function DashboardPage() {
         onStage: (event) => setProcessingStage((previous) => nextStage(previous, event)),
         signal: controller.signal,
         retryOf: retryOfRef.current,
+        onStarted: (turnId) => {
+          if (stopRef.current?.controller === controller) stopRef.current.turnId = turnId;
+        },
       });
 
       const savedChat = await sendPromise;
@@ -218,6 +223,7 @@ function DashboardPage() {
       throw error;
     } finally {
       stopRef.current = null;
+      setIsStopping(false);
       retryOfRef.current = null;
       setRetryingMessageId(null);
       setProcessingStage(null);
@@ -231,7 +237,18 @@ function DashboardPage() {
     }
   };
 
-  const handleStopQuery = () => stopRef.current?.abort();
+  // Asks the server to stop, so the question stays in the chat as interrupted; if it can't be reached, the
+  // stream is dropped instead and nothing is kept.
+  const handleStopQuery = () => {
+    const active = stopRef.current;
+    if (!active || isStopping) return;
+    setIsStopping(true);
+    if (!active.turnId) {
+      active.controller.abort();
+      return;
+    }
+    stopChatTurn(active.turnId).catch(() => active.controller.abort());
+  };
 
   // Try again on a failed answer: the next send replaces it, and it is hidden meanwhile.
   const handleRetryQuery = (messageId) => {
@@ -349,6 +366,7 @@ function DashboardPage() {
         streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
         processingStage={selectedOwnsPendingRequest ? processingStage : null}
         onStopQuery={handleStopQuery}
+        isStopping={isStopping}
         retryingMessageId={retryingMessageId}
         onRetryQuery={handleRetryQuery}
       />

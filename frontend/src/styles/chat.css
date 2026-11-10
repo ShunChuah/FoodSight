@@ -426,8 +426,13 @@
   cursor: pointer;
 }
 
-.processing-stop:hover {
+.processing-stop:hover:not(:disabled) {
   background: #e4e4e7;
+}
+
+.processing-stop:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .processing-stop:focus-visible {

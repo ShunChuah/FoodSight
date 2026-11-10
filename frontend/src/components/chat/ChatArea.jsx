@@ -27,6 +27,7 @@ function ChatArea({
   streamingAnswer = "",
   processingStage = null,
   onStopQuery,
+  isStopping = false,
   retryingMessageId = null,
   onRetryQuery,
 }) {
@@ -143,7 +144,7 @@ function ChatArea({
                 )}
                 {isSending && (streamingAnswer
                   ? <AIResponseCard answer={streamingAnswer} streaming />
-                  : <ProcessingSteps stage={processingStage} onStop={onStopQuery} />)}
+                  : <ProcessingSteps stage={processingStage} onStop={onStopQuery} stopping={isStopping} />)}
               </>
             )}
 

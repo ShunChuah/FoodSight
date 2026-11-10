@@ -26,6 +26,7 @@ export async function sendChatMessage({
   onStage = null,
   signal = undefined,
   retryOf = null,
+  onStarted = null,
 }) {
   const payload = {
     chat_id: chatId ?? null,
@@ -40,14 +41,14 @@ export async function sendChatMessage({
 
   // axios cannot read a streamed body.
   if (onAnswer && typeof fetch === "function") {
-    return (await streamChatMessage(payload, onAnswer, onStage, signal)).chat;
+    return (await streamChatMessage(payload, onAnswer, onStage, signal, onStarted)).chat;
   }
   const response = await api.post("/chats/messages", payload);
   return response.data.chat;
 }
 
 // Aborting the signal (Stop) closes the stream, and the server then stops before its next model call.
-async function streamChatMessage(payload, onAnswer, onStage, signal) {
+async function streamChatMessage(payload, onAnswer, onStage, signal, onStarted) {
   const baseUrl = (api.defaults.baseURL ?? "").replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/chats/messages/stream`, {
     method: "POST",
@@ -61,7 +62,7 @@ async function streamChatMessage(payload, onAnswer, onStage, signal) {
     const detail = await response.json().then((body) => body.detail).catch(() => undefined);
     throw streamError(response.status, detail);
   }
-  return readAnswerStream(response, onAnswer, onStage);
+  return readAnswerStream(response, onAnswer, onStage, onStarted);
 }
 
 export async function fetchGraphEvidence(chatId, messageId) {
@@ -85,6 +86,11 @@ export async function renameChatHistory(chatId, title) {
 export async function updateChatPin(chatId, pinned) {
   const response = await api.patch(`/chats/${chatId}/pin`, { pinned });
   return response.data;
+}
+
+// Stop: the server keeps the question with an interrupted answer and sends the chat back on the open stream.
+export async function stopChatTurn(turnId) {
+  await api.post(`/chats/turns/${turnId}/stop`);
 }
 
 export async function deleteChatHistory(chatId) {

@@ -16,12 +16,14 @@
     "unavailable": "Sorry, I can’t look up restaurants right now. Please try again in a moment.",
     "retrieval": "Sorry, I couldn’t get that information just now. Please try again.",
     "validation": "Sorry, I couldn’t run that search. Could you try asking in a different way?",
-    "unexpected": "Sorry, something went wrong on my side. Please try again."
+    "unexpected": "Sorry, something went wrong on my side. Please try again.",
+    "stopped": "Interrupted"
   },
   "interface": {
     "empty_message": "Please type a message first.",
     "message_limit": "That message is a bit long. Please keep it under {maximum} characters.",
     "chat_not_found": "Sorry, I couldn’t find that chat.",
+    "turn_not_found": "That answer has already finished.",
     "empty_title": "Please enter a title.",
     "rate_limited": "You’ve sent a lot of messages in a short time. Please try again in {wait}."
   },
