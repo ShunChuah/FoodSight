@@ -25,6 +25,7 @@ export async function sendChatMessage({
   onAnswer = null,
   onStage = null,
   signal = undefined,
+  retryOf = null,
 }) {
   const payload = {
     chat_id: chatId ?? null,
@@ -34,6 +35,7 @@ export async function sendChatMessage({
     longitude: locationPermissionDenied ? null : location?.longitude ?? null,
     location_permission_denied: locationPermissionDenied,
     preflight_token: preflight?.decisionToken ?? null,
+    retry_of: retryOf,
   };
 
   // axios cannot read a streamed body.

@@ -7,7 +7,7 @@ from typing import Any, Callable
 from ...contracts import AnswerResult
 from ..query_generation.cypher_generation import load_vocabulary
 from ..shared.diagnostics import kg_debug
-from ..shared.llm import LLMServiceError
+from ..shared.progress import TurnCancelled
 from ..shared.messages import response
 from .answer_checks import _checked_payload, _numbers
 from .answer_evidence import _business_evidence, _group_evidence
@@ -100,8 +100,11 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
                                note, on_answer)
         if answer is None:
             return AnswerResult(status="fallback", text=fallback)
-    except (LLMServiceError, ValueError, TypeError) as exc:
-        kg_debug("Answer used the written-out fallback", {"reason": str(exc)})
+    except TurnCancelled:
+        raise
+    # Any failure while writing still shows the places found, written out without the model.
+    except Exception as exc:
+        kg_debug("Answer used the written-out fallback", {"reason": f"{type(exc).__name__}: {exc}"})
         return AnswerResult(status="fallback", text=fallback)
     answer = _without_markers(answer)
     return AnswerResult(status="success", text=f"{note}\n\n{answer}" if note else answer, used_llm=True)

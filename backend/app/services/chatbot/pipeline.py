@@ -47,6 +47,8 @@ class AssistantTurn:
     build_graph: Callable[[], dict | None] | None = None
     quick_replies: list[str] = field(default_factory=list)
     chat_title: str | None = None
+    # Why the answer failed (contracts.FAILURE_REASONS), shown with Try again; None for a normal answer.
+    failure: str | None = None
     # None keeps the previous state.
     state: dict | None = None
     log: dict = field(default_factory=dict, compare=False, repr=False)
@@ -107,6 +109,7 @@ def _respond(user_query, messages, location_context, location_permission_denied,
     state = search_state(result.query_plan, result.records, place) if has_rows else None
     return AssistantTurn(
         answer=answer.text or LLM_ERROR_ANSWER,
+        failure=result.failure or (None if answer.text else "model"),
         map_data=result.map_result.to_dict() if has_rows else None,
         build_graph=partial(build_graph_evidence, result.records) if has_rows else None,
         quick_replies=replies.get("quick_replies", []),

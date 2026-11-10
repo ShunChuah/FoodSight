@@ -86,7 +86,8 @@ def query_graph(
     if generated.status != "success" or not generated.plan:
         status = "invalid_query" if generated.status == "rejected_validation" else "execution_error"
         return RetrievalResult(status=status, query_plan=QueryPlan(),
-                               message=response("errors.validation" if status == "invalid_query" else "errors.retrieval"))
+                               message=response("errors.validation" if status == "invalid_query" else "errors.retrieval"),
+                               failure=None if status == "invalid_query" else _model_failure(generated.status))
 
     plan = generated.plan
     if not execution_enabled():
@@ -120,7 +121,8 @@ def query_graph(
     note_turn(business=plan.business, cypher=plan.cypher, rows=len(execution.records),
               parameters={key: value for key, value in plan.parameters.items() if key not in ("latitude", "longitude")})
     if execution.status != "success":
-        return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message)
+        return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message,
+                               failure=_search_failure(execution.status))
     widened = None
     if not execution.records:
         # Nothing found: loosen only the app's own defaults, never the user's values.
@@ -189,6 +191,15 @@ def query_graph(
 
 
 FEW_RESULTS = 3
+
+
+# The query model gave no usable query: it ran out of time, or the AI service failed or answered nonsense.
+def _model_failure(status: str) -> str:
+    return "timeout" if status in ("timeout", "skipped_deadline") else "model"
+
+
+def _search_failure(status: str) -> str:
+    return "timeout" if status == "timeout" else "search"
 TIER_SUMMARY = {"budget": "budget", "mid": "mid-range", "upscale": "upscale", "luxury": "fine dining"}
 
 
@@ -330,12 +341,14 @@ def _market_study(plan: QueryPlan, generate: Callable[..., CypherResult], user_q
             execution = _run(plan, deadline, more_candidates=True, pool=limit)
     note_turn(business=True, cypher=plan.cypher, rows=len(execution.records), study=plan.intent)
     if execution.status != "success":
-        return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message)
+        return RetrievalResult(status="execution_error", query_plan=plan, message=execution.message,
+                               failure=_search_failure(execution.status))
     competitors = list(dict.fromkeys(row["restaurant_id"] for row in execution.records
                                      if row.get("restaurant_id") is not None))
     found = study(competitors, plan.intent, user_query, timeout_seconds=_query_time(deadline))
     if found is None:
-        return RetrievalResult(status="execution_error", query_plan=plan, message=response("errors.retrieval"))
+        return RetrievalResult(status="execution_error", query_plan=plan, message=response("errors.retrieval"),
+                               failure="search")
     areas, places = found
     plan = replace(plan, business=True)
     if not areas:

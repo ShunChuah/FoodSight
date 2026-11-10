@@ -134,6 +134,12 @@ class RetrievalResult:
     records: list[dict[str, Any]] = field(default_factory=list)
     message: str | None = None
     map_result: MapResult = field(default_factory=lambda: MapResult(status="empty"))
+    # Why the turn failed (a FAILURE_REASONS key), so the app can offer Try again; None when it did not fail.
+    failure: str | None = None
+
+
+# Turns that failed for a reason worth retrying, shown as a card with Try again.
+FAILURE_REASONS = ("timeout", "model", "search", "unexpected")
 
 
 @dataclass(frozen=True)

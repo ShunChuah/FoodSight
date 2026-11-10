@@ -83,6 +83,19 @@ class ChatMessage(Base):
     graph_job: Mapped["ChatMessageGraphJob | None"] = relationship(
         cascade="all, delete-orphan", passive_deletes=True, uselist=False,
     )
+    failure: Mapped["ChatMessageFailure | None"] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True, uselist=False,
+    )
+
+
+# An answer that failed (the AI service, the search or a timeout), so the app shows the reason and Try again.
+class ChatMessageFailure(Base):
+    __tablename__ = "chat_message_failures"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
+    )
+    reason: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
 class ChatMessageQuickReplies(Base):

@@ -6,7 +6,7 @@ from typing import Any, Callable
 from ...contracts import AnswerResult, RetrievalResult
 from ..query_generation.cypher_generation import RESTAURANT_DETAILS_FIELD
 from ..shared.diagnostics import kg_debug, log_timing, note_turn
-from ..shared.llm import LLMServiceError
+from ..shared.progress import TurnCancelled
 from ..shared.messages import response
 from .analysis_answer import _analysis
 from .answer_checks import _checked_payload, _numbers, asked_dish, dish_note, supported_claims
@@ -113,8 +113,11 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
             return AnswerResult(status="fallback", text=fallback)
         if not answer:
             raise ValueError("invalid_response_json")
-    except (LLMServiceError, ValueError, TypeError) as exc:
-        kg_debug("Answer used the written-out fallback", {"reason": str(exc)})
+    except TurnCancelled:
+        raise
+    # Any failure while writing still shows the places found, written out without the model.
+    except Exception as exc:
+        kg_debug("Answer used the written-out fallback", {"reason": f"{type(exc).__name__}: {exc}"})
         return AnswerResult(status="fallback", text=fallback)
     answer = _without_markers(answer)
     return AnswerResult(status="success", text=f"{note}\n\n{answer}" if note else answer, used_llm=True)

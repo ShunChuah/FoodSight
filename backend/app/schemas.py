@@ -42,6 +42,8 @@ class ChatSendRequest(ChatMessageInput):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     location_permission_denied: bool = False
     preflight_token: str | None = Field(default=None, max_length=12000)
+    # Try again on a failed answer: that answer and its question are replaced by this turn.
+    retry_of: int | None = None
 
 
 class ChatPreflightRequest(ChatMessageInput):
@@ -85,6 +87,7 @@ class ChatMessageRead(BaseModel):
     graphData: dict | None = None
     graphStatus: GraphStatus | None = None
     quickReplies: list[str] = Field(default_factory=list)
+    failure: Literal["timeout", "model", "search", "unexpected"] | None = None
     createdAt: datetime
 
 

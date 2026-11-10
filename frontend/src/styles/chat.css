@@ -509,10 +509,25 @@
   color: #ffb997;
 }
 
-.chat-send-error {
-  margin: 8px 16px;
-  color: #b42318;
-  font-size: 13px;
+.failure-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.failure-message .ai-response-summary {
+  margin: 0;
+}
+
+.failure-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: #ff6129;
+}
+
+/* The answer card's own action row; the icon is a stroke, not a fill. */
+.show-explanation-action.failure-retry svg {
+  fill: none;
 }
 
 [data-theme="dark"] .quick-reply-button {
@@ -525,9 +540,6 @@
   background: #4b2f23;
 }
 
-[data-theme="dark"] .chat-send-error {
-  color: #fda29b;
-}
 
 .response-actions {
   margin-top: 10px;

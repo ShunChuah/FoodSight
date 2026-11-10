@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
@@ -19,6 +19,7 @@ import {
 import { fetchThemePreference, saveThemePreference } from "../api/preferencesApi";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { nextStage } from "../services/processingSteps";
+import Notice from "../components/Notice";
 import "../styles/dashboard.css";
 
 function DashboardPage() {
@@ -43,6 +44,12 @@ function DashboardPage() {
   const [pendingChatId, setPendingChatId] = useState(null);
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [processingStage, setProcessingStage] = useState(null);
+  const [retryingMessageId, setRetryingMessageId] = useState(null);
+  const [chatLoadFailed, setChatLoadFailed] = useState(false);
+  const [chatLoadAttempt, setChatLoadAttempt] = useState(0);
+  const [notice, setNotice] = useState("");
+  const closeNotice = useCallback(() => setNotice(""), []);
+  const retryOfRef = useRef(null);
   const isSendingRef = useRef(false);
   const stopRef = useRef(null);
   const preflightRef = useRef(null);
@@ -78,9 +85,12 @@ function DashboardPage() {
         const savedChats = await fetchChatHistories();
         if (!ignore) {
           setChats(savedChats);
+          setChatLoadFailed(false);
         }
       } catch (error) {
         console.error("Failed to load chat histories", error);
+        // Shown in the sidebar with Retry, so an empty list is never mistaken for having no chats.
+        if (!ignore) setChatLoadFailed(true);
       } finally {
         if (!ignore) {
           setIsLoadingChats(false);
@@ -93,7 +103,13 @@ function DashboardPage() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [chatLoadAttempt]);
+
+  const handleRetryChatLoad = () => {
+    setChatLoadFailed(false);
+    setIsLoadingChats(true);
+    setChatLoadAttempt((attempt) => attempt + 1);
+  };
 
   const pendingGraphKey = pendingGraphs(chats)
     .map(({ chatId, messageId }) => `${chatId}:${messageId}`)
@@ -181,6 +197,7 @@ function DashboardPage() {
         onAnswer: setStreamingAnswer,
         onStage: (event) => setProcessingStage((previous) => nextStage(previous, event)),
         signal: controller.signal,
+        retryOf: retryOfRef.current,
       });
 
       const savedChat = await sendPromise;
@@ -201,6 +218,8 @@ function DashboardPage() {
       throw error;
     } finally {
       stopRef.current = null;
+      retryOfRef.current = null;
+      setRetryingMessageId(null);
       setProcessingStage(null);
       preflightRef.current = null;
       draftChatIdRef.current = null;
@@ -213,6 +232,12 @@ function DashboardPage() {
   };
 
   const handleStopQuery = () => stopRef.current?.abort();
+
+  // Try again on a failed answer: the next send replaces it, and it is hidden meanwhile.
+  const handleRetryQuery = (messageId) => {
+    retryOfRef.current = messageId;
+    setRetryingMessageId(messageId);
+  };
 
   const handleNewChat = () => {
     setSelectedChatId(null);
@@ -233,6 +258,7 @@ function DashboardPage() {
       replaceChat(savedChat);
     } catch (error) {
       console.error("Failed to rename chat history", error);
+      setNotice("Couldn't rename the chat. Please try again.");
     }
   };
 
@@ -242,6 +268,7 @@ function DashboardPage() {
       replaceChat(savedChat);
     } catch (error) {
       console.error("Failed to update pinned chat", error);
+      setNotice(pinned ? "Couldn't pin the chat. Please try again." : "Couldn't unpin the chat. Please try again.");
     }
   };
 
@@ -254,6 +281,7 @@ function DashboardPage() {
       }
     } catch (error) {
       console.error("Failed to delete chat history", error);
+      setNotice("Couldn't delete the chat. Please try again.");
     }
   };
 
@@ -285,6 +313,8 @@ function DashboardPage() {
         <Sidebar
           chats={chats}
           isLoadingChats={isLoadingChats}
+          chatLoadFailed={chatLoadFailed}
+          onRetryChatLoad={handleRetryChatLoad}
           selectedChatId={selectedChatId}
           setSelectedChatId={setSelectedChatId}
           darkMode={darkMode}
@@ -319,6 +349,8 @@ function DashboardPage() {
         streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
         processingStage={selectedOwnsPendingRequest ? processingStage : null}
         onStopQuery={handleStopQuery}
+        retryingMessageId={retryingMessageId}
+        onRetryQuery={handleRetryQuery}
       />
 
       {settingsOpen && (
@@ -338,6 +370,7 @@ function DashboardPage() {
           chatBusy={isSending}
         />
       )}
+      <Notice message={notice} onClose={closeNotice} />
     </div>
   );
 }

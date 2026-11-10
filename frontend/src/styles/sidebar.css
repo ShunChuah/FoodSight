@@ -667,3 +667,45 @@
 }
 
 
+
+.chat-load-error {
+  padding: 12px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: #344054;
+}
+
+.chat-load-error p {
+  margin: 0;
+}
+
+.chat-load-error button {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: #ff6129;
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chat-load-error button:focus-visible {
+  outline: 2px solid #ff6129;
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .chat-load-error {
+  background: var(--dark-card);
+  border-color: var(--dark-border);
+  color: var(--dark-text);
+}

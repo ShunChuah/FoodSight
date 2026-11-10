@@ -11,6 +11,8 @@ import "../../styles/sidebar.css";
 function Sidebar({
   chats,
   isLoadingChats = false,
+  chatLoadFailed = false,
+  onRetryChatLoad,
   selectedChatId,
   setSelectedChatId,
   onNewChat,
@@ -103,6 +105,12 @@ function Sidebar({
         className="chat-history-list"
         onScroll={() => setOpenMenuId(null)}
       >
+        {chatLoadFailed && !isLoadingChats && (
+          <div className="chat-load-error" role="alert">
+            <p>Couldn't load your chats.</p>
+            <button type="button" onClick={onRetryChatLoad}>Retry</button>
+          </div>
+        )}
         {isLoadingChats
           ? Array.from({ length: 6 }, (_, index) => (
               <ChatHistoryItemSkeleton key={index} />

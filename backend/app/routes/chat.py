@@ -19,6 +19,7 @@ from ..database import get_db
 from ..model import (
     ChatHistory,
     ChatMessage,
+    ChatMessageFailure,
     ChatMessageGraphJob,
     ChatMessageMap,
     ChatMessageQuickReplies,
@@ -107,6 +108,7 @@ def serialize_message(message: ChatMessage):
         "graphData": message.graph_snapshot.data if message.graph_snapshot else None,
         "graphStatus": graph_status(message),
         "quickReplies": message.quick_replies.replies if message.quick_replies else [],
+        "failure": message.failure.reason if message.failure else None,
     }
 
 
@@ -161,6 +163,7 @@ def get_chat_or_404(db: Session, chat_id: int, user_id: int) -> ChatHistory:
         .options(
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.failure),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_job),
             selectinload(ChatHistory.query_state),
@@ -192,8 +195,12 @@ def build_llm_messages(
     user_text: str | None = None,
 ) -> list[dict[str, str]]:
     messages = []
+    failed = {message.id for pair in _failed_pairs(chat) for message in pair}
 
     for message in get_ordered_messages(chat):
+        # A failed answer and its question say nothing about what the user wants next.
+        if message.id in failed:
+            continue
         messages.append(
             {
                 "role": "assistant" if message.role == "assistant" else "user",
@@ -204,6 +211,17 @@ def build_llm_messages(
     if user_text is not None:
         messages.append({"role": "user", "content": user_text})
     return messages
+
+
+# Each failed answer with the question it answered.
+def _failed_pairs(chat: ChatHistory) -> list[tuple[ChatMessage, ...]]:
+    ordered = get_ordered_messages(chat)
+    pairs = []
+    for index, message in enumerate(ordered):
+        if message.role == "assistant" and message.failure:
+            question = ordered[index - 1] if index and ordered[index - 1].role == "user" else None
+            pairs.append((question, message) if question else (message,))
+    return pairs
 
 
 def build_location_context(payload: ChatSendRequest) -> str:
@@ -235,6 +253,7 @@ def list_chat_histories(
         .options(
             selectinload(ChatHistory.messages).selectinload(ChatMessage.map_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.quick_replies),
+            selectinload(ChatHistory.messages).selectinload(ChatMessage.failure),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_snapshot),
             selectinload(ChatHistory.messages).selectinload(ChatMessage.graph_job),
         )
@@ -421,7 +440,7 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
         raise
     except Exception as exc:
         print(f"Assistant response generation failed: {exc}", flush=True)
-        turn = AssistantTurn(user_response("errors.unexpected"))
+        turn = AssistantTurn(user_response("errors.unexpected"), failure="unexpected")
     # Stopped while the answer was being written: keep the chat as it was.
     check_cancelled()
     title = generated_title(turn.chat_title, user_text) if wants_title else None
@@ -451,8 +470,15 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
         map_snapshot=ChatMessageMap(data=turn.map_data) if turn.map_data is not None else None,
         graph_job=ChatMessageGraphJob(status="pending") if turn.build_graph else None,
         quick_replies=ChatMessageQuickReplies(replies=turn.quick_replies) if turn.quick_replies else None,
+        failure=ChatMessageFailure(reason=turn.failure) if turn.failure else None,
         created_at=assistant_created_at,
     )
+    # Try again replaces the failed answer and its question, in the same commit as the new turn.
+    if payload.retry_of is not None and payload.chat_id:
+        for pair in _failed_pairs(chat):
+            if pair[-1].id == payload.retry_of:
+                for message in pair:
+                    db.delete(message)
 
     updates = {**({TITLE_GENERATED: True} if title else {}),
                **({SEARCH_STATE: turn.state} if turn.state is not None else {})}

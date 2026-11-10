@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from .database import Base, auth_engine, engine
+from .errors import handle_unexpected_errors
 from . import config
 from .auth.routes import router as auth_router
 from .routes.chat import router as chat_router
@@ -21,6 +22,7 @@ logger = logging.getLogger("foodsight")
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="FoodSight API")
+handle_unexpected_errors(app)
 
 app.add_middleware(
     CORSMiddleware,

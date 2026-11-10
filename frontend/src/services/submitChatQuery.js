@@ -70,7 +70,7 @@ async function browserLocation(browser) {
   } };
 }
 
-const SEND_FAILED = "Your message couldn't be sent. Please try again.";
+const SEND_FAILED = "Your message couldn't be sent.";
 
 export function sendErrorText(error) {
   const detail = error?.response?.data?.detail;
