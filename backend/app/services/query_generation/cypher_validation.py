@@ -136,6 +136,13 @@ def validate_cypher(
             + ", ".join(sorted(set(unknown_properties)))
             + ".",
         )
+    whole_nodes = _returned_nodes(cypher, set(variable_labels))
+    if whole_nodes:
+        return (
+            False,
+            f"Do not return whole nodes ({', '.join(whole_nodes)}). Return values such as r.restaurant_id; "
+            "for two groups, return one row per restaurant with a column naming its group.",
+        )
     renamed = _renamed_restaurant_ids(cypher)
     if renamed:
         return (
@@ -155,6 +162,42 @@ def _renamed_restaurant_ids(cypher: str) -> list[str]:
         return []
     return [alias for alias in re.findall(r"\b\w+\.restaurant_id\s+AS\s+(\w+)", clause, re.IGNORECASE)
             if alias.lower() != "anchor_id"]
+
+
+def _returned_nodes(cypher: str, node_variables: set[str]) -> list[str]:
+    for collected, source, alias in re.findall(
+        r"(?:\bcollect\s*\(\s*(?:DISTINCT\s+)?([A-Za-z_]\w*)\s*\)(?:\s*\[[^\]]*\])?|(?<![\w.(])([A-Za-z_]\w*))"
+        r"\s+AS\s+([A-Za-z_]\w*)", cypher, re.IGNORECASE
+    ):
+        if (collected or source) in node_variables:
+            node_variables.add(alias)
+    clause = re.split(r"\bRETURN\b", cypher, flags=re.IGNORECASE)[-1]
+    clause = re.split(r"\b(?:ORDER\s+BY|SKIP|LIMIT)\b", clause, flags=re.IGNORECASE)[0]
+    found = []
+    for item in _top_level_items(clause):
+        expression = re.split(r"\s+AS\s+", item, flags=re.IGNORECASE)[0].strip()
+        match = re.fullmatch(
+            r"(?:DISTINCT\s+)?(?:collect\s*\(\s*(?:DISTINCT\s+)?([A-Za-z_]\w*)\s*\)(?:\s*\[[^\]]*\])?|([A-Za-z_]\w*))",
+            expression, re.IGNORECASE,
+        )
+        name = match and (match.group(1) or match.group(2))
+        if name in node_variables:
+            found.append(expression)
+    return found
+
+
+def _top_level_items(clause: str) -> list[str]:
+    items, depth, current = [], 0, ""
+    for char in clause:
+        depth += char in "([{"
+        depth -= char in ")]}"
+        if char == "," and depth == 0:
+            items.append(current.strip())
+            current = ""
+        else:
+            current += char
+    return [item for item in [*items, current.strip()] if item]
+
 
 def _is_safe_read_query(cypher: str) -> bool:
     normalized = re.sub(r"\s+", " ", cypher).upper()

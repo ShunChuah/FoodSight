@@ -53,6 +53,10 @@ def _hidden(key: str) -> bool:
     return key in HIDDEN_COLUMNS or key == "id" or key.endswith(("_id", "_ids"))
 
 
+def _record(value: Any) -> bool:
+    return isinstance(value, dict) or (isinstance(value, list) and any(isinstance(item, dict) for item in value))
+
+
 NOT_A_COUNT = re.compile(r"pct|share|rating|price|spend|avg|average|per_|ratio|rate|stars", re.IGNORECASE)
 
 
@@ -68,7 +72,7 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
     else:
         evidence = [{re.sub(r"\bpj\b", "PJ", key.replace("_pct", " %").replace("_", " ")): _plain_value(value)
                      for key, value in (_business_evidence(row) if row.get("restaurant_name")
-                                        else _group_evidence(row)).items() if not _hidden(key)}
+                                        else _group_evidence(row)).items() if not _hidden(key) and not _record(value)}
                     for row in rows]
     if not areas and not any(evidence):
         # Only ids came back, so the model would write about missing records.
@@ -149,7 +153,7 @@ def _figures(rows: list[dict[str, Any]], kind: str) -> list[str]:
     table = _group_table(rows)
     if table:
         return table
-    columns = [key for key in rows[0] if not _hidden(key) and not isinstance(rows[0].get(key), dict)]
+    columns = [key for key in rows[0] if not _hidden(key) and not _record(rows[0].get(key))]
     label = columns[0] if columns and isinstance(rows[0].get(columns[0]), str) else None
     if len(rows) == 1:
         return [f"{_column_name(key)}: {_cell(key, rows[0][key])}" for key in columns

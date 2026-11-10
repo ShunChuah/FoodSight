@@ -8,8 +8,10 @@ from ...contracts import QueryPlan, RetrievalResult
 from ..maps.answer_map import answer_map, study_map
 from ..query_generation.coverage import outside_coverage
 from ..query_generation.cypher_generation import (
+    CUISINE_NAMES,
     CypherResult,
     RESTAURANT_DETAILS_FIELD,
+    cuisine_labels,
     generate_cypher,
     returns_restaurants,
 )
@@ -18,9 +20,11 @@ from ..shared.config import policy
 from ..shared.diagnostics import kg_debug, note_turn
 from ..shared.messages import response
 from ..shared.neo4j import execution_enabled
+from .answer_checks import asked_dish, serves_dish
 from .answer_text import TECHNICAL_WORDS
 from .graph_reads import (
     _anchor_question,
+    _dish_places,
     _plain,
     _query_time,
     _relax,
@@ -142,6 +146,9 @@ def query_graph(
         elif prefer_open:
             rows = sorted(rows[:pool], key=_open_first_ranked if rank else _open_first)
         rows = rows[:plan.result_limit]
+    dish_message = None
+    if returns_restaurants(plan.cypher) and not plan.business and RESTAURANT_DETAILS_FIELD not in plan.requested_fields:
+        rows, dish_message = _dish_matches(rows, plan, user_query, deadline, wanted)
     map_rows = rows
     kg_debug("Cypher rows", rows)
     if not rows:
@@ -156,6 +163,8 @@ def query_graph(
                                    message=NO_MATCHES_IN_AREA if plan.business else NO_RESULTS_IN_AREA)
         return RetrievalResult(status="no_results", query_plan=plan, message=NO_RESULTS)
     notes = [_widened_note(widened)] if widened else []
+    if dish_message:
+        notes.append(dish_message)
     missing = _missing_places(rows, named_places(plan.parameters), user_query)
     if missing:
         notes.append(f"I couldn't find {_join(missing)}, so I can't include {'it' if len(missing) == 1 else 'them'}.")
@@ -173,6 +182,49 @@ def query_graph(
 
 FEW_RESULTS = 3
 OUTCOMES = {"success": "query", "cannot_answer": "decline"}
+
+
+# A named dish outranks soft filters such as price: when no result clearly offers it, search for the dish itself.
+def _dish_matches(rows: list[dict[str, Any]], plan: QueryPlan, user_query: str, deadline: float | None,
+                  wanted: Any = None) -> tuple[list[dict[str, Any]], str | None]:
+    dish = asked_dish(user_query, plan.parameters)
+    if not dish or any(serves_dish(row, dish) for row in rows):
+        return rows, None
+    budget = bool(plan.intent.get("budget")) or plan.intent.get("price_position") == "budget"
+    # A wider pool when the places must also be open at the time asked.
+    limit = plan.result_limit * (OPEN_FIRST_POOL if wanted else 1)
+    found = _dish_places(dish, cuisine_labels()[CUISINE_NAMES].get(dish), _area_pattern(plan), budget,
+                         limit, deadline, _search_circle(plan))
+    found = _with_restaurant_details(found, deadline) if found else []
+    if wanted:
+        found = [row for row in found
+                 if open_now(row.get("hours_today"), wanted, _yesterday(row.get("weekly_hours"), wanted)) is True]
+    found = found[:plan.result_limit]
+    if not found:
+        return rows, None
+    kg_debug("Dish search replaced the results", {"dish": dish, "rows": len(found)})
+    if budget and not any(row.get("price_tier") == "budget" for row in found):
+        return found, f"I couldn't find a budget {dish} place, so these are the closest matches, cheapest first."
+    return found, None
+
+
+def _area_pattern(plan: QueryPlan) -> str | None:
+    for variable in re.findall(r"\(\s*([A-Za-z_]\w*)\s*:\s*Area\b", plan.cypher):
+        match = re.search(rf"\b{re.escape(variable)}\.name\s*=~\s*\$(\w+)", plan.cypher)
+        if match and isinstance(plan.parameters.get(match.group(1)), str):
+            return plan.parameters[match.group(1)]
+    return None
+
+
+# The user's position and search radius when the query keeps to a distance ("near me"), so the dish search does too.
+def _search_circle(plan: QueryPlan) -> tuple[float, float, float] | None:
+    match = re.search(r"\bdistance_m\s*<=\s*\$(\w+)", plan.cypher)
+    values = [plan.parameters.get(name) for name in ("latitude", "longitude", match.group(1) if match else "")]
+    if all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
+        return values[0], values[1], values[2]
+    return None
+
+
 NO_STUDY_AREAS = ("I couldn't find enough restaurants in those areas to compare. Try another area, or ask about all "
                   "of Petaling Jaya.")
 

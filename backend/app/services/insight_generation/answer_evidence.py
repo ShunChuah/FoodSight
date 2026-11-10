@@ -44,7 +44,8 @@ def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False, hours: 
             "hours_today": hours_label(row.get("hours_today")) if timed else None,
             "open_now": row.get("open_now") if timed else None,
             "opens_at": row.get("opens_at") if timed else None,
-            "comparison_facts": [item["description"] for item in comparisons if row.get("restaurant_name") in item["names"]],
+            "comparison_facts": [("joint " if item["tied"] else "") + item["description"] for item in comparisons
+                                 if row.get("restaurant_name") in item["names"] and len(item["names"]) < len(rows)],
         }
         if card:
             item.update(phone=row.get("phone"), address=row.get("address"), website=row.get("website"),

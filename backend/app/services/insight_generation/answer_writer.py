@@ -9,7 +9,7 @@ from ..shared.diagnostics import kg_debug, log_timing, note_turn
 from ..shared.llm import LLMServiceError
 from ..shared.messages import response
 from .analysis_answer import _analysis
-from .answer_checks import _checked_payload, _numbers
+from .answer_checks import _checked_payload, _numbers, asked_dish, dish_note, supported_claims
 from .answer_evidence import TIME_WORDS, _restaurant_evidence
 from .answer_model import _model_answer
 from .answer_prompts import ANSWER_INSTRUCTIONS, CARD_FORMAT, COMPARE_FORMAT, LIST_FORMAT
@@ -80,6 +80,10 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     card = layout == "card"
     if layout == "compare":
         rows = _brand_branches(rows, named_places(retrieval.query_plan.parameters))
+    dish = None if card else asked_dish(user_query, retrieval.query_plan.parameters)
+    unconfirmed = dish_note(rows, dish) if dish else None
+    if unconfirmed:
+        note = f"{note}\n\n{unconfirmed}" if note else unconfirmed
     evidence = _restaurant_evidence(rows, card, hours=card or bool(TIME_WORDS.search(user_query)))
     fallback = _restaurant_fallback(rows, card, user_query, compare=layout == "compare")
     if note:
@@ -99,10 +103,11 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     try:
         answer = _model_answer(
             prompt, ANSWER_INSTRUCTIONS + "\n\n" + output_format, deadline,
-            lambda payload: _render_model_answer(_checked_payload(payload, known), rows, card, user_query, compare),
-            lambda payload: _render_model_answer(_checked_payload(payload, known, streaming=True),
-                                                 rows if card else _described_rows(payload, rows), card,
-                                                 user_query, compare),
+            lambda payload: _render_model_answer(
+                supported_claims(_checked_payload(payload, known), rows, dish), rows, card, user_query, compare),
+            lambda payload: _render_model_answer(
+                supported_claims(_checked_payload(payload, known, streaming=True), rows, dish),
+                rows if card else _described_rows(payload, rows), card, user_query, compare),
             note, on_answer)
         if answer is None:
             return AnswerResult(status="fallback", text=fallback)

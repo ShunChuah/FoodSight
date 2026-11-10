@@ -88,6 +88,42 @@ LIMIT 4
 """.strip()
 
 
+DISH_PLACES = """
+MATCH (r:Restaurant {counted_as_open: true})
+OPTIONAL MATCH (r)-[:LOCATED_IN]->(l:Location)
+OPTIONAL MATCH (l)-[:IN_AREA]->(a:Area)
+OPTIONAL MATCH (r)-[:HAS_PROFILE]->(bp:BusinessProfile)
+OPTIONAL MATCH (r)-[:PRICED_AT]->(p:PriceRange)
+OPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)
+WITH r, a, bp, p, rt,
+     toLower(r.name) CONTAINS $dish OR toLower(coalesce(r.editorial_summary, '')) CONTAINS $dish AS named,
+     CASE WHEN $radius IS NULL OR l IS NULL THEN null
+          ELSE point.distance(point({latitude: l.latitude, longitude: l.longitude}),
+                              point({latitude: $latitude, longitude: $longitude})) END AS distance_m
+WHERE ($area IS NULL OR a.name =~ $area)
+  AND ($radius IS NULL OR distance_m <= $radius)
+  AND (named OR ($cuisine IS NOT NULL AND EXISTS { MATCH (r)-[:SERVES]->(:Cuisine {name: $cuisine}) }
+                 AND NOT coalesce(bp.restaurant_type, '') IN $not_meals))
+WITH DISTINCT r, named, p, rt, distance_m
+RETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m
+ORDER BY named DESC, CASE WHEN $budget THEN coalesce(p.avg_meal_price, 1000) ELSE 0 END,
+         coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC
+LIMIT $limit
+""".strip()
+NOT_MEALS = ["bakery", "cafe", "dessert_shop", "drinks_shop", "bar_pub"]
+
+
+# Places with the dish in their name or summary first, then sit-down places of its cuisine; price only orders them.
+def _dish_places(dish: str, cuisine: str | None, area: str | None, budget: bool, limit: int,
+                 deadline: float | None, near: tuple[float, float, float] | None = None) -> list[dict[str, Any]]:
+    latitude, longitude, radius = near or (None, None, None)
+    found = execute_cypher(DISH_PLACES, {"dish": dish.lower(), "cuisine": cuisine, "area": area, "budget": budget,
+                                         "limit": limit, "not_meals": NOT_MEALS, "latitude": latitude,
+                                         "longitude": longitude, "radius": radius},
+                           timeout_seconds=_query_time(deadline), purpose="dish places")
+    return found.records if found.status == "success" else []
+
+
 def _anchor_question(rows: list[dict[str, Any]], deadline: float | None) -> tuple[str, list[str]] | None:
     anchors = list(dict.fromkeys(row["anchor_id"] for row in rows if row.get("anchor_id") is not None))
     if len(anchors) < 2:
