@@ -8,6 +8,7 @@ from ...contracts import AnswerResult
 from ..query_generation.cypher_generation import load_vocabulary
 from ..shared.diagnostics import kg_debug
 from ..shared.llm import LLMServiceError
+from ..shared.messages import response
 from .answer_checks import _checked_payload, _numbers
 from .answer_evidence import _business_evidence, _group_evidence
 from .answer_model import _model_answer
@@ -69,6 +70,10 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
                      for key, value in (_business_evidence(row) if row.get("restaurant_name")
                                         else _group_evidence(row)).items() if not _hidden(key)}
                     for row in rows]
+    if not areas and not any(evidence):
+        # Only ids came back, so the model would write about missing records.
+        kg_debug("No evidence for the analysis", rows)
+        return AnswerResult(status="fallback", text=response("errors.no_results"))
     sample = _review_sample(rows) if kind == "reviews" else ""
     prompt = _earlier_chat(conversation_context) + f"User question: {user_query}\n\n{sample}Evidence:\n" + "\n".join(
         (f"[A{index}] " if areas else "- ") + json.dumps(item, ensure_ascii=False, default=str)

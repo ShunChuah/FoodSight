@@ -54,6 +54,12 @@ def query_graph(
     if generated.status == "clarify" and (not may_clarify or _already_said(user_query, generated.options)):
         retry = generate(previous=("", NO_SECOND_QUESTION_ERROR), may_clarify=False)
         generated = retry if retry.status != "skipped_deadline" else generated
+    elif generated.status == "clarify" and _same_options(generated.options):
+        kg_debug("Clarifying options mean the same thing", generated.options)
+        retry = generate(previous=("", SAME_OPTIONS_ERROR), may_clarify=may_clarify)
+        if retry.status == "clarify" and _same_options(retry.options):
+            retry = generate(previous=("", NO_SECOND_QUESTION_ERROR), may_clarify=False)
+        generated = retry if retry.status != "skipped_deadline" else generated
     if generated.status == "rejected_validation":
         retry = generate(previous=(generated.cypher or "", generated.error or ""), may_clarify=may_clarify)
         generated = _keep_details(retry, generated) if retry.status != "skipped_deadline" else generated
@@ -340,6 +346,25 @@ def _already_said(question: str, options: tuple[str, ...] | list[str]) -> bool:
         if len(words) >= 2 and all(word in asked for word in words):
             return True
     return False
+
+
+SAME_OPTIONS_ERROR = ("Your options meant the same thing in different words. Offer readings that lead to different "
+                      "searches, or use a sensible default and query.")
+OPTION_WORDS = {"i", "mean", "want", "option", "options", "place", "places", "restaurant", "restaurants", "one",
+                "each", "a", "an", "the", "and", "or", "for", "of", "to", "with", "food", "please", "just", "both"}
+SAME_MEANING = {"budget": "cheap", "affordable": "cheap", "inexpensive": "cheap", "cheaper": "cheap",
+                "premium": "expensive", "pricey": "expensive", "luxury": "expensive", "upscale": "expensive",
+                "fine": "expensive", "dining": "", "high": "expensive", "end": ""}
+
+
+# Options whose key words match after common synonyms ("one cheap and one expensive" and "one budget and one
+# premium option") give the user no real choice.
+def _same_options(options: tuple[str, ...] | list[str]) -> bool:
+    keys = []
+    for option in options or ():
+        words = {SAME_MEANING.get(word, word) for word in re.findall(r"[a-z]+", option.lower())}
+        keys.append(frozenset(words - OPTION_WORDS - {""}))
+    return any(keys[i] and keys[i] == keys[j] for i in range(len(keys)) for j in range(i + 1, len(keys)))
 
 
 def _clarification(replies: dict, question: str, options: tuple[str, ...] | list[str]) -> RetrievalResult:

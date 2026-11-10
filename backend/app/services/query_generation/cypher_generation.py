@@ -175,8 +175,12 @@ datasets, properties, queries or the graph. When an action does not use a field,
   A restaurant named with its area ("ZUS Coffee SS2") is specific: never ask which branch.
   reply is one short, friendly question that asks what to choose without listing the choices, since the app shows
   the options as buttons right under it ("Which price range do you mean?", not "Do you mean cheap food or fine
-  dining?"), and never letters or numbers them. options are 2-{max_options} short answers the user can tap, each one
-  complete on its own and written as the user would say it ("Cheap Japanese", not "A" or "The first one"). Ask at
+  dining?"), and never letters or numbers them. options are the short answers the user can tap (2 to 5 words): one
+  for every sensible reading, from 2 up to {max_options}, so never leave out a likely reading just to offer two. Each
+  one is complete on its own and written as the user would say it ("Cheap Japanese", not "A", "The first
+  one" or "I mean cheap Japanese"). Each option is a different reading that leads to a different search: never
+  offer the same thing in other words ("One cheap and one expensive" and "One budget and one premium" are the same
+  option). For cheap and expensive at once, offer "Cheap eats", "Fine dining" and "One of each". Ask at
   most one question. Never ask for something the user already said or that the conversation already answered, and
   never ask for the user's location when their position is available.
 - explain: a general food or drink question that needs no particular place (for example what a dish is, or the
@@ -639,12 +643,13 @@ LISTED_CHOICES = "Which of these do you mean?"
 OPTION_FILLER = {"a", "an", "the", "for", "of", "in", "at", "to", "with", "and", "or", "food", "place", "places"}
 
 
-# A question that spells out two or more of the options repeats the buttons under it, so it becomes a short ask.
+# A question that spells out the options ("one cheap place, or ...?") repeats the buttons under it, so it
+# becomes a short ask.
 def _question_text(reply: str, options: tuple[str, ...]) -> str:
     words = set(re.findall(r"[a-z0-9]+", reply.lower()))
     listed = sum(1 for option in options
                  if (needed := set(re.findall(r"[a-z0-9]+", option.lower())) - OPTION_FILLER) and needed <= words)
-    if listed < 2:
+    if listed < 2 and not (listed and re.search(r"\bor\b", reply, re.IGNORECASE)):
         return reply
     opening = re.match(r"^(.*?[.!])\s+", reply)
     return f"{opening[1]} {LISTED_CHOICES}" if opening and not opening[1].endswith("?") else LISTED_CHOICES
@@ -971,8 +976,10 @@ def check_cypher(cypher: str, parameters: dict[str, Any]) -> str | None:
     started_at = perf_counter()
     valid, error = validate_cypher(cypher, ontology_graph_schema(), parameters)
     if not valid and re.search(r"\bUNION\b", cypher, flags=re.IGNORECASE):
-        error = ("UNION is not allowed. Return one row with several columns instead "
-                 "(for example RETURN chains, independents, total).")
+        error = ("UNION is not allowed. For figures, return one row with several columns (for example RETURN "
+                 "chains, independents, total). For restaurants from two groups, return one row per restaurant: "
+                 "WITH tier, collect(r)[0..1] AS picks UNWIND picks AS r RETURN r.restaurant_id AS restaurant_id, "
+                 "tier.")
     if valid and "`" in cypher:
         valid, error = False, "Do not use backticks: write labels, relationship types and properties as plain names."
     if valid and re.search(r"::\s*\w", re.sub(QUOTED, "''", cypher)):

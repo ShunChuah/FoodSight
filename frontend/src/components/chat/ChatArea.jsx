@@ -8,6 +8,7 @@ import AIExplanationPanel from "../explanation/AIExplanationPanel";
 import { sendErrorText, submitChatQuery } from "../../services/submitChatQuery";
 import { detailTabs, isGraphPending } from "../../services/detailsPresentation";
 import { hasMapView } from "../../services/mapPresentation";
+import { repliesFor } from "../../services/quickReplies";
 import "../../styles/chat.css";
 
 function ChatArea({
@@ -82,8 +83,9 @@ function ChatArea({
           <WelcomeScreen darkMode={darkMode} />
         ) : (
           <div className="chat-result-area" ref={resultRef}>
-            {messages.map((message) =>
-              message.type === "user" ? (
+            {messages.map((message, index) => {
+              const replies = message.type === "user" ? null : repliesFor(messages, index, pendingQuery);
+              return message.type === "user" ? (
                 <UserQuestionBubble key={message.id} text={message.text} />
               ) : (
                 <AIResponseCard
@@ -92,12 +94,13 @@ function ChatArea({
                   hasDetails={tabsFor(message).length > 0}
                   isExplanationOpen={explanationTabs.length > 0 && explanationMessageId === message.id}
                   onShowExplanation={() => setExplanationMessageId(message.id)}
-                  quickReplies={message === latestMessage ? message.quickReplies ?? [] : []}
+                  quickReplies={replies.options}
+                  selectedReply={replies.selected}
                   onQuickReply={handleSubmit}
                   repliesDisabled={isSending || hasPendingQuery}
                 />
-              ),
-            )}
+              );
+            })}
 
             {hasPendingQuery && (
               <>

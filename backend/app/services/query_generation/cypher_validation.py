@@ -136,7 +136,25 @@ def validate_cypher(
             + ", ".join(sorted(set(unknown_properties)))
             + ".",
         )
+    renamed = _renamed_restaurant_ids(cypher)
+    if renamed:
+        return (
+            False,
+            f"Return restaurants as r.restaurant_id AS restaurant_id, not as {', '.join(renamed)}, so the app can "
+            "show them. For two groups (one cheap and one expensive place), return one row per restaurant with a "
+            "column naming its group: WITH tier, collect(r)[0..1] AS picks UNWIND picks AS r "
+            "RETURN r.restaurant_id AS restaurant_id, tier.",
+        )
     return True, None
+
+
+# Restaurant ids returned under other names ("cheap_id") are not recognised as places to show.
+def _renamed_restaurant_ids(cypher: str) -> list[str]:
+    clause = re.split(r"\bRETURN\b", cypher, flags=re.IGNORECASE)[-1]
+    if re.search(r"\bAS\s+restaurant_id\b", clause, re.IGNORECASE):
+        return []
+    return [alias for alias in re.findall(r"\b\w+\.restaurant_id\s+AS\s+(\w+)", clause, re.IGNORECASE)
+            if alias.lower() != "anchor_id"]
 
 def _is_safe_read_query(cypher: str) -> bool:
     normalized = re.sub(r"\s+", " ", cypher).upper()

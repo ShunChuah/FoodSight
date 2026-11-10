@@ -1,4 +1,4 @@
-import { Pause, Play, Sparkles, Volume2 } from "lucide-react";
+import { Check, Pause, Play, Sparkles, Volume2 } from "lucide-react";
 import { parseAnswer } from "../../services/answerPresentation";
 import useAnswerSpeech from "../../hooks/useAnswerSpeech";
 import "../../styles/chat.css";
@@ -95,6 +95,7 @@ function AIResponseCard({
   quickReplies = [],
   onQuickReply,
   repliesDisabled = false,
+  selectedReply = null,
 }) {
   const speech = useAnswerSpeech(answer);
   const isSpeaking = speech.status === "speaking";
@@ -107,18 +108,25 @@ function AIResponseCard({
       <FormattedAnswer answer={answer} />
 
       {!streaming && quickReplies.length > 0 && (
-        <div className="quick-reply-actions" role="group" aria-label="Suggested replies">
-          {quickReplies.map((reply) => (
-            <button
-              className="quick-reply-button"
-              key={reply}
-              type="button"
-              disabled={repliesDisabled}
-              onClick={() => onQuickReply && onQuickReply(reply)}
-            >
-              {reply}
-            </button>
-          ))}
+        <div className={`quick-reply-actions${selectedReply ? " is-answered" : ""}`} role="group"
+          aria-label="Suggested replies">
+          {quickReplies.map((reply) => {
+            const chosen = reply === selectedReply;
+            return (
+              <button
+                className={`quick-reply-button${chosen ? " is-selected" : ""}`}
+                key={reply}
+                type="button"
+                // An answered question keeps its options as a record, so none can be sent again.
+                disabled={repliesDisabled || Boolean(selectedReply)}
+                aria-pressed={selectedReply ? chosen : undefined}
+                onClick={() => onQuickReply && onQuickReply(reply)}
+              >
+                {chosen && <Check size={14} strokeWidth={2.5} aria-hidden="true" />}
+                {reply}
+              </button>
+            );
+          })}
         </div>
       )}
 

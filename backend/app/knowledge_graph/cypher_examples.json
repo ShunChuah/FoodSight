@@ -17,6 +17,11 @@
       }
     },
     {
+      "question": "One cheap and one expensive place for dinner",
+      "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:PRICED_AT]->(p:PriceRange)\nWHERE p.tier IN ['budget', 'luxury']\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH p.tier AS price_tier, r, rt\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nWITH price_tier, collect(r)[0..1] AS picks\nUNWIND picks AS r\nRETURN r.restaurant_id AS restaurant_id, price_tier\nORDER BY price_tier\nLIMIT 2",
+      "parameters": {}
+    },
+    {
       "question": "Which areas have the best-rated restaurants?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH a.name AS area_name, count(DISTINCT r) AS restaurants, round(avg(rt.rating_score), 2) AS average_rating\nWHERE restaurants >= 10\nRETURN area_name, average_rating, restaurants\nORDER BY average_rating DESC\nLIMIT 5",
       "parameters": {}
@@ -231,6 +236,16 @@
       "options": [
         "Grill at the table",
         "Barbecued dishes"
+      ]
+    },
+    {
+      "question": "recommend me cheap but expensive restaurant to have dinner",
+      "action": "clarify",
+      "reply": "Sure! Which price range would you like for dinner?",
+      "options": [
+        "Cheap eats",
+        "Fine dining",
+        "One of each"
       ]
     },
     {
