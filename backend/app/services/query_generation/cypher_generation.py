@@ -471,6 +471,9 @@ def defaults_prompt() -> str:
         "the app ranks by the preferences. Filter on ambiance, target_segment or a facility only when the user makes "
         "it a requirement (\"must have a kids menu\", \"only places with outdoor seating\"). A long message still "
         "gets one short query for its main question: never try to cover every detail in the Cypher.",
+        "- A meal (" + ", ".join(policy("meals")["terms"][:4]) + ", a restaurant) needs a place that serves one: "
+        "add WHERE NOT EXISTS { MATCH (r)-[:HAS_PROFILE]->(bp:BusinessProfile) WHERE bp.restaurant_type IN "
+        + str(policy("meals")["not_meals"]) + " }, unless the user asks for desserts, drinks or a bakery.",
         f"- Number of restaurants: LIMIT {results['discovery_limit']}; LIMIT {results['default_limit']} when the user "
         f"asks for a few; the number the user asks for, up to {RESTAURANT_LIMIT}.",
         f"- Never put ${DEFAULT_RADIUS} or ${DEFAULT_MIN_REVIEWS} in parameters: the app sets them.",

@@ -105,7 +105,8 @@ def query_graph(
         plan = replace(plan, cypher=without_soft_filters(plan.cypher, intent, user_query))
     # An explicit ranking (most popular, cheapest) keeps its order.
     prefer_open = not wanted and not (intent and intent.explicit) and _prefers_open(user_query, plan)
-    widen = bool(wanted or best or prefer_open or rank)
+    meal = _meal_only(user_query, plan, intent)
+    widen = bool(wanted or best or prefer_open or rank or meal)
     candidates = candidate_pool() if rank else None
     execution = _run(plan, deadline, more_candidates=widen and returns_restaurants(plan.cypher),
                      pool=candidates)
@@ -133,14 +134,18 @@ def query_graph(
         return _clarification(replies, *branches)
     if rows and returns_restaurants(plan.cypher):
         pool = plan.result_limit * (OPEN_FIRST_POOL if prefer_open else 1)
-        rows = _with_restaurant_details(rows if wanted or best or rank else rows[:pool], deadline)
+        rows = _with_restaurant_details(rows if wanted or best or rank or meal else rows[:pool], deadline)
         rows = _whole_word_matches(rows, plan)
+        if meal:
+            rows = _serves_meals(rows)
         if plan.business and COMPETITOR_WORDS.search(user_query) and RESTAURANT_CONCEPT.search(user_query):
             rows = _meal_competitors(rows)
         if best:
             rows = _well_reviewed(rows)
         if rank:
             rows = rank_for_intent(rows, intent)
+        if meal:
+            rows = _meal_places_first(rows)
         if wanted:
             rows = [row for row in rows
                     if open_now(row.get("hours_today"), wanted, _yesterday(row.get("weekly_hours"), wanted)) is True]
@@ -534,6 +539,39 @@ def _prefers_open(question: str, plan: QueryPlan) -> bool:
 
 COMPETITOR_WORDS = re.compile(r"\bcompet\w*|\brivals?\b", re.IGNORECASE)
 RESTAURANT_CONCEPT = re.compile(r"\brestaurants?\b", re.IGNORECASE)
+
+
+def _meal_words() -> re.Pattern:
+    return re.compile(r"\b(?:" + "|".join(re.escape(term) for term in policy("meals")["terms"]) + r")\b",
+                      re.IGNORECASE)
+
+
+# Dinner, lunch or a restaurant asks for a meal, so dessert, drinks and bakery places are left out, unless the user
+# asked for one of those kinds (policy "meals").
+def _meal_only(user_query: str, plan: QueryPlan, intent: Any) -> bool:
+    settings = policy("meals")
+    if plan.business or RESTAURANT_DETAILS_FIELD in plan.requested_fields or not returns_restaurants(plan.cypher):
+        return False
+    if not _meal_words().search(user_query or ""):
+        return False
+    if intent is not None and intent.category in settings["unless_category"]:
+        return False
+    return not any(f"'{kind}'" in plan.cypher for kind in settings["not_meals"])
+
+
+def _serves_meals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    excluded = set(policy("meals")["not_meals"])
+    kept = [row for row in rows if row.get("restaurant_type") not in excluded]
+    if len(kept) < len(rows):
+        kg_debug("Left out places that do not serve meals", [row.get("restaurant_name") for row in rows
+                                                             if row not in kept])
+    return kept
+
+
+# Cafes come after the other meal places, so a coffee chain never leads a dinner list; the order is kept otherwise.
+def _meal_places_first(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    later = set(policy("meals")["only_if_needed"])
+    return sorted(rows, key=lambda row: row.get("restaurant_type") in later)
 
 
 # A Korean restaurant does not compete with a drinks shop that also carries the Korean tag.

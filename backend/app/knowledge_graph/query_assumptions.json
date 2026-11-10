@@ -159,6 +159,13 @@
                    "opens_by": "12:00"}
       }
     },
+    "meals": {
+      "description": "A diner asking for a meal (lunch, dinner, a meal or a restaurant) wants somewhere that serves one, so places that only sell desserts, drinks or baked goods are left out unless the user asks for one of those kinds. Cafes stay because many serve full meals, but come after other meal places (only_if_needed) so coffee chains do not lead. Breakfast and supper are not listed: bakeries and dessert places can suit them.",
+      "terms": ["lunch", "dinner", "meal", "meals", "restaurant", "restaurants", "makan"],
+      "not_meals": ["dessert_shop", "drinks_shop", "bakery"],
+      "only_if_needed": ["cafe"],
+      "unless_category": ["dessert", "bakery"]
+    },
     "market_study": {
       "description": "Where to open an F&B outlet. The query model names the concept (its direct competitors) and the user's objective; the app computes every figure per area and ranks areas on six dimensions, each normalised across the eligible areas. weights are percentages; objectives replace some of them; a dimension with no data for an area is left out of that area's score, never counted as zero. Areas need min_restaurants unless the user names them. An area with no competitors gets at most no_competitor_cap for competition, because demand there is unverified; when the user asks for low competition, competition is judged on share alone and the cap is no_competitor_cap_low_competition. The score is shown only when every compared area has at least show_score_min_confidence of its data. A positioning alternative must score at least alternative_min_score_share of the first choice. For a restaurant concept, places of the not_restaurant_competitors kinds are not direct competitors, even when they carry the cuisine. Nearby kinds come from categories.json nearby_place.kind; customers says who each kind could bring.",
       "weights": {"market": 25, "competition": 25, "generators": 20, "price": 15, "differentiation": 10, "confidence": 5},
