@@ -13,6 +13,7 @@ from ..insight_generation.graph_query import query_graph
 from ..query_generation.coverage import coverage_reply
 from ..query_generation.location import resolve_location
 from ..query_generation.scope import classify_query_scope
+from ..shared import progress
 from ..shared.diagnostics import kg_debug, note_turn, turn_record
 from ..shared.messages import response
 from .conversation_state import search_state, state_prompt
@@ -87,6 +88,7 @@ def _respond(user_query, messages, location_context, location_permission_denied,
         note_turn(outcome="location_request")
         return AssistantTurn(LOCATION_REQUEST_ANSWER)
 
+    progress.set_place(decision.detected_location if decision.location_kind == "named" else None)
     if title_needed is None:
         title_needed = len(messages) <= 1
     # Never ask the user two questions in a row (this also covers the location request).

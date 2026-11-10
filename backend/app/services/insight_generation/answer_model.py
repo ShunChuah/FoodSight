@@ -3,6 +3,7 @@ from typing import Callable
 
 from ..shared.cache import ANSWER_REPLIES
 from ..shared.diagnostics import kg_debug, mark
+from ..shared.progress import WRITING, report_stage
 from ..shared.llm import call_llm, parse_json_object, parse_partial_json, remaining_response_timeout
 from .answer_text import _without_markers
 
@@ -32,6 +33,7 @@ class _AnswerStream:
 def _model_answer(prompt: str, instructions: str, deadline: float | None, render: Callable[[dict | None], str],
                   partial: Callable[[dict | None], str], note: str | None,
                   on_answer: Callable[[str], None] | None) -> str | None:
+    report_stage(WRITING)
     raw = ANSWER_REPLIES.get(prompt, instructions)
     if raw is not None:
         return render(parse_json_object(raw))

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import WelcomeScreen from "./WelcomeScreen";
 import ChatInput from "./ChatInput";
 import AIResponseCard from "./AIResponseCard";
-import AIResponseSkeleton from "./AIResponseSkeleton";
+import ProcessingSteps from "./ProcessingSteps";
 import UserQuestionBubble from "./UserQuestionBubble";
 import AIExplanationPanel from "../explanation/AIExplanationPanel";
 import { sendErrorText, submitChatQuery } from "../../services/submitChatQuery";
@@ -20,6 +20,8 @@ function ChatArea({
   showGraphEvidence = true,
   pendingQuery = "",
   streamingAnswer = "",
+  processingStage = null,
+  onStopQuery,
 }) {
   const hasPendingQuery = Boolean(pendingQuery.trim());
   const messages = selectedChat?.messages ?? [];
@@ -109,7 +111,7 @@ function ChatArea({
                 )}
                 {isSending && (streamingAnswer
                   ? <AIResponseCard answer={streamingAnswer} streaming />
-                  : <AIResponseSkeleton />)}
+                  : <ProcessingSteps stage={processingStage} onStop={onStopQuery} />)}
               </>
             )}
           </div>

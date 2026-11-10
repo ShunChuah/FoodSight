@@ -1,3 +1,4 @@
+import asyncio
 import json
 import queue
 import threading
@@ -5,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -36,6 +37,7 @@ from ..schemas import (
     DeleteChatResponse,
     GraphEvidenceRead,
 )
+from ..services.shared.progress import TurnCancelled, check_cancelled, tracking
 from ..services.chatbot.graph_jobs import graph_status, start_graph_job
 from ..services.chatbot.pipeline import (
     AssistantTurn,
@@ -64,6 +66,7 @@ from ..services.shared.messages import response as user_response
 
 # Every route needs a verified user and only sees that user's chats.
 router = APIRouter(prefix="/chats", tags=["chats"])
+STREAM_POLL_SECONDS = 0.5
 TITLE_GENERATED = "title_generated"
 SEARCH_STATE = "search"
 
@@ -312,6 +315,7 @@ def send_message(
 
 @router.post("/messages/stream", dependencies=[Depends(limit_chat)])
 def stream_message(
+    request: Request,
     payload: ChatSendRequest,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
@@ -325,15 +329,20 @@ def stream_message(
         get_chat_or_404(db, payload.chat_id, user.id)
     events: queue.Queue = queue.Queue()
     owner, bind = SimpleNamespace(id=user.id), db.get_bind()
+    # Set when the user presses Stop (the browser closes the stream), so no more model calls are made.
+    cancel = threading.Event()
 
     @trace_request
     def work() -> None:
         try:
             # Own session: the request's session can close before the stream ends.
-            with Session(bind=bind) as session:
+            with Session(bind=bind) as session, tracking(
+                    lambda stage, detail: events.put({"type": "stage", "stage": stage, "detail": detail}), cancel):
                 sent = _send_message(payload, session, owner,
                                      on_answer=lambda text: events.put({"type": "answer", "text": text}))
             events.put({"type": "done", **jsonable_encoder(sent)})
+        except TurnCancelled:
+            print("Chat message stopped by the user; nothing was saved.", flush=True)
         except HTTPException as exc:
             events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
         except Exception as exc:
@@ -344,9 +353,21 @@ def stream_message(
 
     threading.Thread(target=work, name="chat-send", daemon=True).start()
 
-    def lines():
-        while (event := events.get()) is not None:
-            yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
+    async def lines():
+        try:
+            while True:
+                try:
+                    event = await asyncio.to_thread(events.get, True, STREAM_POLL_SECONDS)
+                except queue.Empty:
+                    if await request.is_disconnected():
+                        return
+                    continue
+                if event is None:
+                    return
+                yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
+        finally:
+            # The stream ended early only when the browser stopped reading it.
+            cancel.set()
 
     return StreamingResponse(lines(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -396,9 +417,13 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
             chat_state=saved_state.get(SEARCH_STATE),
             on_answer=on_answer,
         )
+    except TurnCancelled:
+        raise
     except Exception as exc:
         print(f"Assistant response generation failed: {exc}", flush=True)
         turn = AssistantTurn(user_response("errors.unexpected"))
+    # Stopped while the answer was being written: keep the chat as it was.
+    check_cancelled()
     title = generated_title(turn.chat_title, user_text) if wants_title else None
     if title:
         chat.title = title

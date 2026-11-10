@@ -18,6 +18,7 @@ import {
 } from "../api/chatApi";
 import { fetchThemePreference, saveThemePreference } from "../api/preferencesApi";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { nextStage } from "../services/processingSteps";
 import "../styles/dashboard.css";
 
 function DashboardPage() {
@@ -41,7 +42,9 @@ function DashboardPage() {
   const [pendingQuery, setPendingQuery] = useState("");
   const [pendingChatId, setPendingChatId] = useState(null);
   const [streamingAnswer, setStreamingAnswer] = useState("");
+  const [processingStage, setProcessingStage] = useState(null);
   const isSendingRef = useRef(false);
+  const stopRef = useRef(null);
   const preflightRef = useRef(null);
   const draftChatIdRef = useRef(null);
 
@@ -162,6 +165,8 @@ function DashboardPage() {
       ?? selectedChatId;
     setPendingChatId(chatId);
     setPendingQuery(query);
+    const controller = new AbortController();
+    stopRef.current = controller;
     try {
       const preflight =
         preflightRef.current?.query === query
@@ -174,15 +179,29 @@ function DashboardPage() {
         locationPermissionDenied,
         preflight,
         onAnswer: setStreamingAnswer,
+        onStage: (event) => setProcessingStage((previous) => nextStage(previous, event)),
+        signal: controller.signal,
       });
 
       const savedChat = await sendPromise;
       replaceChat(savedChat);
       setSelectedChatId(savedChat.id);
     } catch (error) {
+      // Stopped by the user: the server saves nothing, so the chat stays as it was.
+      if (controller.signal.aborted) {
+        // A new chat made just for this question would be left empty, so it goes too.
+        if (chatId !== null && chatId === draftChatIdRef.current) {
+          setChats((prevChats) => prevChats.filter((chat) => chat.id !== chatId));
+          setSelectedChatId(null);
+          deleteChatHistory(chatId).catch((deleteError) => console.error("Failed to remove the empty chat", deleteError));
+        }
+        return;
+      }
       console.error("Failed to save chat message", error);
       throw error;
     } finally {
+      stopRef.current = null;
+      setProcessingStage(null);
       preflightRef.current = null;
       draftChatIdRef.current = null;
       isSendingRef.current = false;
@@ -192,6 +211,8 @@ function DashboardPage() {
       setStreamingAnswer("");
     }
   };
+
+  const handleStopQuery = () => stopRef.current?.abort();
 
   const handleNewChat = () => {
     setSelectedChatId(null);
@@ -296,6 +317,8 @@ function DashboardPage() {
         showGraphEvidence={showGraphEvidence}
         pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
         streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
+        processingStage={selectedOwnsPendingRequest ? processingStage : null}
+        onStopQuery={handleStopQuery}
       />
 
       {settingsOpen && (

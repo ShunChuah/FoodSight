@@ -20,6 +20,7 @@ from ..shared.config import policy
 from ..shared.diagnostics import kg_debug, note_turn
 from ..shared.messages import response
 from ..shared.neo4j import execution_enabled
+from ..shared import progress
 from .answer_checks import asked_dish, serves_dish
 from .answer_text import TECHNICAL_WORDS
 from .graph_reads import (
@@ -90,6 +91,8 @@ def query_graph(
     plan = generated.plan
     if not execution_enabled():
         return RetrievalResult(status="preview", query_plan=plan)
+    progress.report_stage(progress.UNDERSTOOD, question_summary(plan, user_query))
+    progress.report_stage(progress.COMPARING if plan.intent.get("location_study") is True else progress.SEARCHING)
     if plan.intent.get("location_study") is True:
         studied = _market_study(plan, generate, user_query, deadline)
         if studied is not None:
@@ -181,6 +184,60 @@ def query_graph(
 
 
 FEW_RESULTS = 3
+TIER_SUMMARY = {"budget": "budget", "mid": "mid-range", "upscale": "upscale", "luxury": "fine dining"}
+
+
+def _quoted(cypher: str, field: str) -> list[str]:
+    single = re.findall(rf"\b{field}\s*(?::|=)\s*'([^']+)'", cypher)
+    listed = [value for group in re.findall(rf"\b{field}\s+IN\s*\[([^\]]*)\]", cypher)
+              for value in re.findall(r"'([^']+)'", group)]
+    return single + listed
+
+
+# The area the query filters on, readable: a study's named areas, or "(?i)^SS ?2\b.*" read as "SS 2".
+def _area_name(plan: QueryPlan) -> str | None:
+    areas = [area for area in plan.intent.get("areas") or [] if isinstance(area, str)]
+    if areas:
+        return ", ".join(areas[:2])
+    pattern = _area_pattern(plan)
+    if not pattern:
+        match = re.search(r"\(\s*(\w+)\s*:\s*Area\b", plan.cypher)
+        contains = match and re.search(rf"\b{match.group(1)}\.name\s*\)?\s*CONTAINS\s+(?:toLower\(\s*)?\$(\w+)",
+                                       plan.cypher)
+        value = plan.parameters.get(contains.group(1)) if contains else None
+        return value if isinstance(value, str) else None
+    text = re.sub(r"\(\?i\)|\\b|\.\*|[\^$]", "", pattern).replace(" ?", " ").replace("\\", "")
+    return text.strip() or None
+
+
+def _plural(kind: str) -> str:
+    words = kind.replace("_", " ")
+    return words if words.endswith("s") else words + "s"
+
+
+# What the app understood, in a few words for the processing card ("competition, SS 2, cafes").
+def question_summary(plan: QueryPlan, user_query: str) -> list[str]:
+    words: list[str] = []
+    if plan.intent.get("location_study") is True:
+        words.append("where to open")
+    elif plan.business:
+        words.append("competition" if COMPETITOR_WORDS.search(user_query) or "COMPETES_WITH" in plan.cypher
+                     else "market analysis")
+    elif RESTAURANT_DETAILS_FIELD in plan.requested_fields:
+        words.append("restaurant details")
+    place = progress.place() or _area_name(plan)
+    if place:
+        words.append(place)
+    elif "distance_m" in plan.cypher and isinstance(plan.parameters.get("latitude"), (int, float)):
+        words.append("near you")
+    words += re.findall(r"Cuisine\s*\{\s*name\s*:\s*'([^']+)'", plan.cypher)
+    words += [value for key, value in plan.parameters.items() if "cuisine" in key and isinstance(value, str)]
+    words += [_plural(kind) for kind in _quoted(plan.cypher, "restaurant_type")]
+    tiers = [TIER_SUMMARY.get(tier, tier) for tier in _quoted(plan.cypher, "tier")]
+    words += tiers or (["budget"] if plan.intent.get("budget") is True else [])
+    if time_asked(user_query, opening_hours.now_local()):
+        words.append("opening hours")
+    return progress.summary_words(words)
 OUTCOMES = {"success": "query", "cannot_answer": "decline"}
 
 

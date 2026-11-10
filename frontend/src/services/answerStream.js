@@ -1,4 +1,4 @@
-export async function readAnswerStream(response, onAnswer) {
+export async function readAnswerStream(response, onAnswer, onStage) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -6,7 +6,8 @@ export async function readAnswerStream(response, onAnswer) {
   const handle = (line) => {
     if (!line.trim()) return;
     const event = JSON.parse(line);
-    if (event.type === "answer") onAnswer?.(event.text);
+    if (event.type === "stage") onStage?.({ stage: event.stage, detail: event.detail ?? [] });
+    else if (event.type === "answer") onAnswer?.(event.text);
     else if (event.type === "done") result = event;
     else if (event.type === "error") throw streamError(event.status, event.detail);
   };

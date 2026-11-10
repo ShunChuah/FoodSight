@@ -23,6 +23,8 @@ export async function sendChatMessage({
   locationPermissionDenied = false,
   preflight = null,
   onAnswer = null,
+  onStage = null,
+  signal = undefined,
 }) {
   const payload = {
     chat_id: chatId ?? null,
@@ -36,26 +38,28 @@ export async function sendChatMessage({
 
   // axios cannot read a streamed body.
   if (onAnswer && typeof fetch === "function") {
-    return (await streamChatMessage(payload, onAnswer)).chat;
+    return (await streamChatMessage(payload, onAnswer, onStage, signal)).chat;
   }
   const response = await api.post("/chats/messages", payload);
   return response.data.chat;
 }
 
-async function streamChatMessage(payload, onAnswer) {
+// Aborting the signal (Stop) closes the stream, and the server then stops before its next model call.
+async function streamChatMessage(payload, onAnswer, onStage, signal) {
   const baseUrl = (api.defaults.baseURL ?? "").replace(/\/$/, "");
   const response = await fetch(`${baseUrl}/chats/messages/stream`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
     body: JSON.stringify(payload),
+    signal,
   });
   if (!response.ok || !response.body) {
     if (response.status === 401) notifyUnauthorized();
     const detail = await response.json().then((body) => body.detail).catch(() => undefined);
     throw streamError(response.status, detail);
   }
-  return readAnswerStream(response, onAnswer);
+  return readAnswerStream(response, onAnswer, onStage);
 }
 
 export async function fetchGraphEvidence(chatId, messageId) {
