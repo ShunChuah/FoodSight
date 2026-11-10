@@ -92,6 +92,9 @@ function AIResponseCard({
   onShowExplanation,
   isExplanationOpen = false,
   streaming = false,
+  quickReplies = [],
+  onQuickReply,
+  repliesDisabled = false,
 }) {
   const speech = useAnswerSpeech(answer);
   const isSpeaking = speech.status === "speaking";
@@ -102,6 +105,22 @@ function AIResponseCard({
   return (
     <div className="ai-response-card" aria-busy={streaming}>
       <FormattedAnswer answer={answer} />
+
+      {!streaming && quickReplies.length > 0 && (
+        <div className="quick-reply-actions" role="group" aria-label="Suggested replies">
+          {quickReplies.map((reply) => (
+            <button
+              className="quick-reply-button"
+              key={reply}
+              type="button"
+              disabled={repliesDisabled}
+              onClick={() => onQuickReply && onQuickReply(reply)}
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!streaming && <div className="response-actions">
         {hasDetails && (

@@ -169,10 +169,16 @@ datasets, properties, queries or the graph. When an action does not use a field,
 - clarify: only when the request can mean clearly different things, no default is safe, and the answers would differ
   a lot (for example "BBQ" could mean cooking at the table or barbecued dishes; "coffee shop" could mean a cafe or a
   kopitiam), or a business question about the user's own place that you cannot identify (for example "a second
-  outlet" without its brand or cuisine). A restaurant named with its area ("ZUS Coffee SS2") is specific: never ask
-  which branch. reply is one short question; options are 2-{max_options} short answers the user can tap, written as
-  the user would say them. Ask at most one question. Never ask for something the user already said or that the
-  conversation already answered, and never ask for the user's location when their position is available.
+  outlet" without its brand or cuisine). Also clarify when the request asks for things one place cannot all be, such
+  as cheap and expensive at once, or two cuisines run together with no "and" or "or" ("Japanese Chinese" could mean
+  either cuisine or one place serving both). Cuisines joined by "and" or "or" are clear: search for any of them.
+  A restaurant named with its area ("ZUS Coffee SS2") is specific: never ask which branch.
+  reply is one short, friendly question that asks what to choose without listing the choices, since the app shows
+  the options as buttons right under it ("Which price range do you mean?", not "Do you mean cheap food or fine
+  dining?"), and never letters or numbers them. options are 2-{max_options} short answers the user can tap, each one
+  complete on its own and written as the user would say it ("Cheap Japanese", not "A" or "The first one"). Ask at
+  most one question. Never ask for something the user already said or that the conversation already answered, and
+  never ask for the user's location when their position is available.
 - explain: a general food or drink question that needs no particular place (for example what a dish is, or the
   difference between a kopitiam and a mamak). reply is a short, friendly answer of at most 80 words; you may use the
   vocabulary definitions above. Do not name or recommend particular places. Never use explain for questions about
@@ -620,6 +626,30 @@ def _generate(question, conversation_context, location_context, deadline, previo
     return _read_reply(raw, question, conversation_context, location_context, want_title)
 
 
+# Choice labels such as "(A)" or "B)" in a clarifying question, or "1." before an option, duplicate the buttons.
+OPTION_LABEL = re.compile(r"(?:(?<=\s)|^)(?:\(\s*[A-Da-d1-4]\s*\)|[A-D]\)(?=\s))\s*")
+OPTION_PREFIX = re.compile(r"^\s*(?:\(\s*[A-Da-d1-9]\s*\)|[A-Da-d1-9][.)])\s+")
+
+
+def _option_text(option: str) -> str:
+    return " ".join(OPTION_LABEL.sub("", OPTION_PREFIX.sub("", option)).split())[:80]
+
+
+LISTED_CHOICES = "Which of these do you mean?"
+OPTION_FILLER = {"a", "an", "the", "for", "of", "in", "at", "to", "with", "and", "or", "food", "place", "places"}
+
+
+# A question that spells out two or more of the options repeats the buttons under it, so it becomes a short ask.
+def _question_text(reply: str, options: tuple[str, ...]) -> str:
+    words = set(re.findall(r"[a-z0-9]+", reply.lower()))
+    listed = sum(1 for option in options
+                 if (needed := set(re.findall(r"[a-z0-9]+", option.lower())) - OPTION_FILLER) and needed <= words)
+    if listed < 2:
+        return reply
+    opening = re.match(r"^(.*?[.!])\s+", reply)
+    return f"{opening[1]} {LISTED_CHOICES}" if opening and not opening[1].endswith("?") else LISTED_CHOICES
+
+
 def _read_reply(raw, question, conversation_context, location_context, want_title) -> CypherResult:
     payload = parse_json_object(raw)
     if not payload or not isinstance(payload.get("cypher"), str):
@@ -629,9 +659,12 @@ def _read_reply(raw, question, conversation_context, location_context, want_titl
     if not payload["cypher"].strip() and re.match(r"(?:OPTIONAL\s+)?MATCH\b", reply, flags=re.IGNORECASE):
         payload["cypher"], reply = reply, ""
     options = tuple(dict.fromkeys(
-        " ".join(option.split())[:80] for option in payload.get("options") or []
-        if isinstance(option, str) and option.strip()))[:MAX_OPTIONS]
+        text for text in (_option_text(option) for option in payload.get("options") or [] if isinstance(option, str))
+        if text))[:MAX_OPTIONS]
     action = payload.get("action") if payload.get("action") in ACTIONS else "query"
+    # Only a clarifying question loses its choice labels; an explanation keeps its own wording and line breaks.
+    if action == "clarify":
+        reply = _question_text(" ".join(OPTION_LABEL.sub("", reply).split()), options)
     incomplete = (action == "decline" and not reply) or (action == "explain" and not reply) or \
         (action == "clarify" and (not reply or len(options) < 2))
     if incomplete and payload["cypher"].strip():

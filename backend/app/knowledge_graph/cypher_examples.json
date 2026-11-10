@@ -234,6 +234,17 @@
       ]
     },
     {
+      "question": "recommend me cheap and expensive japanese chinese restaurant",
+      "action": "clarify",
+      "reply": "Happy to help! Which price range and cuisine would you like first?",
+      "options": [
+        "Cheap Japanese",
+        "Cheap Chinese",
+        "Fine-dining Japanese",
+        "Fine-dining Chinese"
+      ]
+    },
+    {
       "question": "What's the difference between a kopitiam and a mamak?",
       "action": "explain",
       "reply": "A kopitiam is a traditional coffee shop with local drinks, toast and simple meals, often with several food stalls inside. A mamak is an Indian Muslim eatery known for roti canai, nasi kandar and teh tarik, and many stay open late."

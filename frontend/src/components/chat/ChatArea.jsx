@@ -92,6 +92,9 @@ function ChatArea({
                   hasDetails={tabsFor(message).length > 0}
                   isExplanationOpen={explanationTabs.length > 0 && explanationMessageId === message.id}
                   onShowExplanation={() => setExplanationMessageId(message.id)}
+                  quickReplies={message === latestMessage ? message.quickReplies ?? [] : []}
+                  onQuickReply={handleSubmit}
+                  repliesDisabled={isSending || hasPendingQuery}
                 />
               ),
             )}
@@ -112,7 +115,6 @@ function ChatArea({
         {sendError && <p className="chat-send-error" role="alert">{sendError}</p>}
         <ChatInput
           onSendQuery={handleSubmit}
-          quickReplies={latestMessage?.type === "assistant" ? latestMessage.quickReplies : []}
           showSuggestions={showWelcome}
           disabled={isSending || hasPendingQuery}
         />
