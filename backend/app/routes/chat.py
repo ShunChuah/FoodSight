@@ -11,11 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth.backend import current_user
 from ..auth.models import User
-from ..rate_limit import limit_chat
+from ..rate_limit import chat_limiter, limit_chat
+from ..services.insight_generation.tour_script import tour_steps, write_tour_script
 from ..database import get_db
 from ..model import (
     ChatHistory,
@@ -24,6 +26,7 @@ from ..model import (
     ChatMessageGraphJob,
     ChatMessageMap,
     ChatMessageQuickReplies,
+    ChatMessageTour,
     ChatQueryState,
 )
 from ..schemas import (
@@ -38,6 +41,8 @@ from ..schemas import (
     ChatSendResponse,
     DeleteChatResponse,
     GraphEvidenceRead,
+    TourScriptRead,
+    TourScriptRequest,
 )
 from ..services.shared.progress import TurnCancelled, check_cancelled, tracking
 from ..services.chatbot.graph_jobs import graph_status, start_graph_job
@@ -578,6 +583,55 @@ def get_graph_evidence(
         graphStatus=graph_status(message),
         graphData=message.graph_snapshot.data if message.graph_snapshot else None,
     )
+
+
+
+# The Cinematic AI tour's words for one answer, tied to the question. Written by the model the first time Play is
+# pressed and kept, so replays are free. Steps the model can't cover keep the app's own wording.
+@router.post("/{chat_id}/messages/{message_id}/tour", response_model=TourScriptRead)
+def get_tour_script(
+    chat_id: int,
+    message_id: int,
+    payload: TourScriptRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> TourScriptRead:
+    message = db.scalar(
+        select(ChatMessage)
+        .join(ChatHistory)
+        .where(ChatMessage.id == message_id, ChatMessage.chat_id == chat_id, ChatHistory.user_id == user.id,
+               ChatMessage.role == "assistant")
+        .options(selectinload(ChatMessage.map_snapshot))
+    )
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=user_response("interface.chat_not_found"))
+    saved = db.get(ChatMessageTour, message_id)
+    if saved and set(payload.steps) <= set(saved.data.get("requested", [])):
+        return TourScriptRead(steps=saved.data.get("steps", {}), source="saved")
+    # Each new script is one model call, so it counts towards the chat limit.
+    if chat_limiter.hit(f"user:{user.id}"):
+        return TourScriptRead(source="limited")
+
+    steps = tour_steps(message.map_snapshot.data if message.map_snapshot else None, payload.steps)
+    questions = db.scalars(
+        select(ChatMessage.content)
+        .where(ChatMessage.chat_id == chat_id, ChatMessage.role == "user", ChatMessage.id < message_id)
+        .order_by(ChatMessage.id.desc())
+        .limit(3)
+    ).all()[::-1]
+    script = write_tour_script(list(questions), message.content, steps)
+    if not script:
+        return TourScriptRead(source="none")
+    data = {"requested": list(dict.fromkeys(payload.steps)), "steps": script}
+    if saved:
+        saved.data = data
+    else:
+        db.add(ChatMessageTour(message_id=message_id, data=data))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # Another request saved this answer's tour first.
+    return TourScriptRead(steps=script, source="model")
 
 
 @router.patch("/{chat_id}/title", response_model=ChatRead)

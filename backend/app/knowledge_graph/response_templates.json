@@ -25,7 +25,9 @@
     "chat_not_found": "Sorry, I couldn’t find that chat.",
     "turn_not_found": "That answer has already finished.",
     "empty_title": "Please enter a title.",
-    "rate_limited": "You’ve sent a lot of messages in a short time. Please try again in {wait}."
+    "rate_limited": "You’ve sent a lot of messages in a short time. Please try again in {wait}.",
+    "narration_unavailable": "The spoken explanation isn’t available right now.",
+    "narration_limited": "You’ve played a lot of new map tours. Please try again in {wait}."
   },
   "location": {
     "permission": "I can find {venue} near you if you share your location. Is that okay?"

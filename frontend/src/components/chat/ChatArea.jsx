@@ -180,6 +180,8 @@ function ChatArea({
         <AIExplanationPanel
           key={explanationMessageId}
           tabs={explanationTabs}
+          chatId={selectedChat?.id ?? null}
+          messageId={explanationMessageId}
           mapImage={explanationMessage.mapImage}
           mapData={explanationMessage.mapData}
           graphData={explanationMessage.graphData}

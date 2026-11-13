@@ -133,3 +133,39 @@
 .map-toast .map-close { width: 22px; height: 22px; }
 .map-toast .map-close svg { width: 16px; height: 16px; }
 [data-theme="dark"] .map-toast { background: var(--dark-card); border-color: var(--dark-border); color: var(--dark-text); }
+
+/* Cinematic AI tour */
+.cinematic-bar { position: absolute; left: 50%; bottom: 16px; z-index: 7; transform: translateX(-50%); width: min(560px, calc(100% - 80px)); display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 14px; box-shadow: 0 12px 32px rgba(9, 9, 11, 0.18); color: #09090b; animation: cinematic-in 0.25s ease-out; }
+.cinematic-progress { display: flex; gap: 4px; }
+.cinematic-progress i { flex: 1; height: 3px; border-radius: 3px; background: #e4e4e7; overflow: hidden; position: relative; }
+.cinematic-progress i.is-done, .cinematic-progress i.is-current { background: #ff6129; }
+.cinematic-progress i.is-playing::after { content: ""; position: absolute; inset: 0; background: #ff6129; transform-origin: left; animation: cinematic-fill 4.2s linear forwards; }
+.cinematic-body { display: flex; align-items: center; gap: 12px; }
+.cinematic-text { flex: 1; min-width: 0; }
+.cinematic-text strong { display: block; font-size: 14px; font-weight: 700; }
+.cinematic-text p { margin: 2px 0 0; font-size: 13px; line-height: 1.4; color: #52525b; }
+.cinematic-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.cinematic-count { margin-right: 4px; font-size: 12px; color: #71717a; font-variant-numeric: tabular-nums; }
+.cinematic-actions .map-control:disabled { opacity: 0.4; cursor: default; border-color: #e4e4e7; color: #3f3f46; }
+.cinematic-actions .map-control.is-primary { background: #ff6129; border-color: #ff6129; color: #ffffff; }
+.cinematic-actions .map-control.is-primary:hover { background: #e8551f; color: #ffffff; }
+@keyframes cinematic-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes cinematic-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (max-width: 720px) {
+  .cinematic-bar { width: calc(100% - 32px); bottom: 12px; }
+  .cinematic-body { flex-direction: column; align-items: stretch; }
+  .cinematic-actions { justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cinematic-bar { animation: none; }
+  .cinematic-progress i.is-playing::after { animation: none; transform: none; opacity: 0.5; }
+}
+[data-theme="dark"] .cinematic-bar { background: var(--dark-card); border-color: var(--dark-border); color: var(--dark-text); }
+[data-theme="dark"] .cinematic-text p, [data-theme="dark"] .cinematic-count { color: var(--dark-muted); }
+[data-theme="dark"] .cinematic-progress i { background: var(--dark-border); }
+[data-theme="dark"] .cinematic-progress i.is-done, [data-theme="dark"] .cinematic-progress i.is-current { background: #ff6129; }
+/* With the voice on, a step lasts as long as its explanation, so the current bar pulses instead of filling. */
+.cinematic-progress i.is-speaking { background: #ff6129; animation: cinematic-pulse 1.2s ease-in-out infinite; }
+@keyframes cinematic-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .cinematic-progress i.is-speaking { animation: none; } }

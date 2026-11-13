@@ -12,6 +12,7 @@ from .errors import handle_unexpected_errors
 from . import config
 from .auth.routes import router as auth_router
 from .routes.chat import router as chat_router
+from .routes.narration import router as narration_router
 from .routes.preferences import router as preferences_router
 from .services.shared.neo4j import warm_up
 
@@ -39,6 +40,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(narration_router)
 app.include_router(preferences_router)
 
 router = APIRouter(prefix="/api/v1")

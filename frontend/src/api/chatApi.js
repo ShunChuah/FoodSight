@@ -93,6 +93,18 @@ export async function stopChatTurn(turnId) {
   await api.post(`/chats/turns/${turnId}/stop`);
 }
 
+// The map tour's words tied to the question, written by the model once per answer; steps it can't cover are left out.
+export async function fetchTourScript(chatId, messageId, steps) {
+  const response = await api.post(`/chats/${chatId}/messages/${messageId}/tour`, { steps }, { timeout: 35000 });
+  return response.data?.steps ?? {};
+}
+
+// The map tour's spoken line as MP3; the server makes it once and keeps it.
+export async function fetchNarration(text) {
+  const response = await api.post("/narration", { text }, { responseType: "blob", timeout: 25000 });
+  return response.data;
+}
+
 export async function deleteChatHistory(chatId) {
   const response = await api.delete(`/chats/${chatId}`);
   return response.data;

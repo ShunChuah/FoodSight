@@ -17,6 +17,10 @@ import AttributionViewModel from "@arcgis/core/widgets/Attribution/AttributionVi
 import { basemapSpec } from "../../services/mapBasemaps";
 import { RADIUS_COLOR, areaColor, legendEntries, mapOverlays, overlayFacts, overlayGroups, polygonRings } from "../../services/mapOverlays";
 import { mapPlaces } from "../../services/mapPlaces";
+import { SCENE_MS, applyTourScript, cinematicScenes } from "../../services/cinematicScript";
+import { saveVoicePreference, voicePreference } from "../../services/tourVoice";
+import { tourVoice } from "../../services/narrator";
+import { CinematicBar } from "./CinematicBar";
 import { applyMapCommand, initialMapState } from "../../services/mapState";
 import { InfoCard, MapControls, MapCredits } from "./MapControls";
 import { PlaceCard, PlacePanel } from "./MapPlaces";
@@ -33,6 +37,7 @@ const MAX_FIT_ZOOM = 16;
 const CARD_HIDE_DELAY = 250;
 const HIT_TEST_MS = 400;
 const WGS84 = { wkid: 4326 };
+const TOUR_MOVE_MS = 1600;
 
 function createBasemap(spec) {
   if (spec.style) return new Basemap({ style: { id: spec.style } });
@@ -93,14 +98,44 @@ function densityLayer(overlays) {
   });
 }
 
-async function fitToContent(view, layers) {
-  const extents = [layers.markers.source, layers.areas.graphics, layers.radius.graphics].flatMap((graphics) => graphics.toArray())
-    .map((graphic) => graphic.geometry).filter(Boolean)
-    .map((geometry) => geometry.extent ?? new Extent({ xmin: geometry.x, ymin: geometry.y, xmax: geometry.x, ymax: geometry.y, spatialReference: geometry.spatialReference }));
-  if (!extents.length) return;
-  const extent = extents.reduce((all, next) => all.union(next));
-  await view.goTo(extent.width || extent.height ? extent.expand(1.3) : { target: extent.center, zoom: MAX_FIT_ZOOM }, { animate: false }).catch(() => {});
+function graphicsExtent(graphics) {
+  return graphics.map((graphic) => graphic.geometry).filter(Boolean)
+    .map((geometry) => geometry.extent ?? new Extent({ xmin: geometry.x, ymin: geometry.y, xmax: geometry.x, ymax: geometry.y, spatialReference: geometry.spatialReference }))
+    .reduce((all, next) => (all ? all.union(next) : next), null);
+}
+
+async function fitToContent(view, layers, motion = { animate: false }) {
+  const extent = graphicsExtent([layers.markers.source, layers.areas.graphics, layers.radius.graphics].flatMap((graphics) => graphics.toArray()));
+  if (!extent) return;
+  await view.goTo(extent.width || extent.height ? extent.expand(1.3) : { target: extent.center, zoom: MAX_FIT_ZOOM }, motion).catch(() => {});
   if (view.zoom > MAX_FIT_ZOOM) view.zoom = MAX_FIT_ZOOM;
+}
+
+// Where the map goes for a tour scene; null means the whole answer.
+function sceneTarget(layers, focus) {
+  const shapes = (layer, id) => layer.graphics.toArray().filter((graphic) => graphic.geometry?.type === "polygon" && (!id || graphic.attributes?.overlayId === id));
+  const around = (graphics, factor) => {
+    const extent = graphicsExtent(graphics);
+    return extent ? extent.expand(factor) : null;
+  };
+  switch (focus.type) {
+    case "areas": return around(shapes(layers.areas), 1.3);
+    case "area": return around(shapes(layers.areas, focus.id), 1.6);
+    case "radius": {
+      const circle = around(shapes(layers.radius, focus.id), 1.25);
+      const centre = layers.radius.graphics.toArray().find((graphic) => graphic.geometry?.type === "point");
+      return circle ?? (centre ? { target: centre.geometry, zoom: 15 } : null);
+    }
+    case "place": {
+      const marker = layers.markers.source.find((graphic) => graphic.attributes.placeId === focus.id);
+      return marker ? { target: marker.geometry, zoom: 16 } : null;
+    }
+    default: return null;
+  }
+}
+
+function prefersStillMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 }
 
 // A hit test that has not answered within HIT_TEST_MS counts as a miss, so a slow frame never freezes the hover.
@@ -110,7 +145,7 @@ async function hitAt(view, layer, event, key) {
   return hit?.results.find((result) => result.graphic?.attributes?.[key])?.graphic ?? null;
 }
 
-function MapPreview({ mapData, darkMode = false }) {
+function MapPreview({ mapData, darkMode = false, playRequest = 0, script = null }) {
   const container = useRef(null);
   const viewRef = useRef(null);
   const layersRef = useRef(null);
@@ -125,11 +160,17 @@ function MapPreview({ mapData, darkMode = false }) {
   const places = useMemo(() => mapPlaces(mapData), [mapData]);
   const overlays = useMemo(() => mapOverlays(mapData), [mapData]);
   const groups = useMemo(() => overlayGroups(mapData), [mapData]);
+  const scenes = useMemo(() => applyTourScript(cinematicScenes(mapData), script), [mapData, script]);
+  const handledPlay = useRef(playRequest);
+  const [voiceOn, setVoiceOn] = useState(voicePreference);
+  const voiceWorks = tourVoice.isSupported();
   const legend = useMemo(() => [...(places.length ? [{ id: "restaurants", color: MARKER_COLOR, label: "Restaurants" }] : []),
     ...legendEntries(mapData)], [places, mapData]);
   // A failure belongs to the result it happened on; the next result gets a fresh try.
   const error = failure?.places === places ? failure.message : null;
   const hovered = hover && places.find((place) => place.id === hover.id);
+  const scene = state.tour ? scenes[state.tour.scene] : null;
+  const tourPlace = scene?.focus.type === "place" ? scene.focus.id : null;
   const title = overlays.some((overlay) => overlay.properties?.role) ? "Main competitors" : "Places on this map";
 
   useEffect(() => dispatch({ type: "load", mapData }), [mapData]);
@@ -186,6 +227,7 @@ function MapPreview({ mapData, darkMode = false }) {
         requestAnimationFrame(checkHover);
       });
       view.on(["drag", "mouse-wheel"], () => {
+        dispatch({ type: "pause_tour" });
         setHover(null);
         setInfo(null);
       });
@@ -225,13 +267,74 @@ function MapPreview({ mapData, darkMode = false }) {
     if (viewRef.current) viewRef.current.map.basemap = createBasemap(basemapSpec(state.basemap, darkMode, API_KEY));
   }, [state.basemap, darkMode, places, overlays]);
 
+  // A tour scene shows the shape it talks about even when its layer is off, and the markers appear only once
+  // the tour reaches the places.
   useEffect(() => {
     const layers = layersRef.current;
     if (!layers) return;
+    const shown = { radius: scene?.focus.type === "radius", areas: ["area", "areas"].includes(scene?.focus.type) };
     for (const group of ["areas", "radius", "density"]) {
-      if (layers[group]) layers[group].visible = state.visible[group] !== false;
+      if (layers[group]) layers[group].visible = state.visible[group] !== false || Boolean(shown[group]);
     }
-  }, [state.visible, places, overlays]);
+    layers.markers.visible = !scene || scene.places;
+  }, [state.visible, scene, places, overlays]);
+
+  useEffect(() => {
+    if (playRequest === handledPlay.current) return;
+    handledPlay.current = playRequest;
+    setHover(null);
+    setInfo(null);
+    dispatch({ type: "start_tour", scenes: scenes.length });
+  }, [playRequest, scenes]);
+
+  useEffect(() => {
+    const view = viewRef.current;
+    const layers = layersRef.current;
+    if (!scene || !view || !layers) return undefined;
+    const controller = new AbortController();
+    const motion = prefersStillMotion() ? { animate: false } : { duration: TOUR_MOVE_MS, easing: "in-out-cubic", signal: controller.signal };
+    const target = sceneTarget(layers, scene.focus);
+    if (target) view.goTo(target, motion).catch(() => {});
+    else fitToContent(view, layers, motion);
+    return () => controller.abort();
+  }, [scene, places, overlays]);
+
+  // While playing, each scene is explained aloud and the tour moves on when the voice finishes, after the map
+  // has had time to arrive. Muted, or without a browser voice, each scene shows for SCENE_MS.
+  const playingScene = state.tour?.playing ? scene : null;
+  useEffect(() => {
+    if (!playingScene) return undefined;
+    let timer = null;
+    let cancelled = false;
+    const startedAt = Date.now();
+    const next = () => {
+      if (cancelled) return;
+      timer = setTimeout(() => dispatch({ type: "scene_done" }), Math.max(700, TOUR_MOVE_MS + 400 - (Date.now() - startedAt)));
+    };
+    if (!(voiceOn && voiceWorks && tourVoice.speak(playingScene.narration, next))) {
+      timer = setTimeout(() => dispatch({ type: "scene_done" }), SCENE_MS);
+    }
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      tourVoice.stop();
+    };
+  }, [playingScene, voiceOn, voiceWorks]);
+
+  // The next line is fetched while the current one plays, so there is no gap between steps.
+  const tourScene = state.tour?.scene;
+  useEffect(() => {
+    if (tourScene == null || !voiceOn) return;
+    tourVoice.prepare(scenes[tourScene]?.narration);
+    tourVoice.prepare(scenes[tourScene + 1]?.narration);
+  }, [tourScene, voiceOn, scenes]);
+
+  useEffect(() => () => tourVoice.stop(), []);
+
+  const toggleVoice = () => {
+    saveVoicePreference(!voiceOn);
+    setVoiceOn(!voiceOn);
+  };
 
   useEffect(() => {
     if (state.fitRequest && viewRef.current && layersRef.current) fitToContent(viewRef.current, layersRef.current);
@@ -240,20 +343,23 @@ function MapPreview({ mapData, darkMode = false }) {
   useEffect(() => {
     if (!state.expanded) return undefined;
     const close = (event) => {
-      if (event.key === "Escape") dispatch(state.selected ? { type: "close_place" } : { type: "expand_map", expanded: false });
+      if (event.key === "Escape") dispatch(state.tour ? { type: "stop_tour" } : state.selected ? { type: "close_place" } : { type: "expand_map", expanded: false });
     };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
-  }, [state.expanded, state.selected]);
+  }, [state.expanded, state.selected, state.tour]);
 
   useEffect(() => {
     const view = viewRef.current;
     const layers = layersRef.current;
     if (!view || !layers) return;
-    layers.markers.renderer = markerRenderer(state.selected);
     const target = layers.markers.source.find((graphic) => graphic.attributes.placeId === state.selected);
     if (target) view.goTo({ target: target.geometry, zoom: Math.max(view.zoom, 15) }).catch(() => {});
   }, [state.selected, places, overlays]);
+
+  useEffect(() => {
+    if (layersRef.current) layersRef.current.markers.renderer = markerRenderer(tourPlace ?? state.selected);
+  }, [tourPlace, state.selected, places, overlays]);
 
   const zoom = (step) => viewRef.current?.goTo({ zoom: viewRef.current.zoom + step }).catch(() => {});
   // A quick fix first, since most laptops have no GPS and a precise-only request times out; a precise fix
@@ -300,8 +406,13 @@ function MapPreview({ mapData, darkMode = false }) {
       {locateError && <p className="map-toast" role="status">{locateError}
         <button type="button" className="map-close" onClick={() => setLocateError(null)} aria-label="Dismiss"><X aria-hidden="true" /></button></p>}
       {!error && <MapCredits credits={credits} />}
+      {!error && scene && <CinematicBar scene={scene} index={state.tour.scene} total={state.tour.scenes} playing={state.tour.playing}
+        voice={voiceWorks ? voiceOn : null} onVoice={toggleVoice}
+        onToggle={() => dispatch({ type: state.tour.playing ? "pause_tour" : "resume_tour" })}
+        onReplay={() => dispatch({ type: "start_tour", scenes: scenes.length })}
+        onStep={(step) => dispatch({ type: "tour_step", step })} onClose={() => dispatch({ type: "stop_tour" })} />}
     </div>
-    {state.expanded && places.length > 0 && <PlacePanel places={places} selected={state.selected} title={title}
+    {state.expanded && !state.tour && places.length > 0 && <PlacePanel places={places} selected={state.selected} title={title}
       onSelect={(id) => dispatch({ type: "select_place", id })} onBack={() => dispatch({ type: "close_place" })}
       onClose={() => dispatch({ type: "expand_map", expanded: false })} />}
     {mapData?.message && <p className="map-note">{mapData.message}</p>}
