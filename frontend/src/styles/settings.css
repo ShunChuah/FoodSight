@@ -1,0 +1,172 @@
+.settings-dialog {
+  width: min(400px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid #e4e4e7;
+  border-radius: 20px;
+  background: #ffffff;
+  color: #09090b;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2), 0 0 2px rgba(0, 0, 0, 0.12);
+  overflow-y: auto;
+}
+
+.settings-dialog::backdrop {
+  background: rgba(9, 9, 11, 0.35);
+}
+
+.settings-content {
+  padding: 22px 20px 24px;
+}
+
+.settings-content h2 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  line-height: 1.3;
+  font-weight: 700;
+  text-align: center;
+}
+
+.settings-content h2:focus {
+  outline: none;
+}
+
+.settings-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-menu-item {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-menu-item > svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  stroke-width: 2.3;
+}
+
+.settings-password-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.settings-password-icon svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+}
+
+.settings-menu-item:not(:disabled):hover {
+  background: #f4f4f5;
+}
+
+.settings-menu-item:focus-visible {
+  outline: 2px solid #ff6129;
+  outline-offset: 2px;
+}
+
+.settings-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-menu-item.settings-logout {
+  color: #ff3b3b;
+}
+
+.settings-menu-item.settings-logout:hover {
+  background: #fff1f1;
+}
+
+.settings-theme-switch {
+  display: flex;
+  align-items: center;
+  flex: 0 0 52px;
+  height: 28px;
+  margin-left: auto;
+  padding: 4px;
+  border-radius: 999px;
+  background: #e4e4e7;
+  transition: background 0.2s ease;
+}
+
+.settings-menu-item[aria-checked="true"] .settings-theme-switch {
+  background: #5a321f;
+}
+
+.settings-theme-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 0.2s ease;
+}
+
+.settings-menu-item[aria-checked="true"] .settings-theme-thumb {
+  transform: translateX(24px);
+}
+
+.settings-notice,
+.settings-error {
+  margin: 16px 8px 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #344054;
+}
+
+.settings-error {
+  color: #b91c1c;
+}
+
+[data-theme="dark"] .settings-dialog {
+  background: var(--dark-bg);
+  border-color: var(--dark-border);
+  color: var(--dark-text);
+}
+
+[data-theme="dark"] .settings-menu-item:not(:disabled):hover {
+  background: var(--dark-hover);
+}
+
+[data-theme="dark"] .settings-menu-item.settings-logout:hover {
+  background: #543736;
+}
+
+[data-theme="dark"] .settings-notice {
+  color: var(--dark-muted);
+}
+
+[data-theme="dark"] .settings-error {
+  color: #ff7272;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-theme-switch,
+  .settings-theme-thumb {
+    transition: none;
+  }
+}

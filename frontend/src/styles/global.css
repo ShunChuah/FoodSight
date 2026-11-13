@@ -1,0 +1,24 @@
+* {
+  font-family: "Manrope", sans-serif;
+  box-sizing: border-box;
+}
+
+.dashboard-page,
+.page-bg {
+  background: #fafafa url("../assets/background.png") no-repeat center center;
+  background-size: cover;
+}
+
+.dashboard-page[data-theme="dark"],
+.dark .page-bg {
+  background-color: #1f1f1f;
+  background-image: url("../assets/backgroundDarkMode.png");
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Manrope", sans-serif;
+}

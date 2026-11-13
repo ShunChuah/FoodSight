@@ -63,7 +63,7 @@ export default function VerifyEmail() {
 
   return (
     <AuthLayout title="Verify Email">
-      {status === 'checking' && <p className="text-base text-gray-500 dark:text-gray-300">Verifying your email…</p>}
+      {status === 'checking' && <p className="text-[0.875rem] text-gray-500 dark:text-gray-300">Verifying your email…</p>}
       {status === 'verified' && <Alert tone="info">Your email is verified. You can log in now.</Alert>}
       {status === 'expired' && <ResendForm />}
       <FooterNote>

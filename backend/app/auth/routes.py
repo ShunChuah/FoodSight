@@ -19,8 +19,7 @@ router.include_router(
 router.include_router(fastapi_users.get_verify_router(UserRead), prefix="/auth", tags=["auth"])
 
 
-# Written by hand instead of get_reset_password_router: the use case requires telling the
-# user when no account matches the email, which the library deliberately hides.
+# Written by hand: the use case must say when no account matches the email, which fastapi-users hides.
 @router.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED, tags=["auth"])
 async def forgot_password(
     body: ForgotPasswordRequest, request: Request, user_manager=Depends(get_user_manager)

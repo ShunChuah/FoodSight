@@ -1,0 +1,203 @@
+{
+  "version": 1,
+  "description": "Search policies and defaults only. Category meanings, aliases and price tiers are defined in categories.json. Restart the backend after edits. Explicit user constraints take precedence. Schema capabilities and security ceilings remain in code; deployment/model settings remain in .env.",
+  "policy": {
+    "coverage": {
+      "description": "Only records connected through an Area to this City are supported. Search-radius expansion never extends city coverage. Unknown place names are not proof that a place is outside the city. A question that asks to search one of outside_places (\"nasi lemak in Bangsar\") is answered before any LLM call: it says only the city is covered and offers the region's nearby_areas (popular_areas when it has none) as quick replies. nearby_areas and popular_areas must name a graph area: its section code (\"SS 2\") or a place in its brackets (\"Kota Damansara\"). Never list a place the graph has as an area (Bandar Sunway, Taman Sri Subang, Sungai Way, Kelana Jaya), nor one that starts an area's name (\"Taman Desa\" would catch Taman Desa Ria).",
+      "city": "Petaling Jaya",
+      "popular_areas": ["SS 2", "Damansara Utama", "Kota Damansara"],
+      "outside_places": [
+        {
+          "region": "Central and east Kuala Lumpur",
+          "places": ["Kuala Lumpur", "KL", "KLCC", "KL Sentral", "Bukit Bintang", "Jalan Alor", "Chow Kit",
+                     "Petaling Street", "Chinatown", "Pudu", "Kampung Baru", "Masjid India", "Titiwangsa", "Sentul",
+                     "Setapak", "Wangsa Maju", "Cheras", "Ampang", "TRX", "Bukit Nanas"],
+          "nearby_areas": ["Seksyen 17", "PJ Old Town", "SS 2"]
+        },
+        {
+          "region": "West Kuala Lumpur, next to Damansara",
+          "places": ["Mont Kiara", "Sri Hartamas", "Desa Sri Hartamas", "TTDI", "Taman Tun Dr Ismail",
+                     "Damansara Heights", "Bukit Damansara", "Kepong", "Segambut", "Desa ParkCity", "Menjalara"],
+          "nearby_areas": ["Damansara Utama", "Bandar Utama", "Bandar Sri Damansara"]
+        },
+        {
+          "region": "South-west Kuala Lumpur",
+          "places": ["Bangsar", "Bangsar South", "Mid Valley", "Brickfields", "Old Klang Road", "Kuchai Lama",
+                     "Seputeh", "Pantai Dalam", "Kerinchi", "Bukit Jalil", "Sri Petaling"],
+          "nearby_areas": ["PJ Old Town", "Seksyen 14", "Seksyen 17"]
+        },
+        {
+          "region": "Subang Jaya",
+          "places": ["Subang Jaya", "USJ", "SS 12", "SS 13", "SS 14", "SS 15", "SS 16", "SS 17", "SS 18", "SS 19",
+                     "Subang Parade", "Putra Heights"],
+          "nearby_areas": ["Kelana Jaya", "Ara Damansara"]
+        },
+        {
+          "region": "Shah Alam and Klang",
+          "places": ["Shah Alam", "Klang", "Port Klang", "Setia Alam", "Kota Kemuning", "Glenmarie", "Bukit Jelutong"],
+          "nearby_areas": ["Ara Damansara", "Kelana Jaya"]
+        },
+        {
+          "region": "North of Petaling Jaya",
+          "places": ["Sungai Buloh", "Rawang", "Selayang", "Gombak", "Batu Caves", "Kuang"],
+          "nearby_areas": ["Kota Damansara", "PJU 10"]
+        },
+        {
+          "region": "South of Petaling Jaya",
+          "places": ["Puchong", "Bandar Kinrara", "Seri Kembangan", "Serdang", "Cyberjaya", "Putrajaya", "Kajang",
+                     "Bangi", "Balakong", "Semenyih"],
+          "nearby_areas": ["PJS 8", "Taman Medan"]
+        },
+        {
+          "region": "Further away",
+          "places": ["Penang", "George Town", "Georgetown", "Ipoh", "Johor Bahru", "JB", "Johor", "Melaka", "Malacca",
+                     "Seremban", "Port Dickson", "Kuantan", "Genting Highlands", "Genting", "Cameron Highlands",
+                     "Langkawi", "Kota Bharu", "Kuala Terengganu", "Alor Setar", "Kota Kinabalu", "Kuching",
+                     "Singapore", "Bangkok", "Jakarta"]
+        }
+      ]
+    },
+    "alternatives": {
+      "description": "After an empty discovery search, expand only a system-default nearby radius. Explicit food, price, numeric distance, amenities and other requirements remain fixed until the user changes them. Explain every expansion.",
+      "enabled": true,
+      "automatic_radius_steps_meters": [5000, 8000],
+      "maximum_attempts": 3,
+      "time_budget_seconds": 4,
+      "result_limit": 3
+    },
+    "results": {
+      "description": "Explicit counts override defaults, including answer size. Maximum 25 is the code safety ceiling.",
+      "default_limit": 3,
+      "discovery_limit": 5,
+      "maximum_limit": 25
+    },
+    "proximity": {
+      "description": "Straight-line distance over available dataset records. Explicit distance wins, then an explicit mode, then venue/general defaults. A larger radius does not extend dataset coverage.",
+      "modes": {
+        "radius_search": {"terms": ["near me", "nearby", "around me", "around here", "close to me", "current location"]},
+        "nearest_search": {"terms": ["nearest", "closest"], "default_limit": 1},
+        "walking_proxy": {"terms": ["walking distance", "walkable"]},
+        "distance_measurement": {"terms": ["distance from", "distance between", "distance to", "how far"], "requires_radius": false},
+        "delivery_search": {"terms": ["delivery", "delivers near me", "can deliver here"]}
+      },
+      "default_radius_meters": 3000,
+      "venue_radius_meters": {
+        "cafe": 2000,
+        "coffee shop": 2000
+      },
+      "delivery_radius_meters": 5000,
+      "walking_radius_meters": 1000,
+      "minimum_radius_meters": 100,
+      "maximum_radius_meters": 50000
+    },
+    "ranking": {
+      "description": "Rating means highest average_rating; popularity means highest review_count, not visits or sales; price means lowest restaurant avg_meal_price; distance means shortest straight-line distance and requires coordinates. Best/top rated ranks only places with at least rated_minimum_reviews reviews; this default is loosened when nothing matches.",
+      "default_field": "Restaurant.average_rating",
+      "default_direction": "desc",
+      "rated_minimum_reviews": 20,
+      "choices": {
+        "highest rated": "Restaurant.average_rating",
+        "highest rating": "Restaurant.average_rating",
+        "most popular": "Restaurant.review_count",
+        "cheapest": "PriceRange.avg_meal_price",
+        "closest": "Location.distance_m",
+        "nearest": "Location.distance_m",
+        "rating": "Restaurant.average_rating",
+        "price": "PriceRange.avg_meal_price",
+        "distance": "Location.distance_m",
+        "popularity": "Restaurant.review_count"
+      }
+    },
+    "recommendation": {
+      "description": "Ranks discovery results by what the question is after. Categories map words to business_profile.restaurant_type values (related ones are shown only as labelled alternatives); preferences map mood and occasion words to ambiance, target_segment and facility.name values, and opens_by is the latest opening time today that suits a meal. The query model names the intent (category, preferences, budget, ranking); the terms here are the fallback and add what it missed. An explicit ranking re-sorts by that metric. Ratings are Bayesian averages that pull a rating towards the PJ average until a place has prior_reviews reviews. candidate_pool is how many matches are ranked. Weights are percentages; price joins only when the user mentions a budget.",
+      "weights": {"category": 35, "ambiance": 30, "suitability": 15, "rating": 10, "reviews": 10, "price": 20},
+      "max_alternatives": 2,
+      "candidate_pool": 100,
+      "prior_reviews": 50,
+      "ranking_terms": {
+        "popularity": ["most popular", "popular", "famous", "most reviewed"],
+        "rating": ["highest rated", "top rated", "best rated", "highly rated"],
+        "price": ["cheapest"],
+        "distance": ["nearest", "closest"]
+      },
+      "budget_terms": ["cheap", "cheaper", "budget", "affordable", "inexpensive", "murah", "value for money"],
+      "categories": {
+        "cafe": {"terms": ["cafe", "cafes", "café", "cafés", "coffee shop", "coffee shops"],
+                 "types": ["cafe"], "venues": ["cafe"], "related": ["bakery", "dessert_shop", "kopitiam"]},
+        "dessert": {"terms": ["dessert", "desserts", "dessert shop", "dessert shops", "ice cream", "tong sui"],
+                    "types": ["dessert_shop"], "venues": ["ice_cream"], "related": ["bakery", "cafe"]},
+        "bakery": {"terms": ["bakery", "bakeries", "pastry", "pastries", "bread"],
+                   "types": ["bakery"], "venues": ["bakery"], "related": ["cafe", "dessert_shop"]},
+        "kopitiam": {"terms": ["kopitiam", "kopitiams"], "types": ["kopitiam"], "venues": [], "related": ["cafe"]},
+        "mamak": {"terms": ["mamak", "mamaks"], "types": ["mamak"], "venues": [], "related": []},
+        "fine_dining": {"terms": ["fine dining", "fine-dining"], "types": ["fine_dining"], "venues": [],
+                        "related": ["casual_restaurant"]}
+      },
+      "preferences": {
+        "chill": {"terms": ["chill", "chilling", "relax", "relaxing", "hang out", "hangout", "lepak", "cosy", "cozy"],
+                  "ambiance": {"cosy": 1, "quiet": 1, "nature": 0.8, "aesthetic": 0.6, "casual": 0.5},
+                  "segments": ["young_adults", "couples"], "facilities": ["Outdoor Seating"]},
+        "aesthetic": {"terms": ["aesthetic", "instagram", "instagrammable", "pretty", "photogenic", "nice decor"],
+                      "ambiance": {"aesthetic": 1, "themed": 0.8, "scenic_view": 0.8, "modern": 0.6},
+                      "segments": ["young_adults"], "facilities": []},
+        "quiet": {"terms": ["quiet", "calm", "peaceful", "tranquil", "read", "reading", "a book"],
+                  "ambiance": {"quiet": 1, "cosy": 0.6}, "segments": ["solo_diners"], "facilities": []},
+        "nature": {"terms": ["nature", "garden", "greenery", "green", "al fresco", "scenic", "view"],
+                   "ambiance": {"nature": 1, "scenic_view": 1}, "segments": [], "facilities": ["Outdoor Seating"]},
+        "study": {"terms": ["study", "studying", "work from", "working", "laptop", "remote work"],
+                  "ambiance": {"quiet": 1, "cosy": 0.6}, "segments": ["students", "solo_diners"], "facilities": []},
+        "family": {"terms": ["family", "families", "kids", "children", "child-friendly", "kid-friendly"],
+                   "ambiance": {}, "segments": ["families"], "facilities": ["Good for Children", "Kids Menu"]},
+        "romantic": {"terms": ["romantic", "date", "date night", "anniversary"],
+                     "ambiance": {"romantic": 1, "elegant": 0.8, "scenic_view": 0.7, "cosy": 0.6},
+                     "segments": ["couples"], "facilities": ["Dinner"]},
+        "groups": {"terms": ["group", "groups", "gathering", "celebration", "big group"],
+                   "ambiance": {}, "segments": ["large_groups", "young_adults"], "facilities": ["Good for Groups"]},
+        "breakfast": {"terms": ["breakfast"], "ambiance": {}, "segments": [], "facilities": ["Breakfast"],
+                      "opens_by": "10:30"},
+        "brunch": {"terms": ["brunch"], "ambiance": {}, "segments": [], "facilities": ["Brunch"],
+                   "opens_by": "12:00"}
+      }
+    },
+    "meals": {
+      "description": "A diner asking for a meal (lunch, dinner, a meal or a restaurant) wants somewhere that serves one, so places that only sell desserts, drinks or baked goods are left out unless the user asks for one of those kinds. Cafes stay because many serve full meals, but come after other meal places (only_if_needed) so coffee chains do not lead. Breakfast and supper are not listed: bakeries and dessert places can suit them.",
+      "terms": ["lunch", "dinner", "meal", "meals", "restaurant", "restaurants", "makan"],
+      "not_meals": ["dessert_shop", "drinks_shop", "bakery"],
+      "only_if_needed": ["cafe"],
+      "unless_category": ["dessert", "bakery"]
+    },
+    "market_study": {
+      "description": "Where to open an F&B outlet. The query model names the concept (its direct competitors) and the user's objective; the app computes every figure per area and ranks areas on six dimensions, each normalised across the eligible areas. weights are percentages; objectives replace some of them; a dimension with no data for an area is left out of that area's score, never counted as zero. Areas need min_restaurants unless the user names them. An area with no competitors gets at most no_competitor_cap for competition, because demand there is unverified; when the user asks for low competition, competition is judged on share alone and the cap is no_competitor_cap_low_competition. The score is shown only when every compared area has at least show_score_min_confidence of its data. A positioning alternative must score at least alternative_min_score_share of the first choice. For a restaurant concept, places of the not_restaurant_competitors kinds are not direct competitors, even when they carry the cuisine. Nearby kinds come from categories.json nearby_place.kind; customers says who each kind could bring.",
+      "weights": {"market": 25, "competition": 25, "generators": 20, "price": 15, "differentiation": 10, "confidence": 5},
+      "objectives": {
+        "exposure": {"market": 40, "competition": 15},
+        "low_competition": {"market": 10, "competition": 50, "generators": 10},
+        "strongest_market": {"competition": 0, "differentiation": 0, "competitor_strength": 50}
+      },
+      "min_restaurants": 15,
+      "no_competitor_cap": 0.7,
+      "no_competitor_cap_low_competition": 0.9,
+      "rated_minimum_reviews": 50,
+      "sentiment_minimum_reviews": 30,
+      "show_score_min_confidence": 0.6,
+      "max_areas": 3,
+      "alternative_min_score_share": 0.6,
+      "max_competitors": 2000,
+      "not_restaurant_competitors": ["drinks_shop", "dessert_shop", "bakery", "cafe"],
+      "nearby": {
+        "school": {"weight": 1, "customers": "parents and students"},
+        "university": {"weight": 1, "customers": "students and young adults"},
+        "office": {"weight": 1, "customers": "office workers"},
+        "mall": {"weight": 1, "customers": "shoppers and families"},
+        "hospital": {"weight": 0.5, "customers": "visitors and healthcare staff"},
+        "hotel": {"weight": 0.5, "customers": "travellers"},
+        "station": {"weight": 0.5, "customers": "commuters"}
+      },
+      "preference_nearby": {"family": ["mall", "school"], "study": ["university", "school"], "groups": ["office", "mall"]}
+    },
+    "price_matching": {
+      "default_currency": "MYR",
+      "currency_note": "Missing restaurant price currency uses MYR for the current Petaling Jaya dataset. Recorded currencies take precedence. Missing min/max remain unknown, never copied from averages."
+    }
+  }
+}

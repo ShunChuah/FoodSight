@@ -1,0 +1,485 @@
+{
+  "description": "FoodSight domain ontology: every node type and relationship type allowed in the Neo4j knowledge graph, which run_8_graph.py builds from PostgreSQL. The legend explains each key.",
+  "legend": {
+    "table": "The PostgreSQL table (schema public) that a node, or a relationship made from a foreign key, is read from.",
+    "key": "The node's key: its table's primary key. Each label has a uniqueness constraint on it.",
+    "properties": "For a node: the columns copied onto it. For a relationship: the columns of its table, or the answers of its rule, copied onto it (NEAR carries distance_m). Foreign key columns are never copied onto a node: they become relationships.",
+    "required": "Properties that must have a value, as the NOT NULL columns in PostgreSQL. A node missing one is left out, with its relationships, and listed in data/quarantine/graph_invalid.json.",
+    "indexes": "Properties with an ordinary index, for fast lookups by value.",
+    "points": "Point values made from two columns, {name: [latitude column, longitude column]}. Each gets a point index. point.distance(a.pin, b.pin) gives the straight-line metres between two pins.",
+    "list_properties": "Columns that PostgreSQL holds as text separated by a comma and a space (families, students), copied as a list in the same order ([\"families\", \"students\"]).",
+    "derived": "Values worked out in stage 8 instead of copied, {name: how}. The code for each name is in DERIVED in extract_entities.py.",
+    "rebuild": "true: deleted and loaded again on every run, because an old copy could become wrong while its nodes stay. On a node: every node of this label is deleted with all its relationships (Cluster: DBSCAN numbers the clusters again on every run, so IN_CLUSTER and SPANS go with them and need no flag). On a relationship: every relationship of this type is deleted before loading (COMPETES_WITH: it follows the clusters, but links two restaurants, which are never deleted). Everything without the flag is only added or updated (MERGE), never deleted; use --fresh to remove what Postgres no longer has.",
+    "from, to": "A relationship's start and end labels.",
+    "from_column, to_column": "The columns of a relationship's table that hold its start and end node keys.",
+    "rule": "A relationship worked out by a rule instead of a foreign key: the name of its SQL in RULES in extract_relationships.py. It is deleted on every run only with \"rebuild\": true, or when one of its ends is a rebuild node.",
+    "undirected": "true: the relationship has no direction. Each pair is stored once, so query it without an arrow: (a)-[:COMPETES_WITH]-(b).",
+    "fulltext_indexes": "Word-search indexes, {index name: {labels, properties}}: capitals do not matter, a word anywhere in the text matches, and small typos can be allowed. place_names finds a restaurant, section or nearby place from the words a user types: CALL db.index.fulltext.queryNodes('place_names', 'damansara uptown')."
+  },
+  "nodes": {
+    "City": {
+      "table": "city",
+      "key": "city_id",
+      "properties": [
+        "name",
+        "state",
+        "country",
+        "boundary_geojson"
+      ],
+      "required": [
+        "name",
+        "state",
+        "country"
+      ],
+      "indexes": [
+        "name"
+      ]
+    },
+    "Area": {
+      "table": "area",
+      "key": "area_id",
+      "properties": [
+        "name",
+        "type",
+        "population_density",
+        "boundary_geojson"
+      ],
+      "required": [
+        "name",
+        "type"
+      ],
+      "indexes": [
+        "name"
+      ]
+    },
+    "Location": {
+      "table": "location",
+      "key": "location_id",
+      "properties": [
+        "latitude",
+        "longitude",
+        "full_address",
+        "postcode",
+        "street"
+      ],
+      "required": [
+        "latitude",
+        "longitude"
+      ],
+      "indexes": [],
+      "points": {
+        "pin": [
+          "latitude",
+          "longitude"
+        ]
+      }
+    },
+    "Cluster": {
+      "table": "cluster",
+      "key": "cluster_id",
+      "rebuild": true,
+      "properties": [
+        "centroid_lat",
+        "centroid_lon",
+        "restaurant_count",
+        "density_score",
+        "boundary_geojson"
+      ],
+      "required": [
+        "centroid_lat",
+        "centroid_lon",
+        "restaurant_count"
+      ],
+      "indexes": [],
+      "points": {
+        "pin": [
+          "centroid_lat",
+          "centroid_lon"
+        ]
+      }
+    },
+    "Restaurant": {
+      "table": "restaurant",
+      "key": "restaurant_id",
+      "properties": [
+        "osm_id",
+        "osm_type",
+        "name",
+        "amenity_type",
+        "brand",
+        "phone",
+        "website",
+        "business_status",
+        "google_place_id",
+        "google_maps_uri",
+        "google_fetched_at",
+        "editorial_summary",
+        "created_at",
+        "updated_at"
+      ],
+      "required": [
+        "osm_id",
+        "osm_type",
+        "name",
+        "amenity_type",
+        "business_status",
+        "created_at",
+        "updated_at"
+      ],
+      "indexes": [
+        "name",
+        "osm_id"
+      ],
+      "derived": {
+        "counted_as_open": "true when business_status is one of counted_as_open in src/categories.json (OPERATIONAL and UNKNOWN): the restaurant may still be trading. Food clusters and COMPETES_WITH use the same list."
+      }
+    },
+    "Cuisine": {
+      "table": "cuisine",
+      "key": "cuisine_id",
+      "properties": [
+        "name",
+        "origin_country",
+        "category"
+      ],
+      "required": [
+        "name",
+        "category"
+      ],
+      "indexes": [
+        "name"
+      ]
+    },
+    "Facility": {
+      "table": "facility",
+      "key": "facility_id",
+      "properties": [
+        "name",
+        "category"
+      ],
+      "required": [
+        "name",
+        "category"
+      ],
+      "indexes": [
+        "name"
+      ]
+    },
+    "Dish": {
+      "table": "dish",
+      "key": "dish_id",
+      "properties": [
+        "name",
+        "price",
+        "category",
+        "is_signature"
+      ],
+      "required": [
+        "name",
+        "is_signature"
+      ],
+      "indexes": [
+        "name"
+      ]
+    },
+    "PriceRange": {
+      "table": "price_range",
+      "key": "price_range_id",
+      "properties": [
+        "tier",
+        "avg_meal_price"
+      ],
+      "required": [
+        "tier"
+      ],
+      "indexes": [
+        "tier"
+      ]
+    },
+    "BusinessProfile": {
+      "table": "business_profile",
+      "key": "profile_id",
+      "properties": [
+        "halal_status",
+        "target_segment",
+        "service_style",
+        "business_style",
+        "ambiance",
+        "restaurant_type",
+        "evidence_level",
+        "generated_at"
+      ],
+      "required": [
+        "halal_status",
+        "evidence_level",
+        "generated_at"
+      ],
+      "indexes": [
+        "halal_status"
+      ],
+      "list_properties": [
+        "target_segment",
+        "ambiance"
+      ]
+    },
+    "OperatingHours": {
+      "table": "operating_hours",
+      "key": "operating_hours_id",
+      "properties": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "is_24_7"
+      ],
+      "required": [
+        "is_24_7"
+      ],
+      "indexes": []
+    },
+    "Rating": {
+      "table": "rating",
+      "key": "rating_id",
+      "properties": [
+        "rating_score",
+        "total_reviews",
+        "scraped_at"
+      ],
+      "required": [
+        "rating_score",
+        "total_reviews",
+        "scraped_at"
+      ],
+      "indexes": []
+    },
+    "NearbyContext": {
+      "table": "nearby_context",
+      "key": "nearby_context_id",
+      "properties": [
+        "offices_500m",
+        "schools_500m",
+        "universities_1km",
+        "hospitals_1km",
+        "malls_500m",
+        "hotels_500m",
+        "osm_fetched_at"
+      ],
+      "required": [
+        "offices_500m",
+        "schools_500m",
+        "universities_1km",
+        "hospitals_1km",
+        "malls_500m",
+        "hotels_500m",
+        "osm_fetched_at"
+      ],
+      "indexes": []
+    },
+    "NearbyPlace": {
+      "table": "nearby_place",
+      "key": "nearby_place_id",
+      "properties": [
+        "kind",
+        "name",
+        "station_type",
+        "latitude",
+        "longitude",
+        "osm_type",
+        "osm_id",
+        "osm_fetched_at"
+      ],
+      "required": [
+        "kind",
+        "name",
+        "latitude",
+        "longitude",
+        "osm_type",
+        "osm_id",
+        "osm_fetched_at"
+      ],
+      "indexes": [
+        "kind"
+      ],
+      "points": {
+        "pin": [
+          "latitude",
+          "longitude"
+        ]
+      }
+    },
+    "Review": {
+      "table": "review",
+      "key": "review_id",
+      "properties": [
+        "author_name",
+        "text",
+        "individual_rating",
+        "sentiment",
+        "published_at"
+      ],
+      "required": [],
+      "indexes": []
+    }
+  },
+  "relationships": {
+    "LOCATED_IN": {
+      "from": "Restaurant",
+      "to": "Location",
+      "table": "restaurant",
+      "from_column": "restaurant_id",
+      "to_column": "location_id",
+      "description": "Where the restaurant is: its map pin (latitude, longitude) and address. Made from restaurant.location_id."
+    },
+    "IN_AREA": {
+      "from": "Location",
+      "to": "Area",
+      "table": "location",
+      "from_column": "location_id",
+      "to_column": "area_id",
+      "description": "The PJ section (for example SS 2 or PJU 6) that the pin falls inside. Made from location.area_id; a location with no area gets no link. Restaurant to area is two steps: (Restaurant)-[:LOCATED_IN]->(Location)-[:IN_AREA]->(Area)."
+    },
+    "IN_CITY": {
+      "from": "Area",
+      "to": "City",
+      "table": "area",
+      "from_column": "area_id",
+      "to_column": "city_id",
+      "description": "The city the section belongs to (Petaling Jaya). Made from area.city_id."
+    },
+    "IN_CLUSTER": {
+      "from": "Restaurant",
+      "to": "Cluster",
+      "table": "restaurant",
+      "from_column": "restaurant_id",
+      "to_column": "cluster_id",
+      "description": "The food cluster this restaurant belongs to: a place where open restaurants are packed close together (DBSCAN: at least 5 restaurants within 200 m, chained). Made from restaurant.cluster_id, set by run_6_clustering.py. A restaurant in no cluster, or a closed one, has no link. The sections a cluster reaches into are on SPANS."
+    },
+    "SPANS": {
+      "from": "Cluster",
+      "to": "Area",
+      "rule": "spans",
+      "properties": [
+        "restaurant_count"
+      ],
+      "description": "A section the food cluster reaches into, with restaurant_count: how many of the cluster's restaurants are in that section. A cluster can span two or more sections, so it has no single area. Not from a column: worked out by the spans rule in extract_relationships.py from the cluster's restaurants and their locations. Deleted with the Cluster nodes (\"rebuild\") and made again on every run, so it needs no flag of its own."
+    },
+    "SERVES": {
+      "from": "Restaurant",
+      "to": "Cuisine",
+      "table": "restaurant_cuisine",
+      "from_column": "restaurant_id",
+      "to_column": "cuisine_id",
+      "properties": [
+        "rank"
+      ],
+      "description": "A cuisine the restaurant serves, for example Chinese (Malaysia) or Japanese, with rank: 1 for the main cuisine, then 2 and 3 (at most three). Made from the junction table restaurant_cuisine, one row per restaurant and cuisine pair."
+    },
+    "HAS_FACILITY": {
+      "from": "Restaurant",
+      "to": "Facility",
+      "table": "restaurant_facility",
+      "from_column": "restaurant_id",
+      "to_column": "facility_id",
+      "description": "A service or feature the restaurant offers, for example Dine-in, Delivery or Wheelchair Accessible. A restaurant can have several. Made from the junction table restaurant_facility, one row per restaurant and facility pair."
+    },
+    "HAS_HOURS": {
+      "from": "Restaurant",
+      "to": "OperatingHours",
+      "table": "operating_hours",
+      "from_column": "restaurant_id",
+      "to_column": "operating_hours_id",
+      "description": "The restaurant's opening hours for each day of the week. At most one per restaurant. Made from operating_hours.restaurant_id."
+    },
+    "PRICED_AT": {
+      "from": "Restaurant",
+      "to": "PriceRange",
+      "table": "price_range",
+      "from_column": "restaurant_id",
+      "to_column": "price_range_id",
+      "description": "How expensive the restaurant is: the average meal price and its tier (budget, mid, upscale or luxury). At most one per restaurant. Made from price_range.restaurant_id."
+    },
+    "HAS_PROFILE": {
+      "from": "Restaurant",
+      "to": "BusinessProfile",
+      "table": "business_profile",
+      "from_column": "restaurant_id",
+      "to_column": "profile_id",
+      "description": "The AI-written business profile: halal status, target customers, service style, business style, ambiance and restaurant type, with its evidence level (how much the AI had to work with). At most one per restaurant. Made from business_profile.restaurant_id."
+    },
+    "HAS_RATING": {
+      "from": "Restaurant",
+      "to": "Rating",
+      "table": "rating",
+      "from_column": "restaurant_id",
+      "to_column": "rating_id",
+      "description": "The restaurant's Google star rating and total number of reviews, with the time it was collected. At most one per restaurant. Made from rating.restaurant_id."
+    },
+    "HAS_NEARBY": {
+      "from": "Restaurant",
+      "to": "NearbyContext",
+      "table": "nearby_context",
+      "from_column": "restaurant_id",
+      "to_column": "nearby_context_id",
+      "description": "What is around the restaurant, from OpenStreetMap: how many offices, schools, malls and hotels within 500 m, and universities and hospitals within 1 km. At most one per restaurant. Made from nearby_context.restaurant_id. The nearest train station is not on this node: it is NEAREST_STATION."
+    },
+    "NEAR": {
+      "from": "Restaurant",
+      "to": "NearbyPlace",
+      "table": "restaurant_nearby_place",
+      "from_column": "restaurant_id",
+      "to_column": "nearby_place_id",
+      "properties": [
+        "distance_m"
+      ],
+      "description": "An office, school, university, hospital, mall or hotel counted in the restaurant's NearbyContext, with distance_m: the straight-line metres between the two pins. For each kind, a restaurant has as many NEAR relationships as its count. Made from the junction table restaurant_nearby_place."
+    },
+    "NEAREST_STATION": {
+      "from": "Restaurant",
+      "to": "NearbyPlace",
+      "rule": "nearest_station",
+      "properties": [
+        "distance_m"
+      ],
+      "description": "The train station closest to the restaurant, with distance_m: the straight-line metres between the two pins. Every restaurant has one, since stations up to 3 km outside PJ count. The station is a NearbyPlace of kind station, with its station_type (LRT, MRT, KTM, Monorail or Other). Not from a foreign key: the nearest_station rule in extract_relationships.py matches the station name in nearby_context to the station node of that name. A name that matches no station node, or two, gets no link and a warning. Not deleted between runs: nearby_context and the station nodes are written once and never updated, so the link cannot change (a changed station is the incremental update, UC21)."
+    },
+    "HAS_DISH": {
+      "from": "Restaurant",
+      "to": "Dish",
+      "table": "dish",
+      "from_column": "restaurant_id",
+      "to_column": "dish_id",
+      "description": "A dish on the restaurant's menu, with its price and whether it is a signature dish. A restaurant can have many. Made from dish.restaurant_id. Empty until the dish table has data."
+    },
+    "HAS_REVIEW": {
+      "from": "Restaurant",
+      "to": "Review",
+      "table": "review",
+      "from_column": "restaurant_id",
+      "to_column": "review_id",
+      "description": "A single customer review of the restaurant: its text, star rating and sentiment. A restaurant can have many. Made from review.restaurant_id."
+    },
+    "COMPETES_WITH": {
+      "from": "Restaurant",
+      "to": "Restaurant",
+      "rule": "competes_with",
+      "rebuild": true,
+      "undirected": true,
+      "description": "Two restaurants that may still be trading (business_status OPERATIONAL or UNKNOWN) in the same food cluster that share at least one cuisine and have the same price tier. A restaurant in no cluster has no competitors. Not from a column: worked out by the competes_with rule in extract_relationships.py. Deleted and made again on every run (\"rebuild\"), because the clusters are numbered again on every load and a pair that no longer shares a cluster must not stay. Stored once per pair, so query it without a direction: (a)-[:COMPETES_WITH]-(b)."
+    }
+  },
+  "fulltext_indexes": {
+    "place_names": {
+      "labels": [
+        "Restaurant",
+        "Area",
+        "NearbyPlace"
+      ],
+      "properties": [
+        "name"
+      ]
+    }
+  }
+}

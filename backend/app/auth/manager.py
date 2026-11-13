@@ -34,9 +34,8 @@ async def get_access_token_db(session=Depends(get_async_session)):
     yield SQLAlchemyAccessTokenDatabase(session, AccessToken)
 
 
+# The stock client reads the People API, which is disabled by default in a Google Cloud project.
 class GoogleClient(GoogleOAuth2):
-    """The stock client reads the People API, which is disabled by default in a Google Cloud project."""
-
     async def get_id_email(self, token: str) -> tuple[str, str | None]:
         async with self.get_httpx_client() as client:
             response = await client.get(
@@ -107,8 +106,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         if not user.username:
             name = await fetch_google_name(access_token) or account_email.split("@")[0]
             user = await self.user_db.update(user, {"username": name[:150]})
-        # Someone who registered by email but never opened the verification link:
-        # Google has confirmed the same address, so the account counts as verified.
+        # Registered by email but never verified: Google has confirmed the address, so the account is verified.
         if not user.is_verified and kwargs.get("is_verified_by_default"):
             user = await self.user_db.update(user, {"is_verified": True})
         return user

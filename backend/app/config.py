@@ -1,5 +1,10 @@
 import os
 
+from dotenv import load_dotenv
+
+# Settings are read on import, so .env must be loaded first whichever module imports this one.
+load_dotenv()
+
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT") or 5432)
 DB_NAME = os.getenv("DB_NAME", "foodsight")
@@ -15,6 +20,10 @@ SESSION_LIFETIME_SECONDS = 60 * 60
 EMAIL_LINK_LIFETIME_SECONDS = 15 * 60
 COOKIE_NAME = "foodsight_session"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+
+# Chat messages one user may send; 0 turns a limit off.
+CHAT_LIMIT_PER_MINUTE = int(os.getenv("CHAT_LIMIT_PER_MINUTE") or 10)
+CHAT_LIMIT_PER_DAY = int(os.getenv("CHAT_LIMIT_PER_DAY") or 200)
 
 SMTP_HOST = os.getenv("SMTP_HOST") or "smtp.gmail.com"
 SMTP_PORT = int(os.getenv("SMTP_PORT") or 587)

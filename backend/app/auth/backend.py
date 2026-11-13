@@ -17,9 +17,8 @@ COOKIE_SETTINGS = dict(
 )
 
 
+# After a Google login the browser is on the backend URL, so send it back to the frontend.
 class RedirectCookieTransport(CookieTransport):
-    """After a Google login the browser is on the backend URL, so send it back to the frontend."""
-
     async def get_login_response(self, token):
         response = RedirectResponse(f"{config.FRONTEND_URL}/chat", status_code=302)
         return self._set_login_cookie(response, token)

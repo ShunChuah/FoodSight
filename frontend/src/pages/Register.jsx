@@ -37,7 +37,7 @@ export default function Register() {
   if (registeredEmail) {
     return (
       <AuthLayout title="Check your email">
-        <p className="text-base text-gray-500 dark:text-gray-300">
+        <p className="text-[0.875rem] text-gray-500 dark:text-gray-300">
           We sent a verification link to <span className="font-semibold">{registeredEmail}</span>. Open it
           within 15 minutes to activate your account.
         </p>

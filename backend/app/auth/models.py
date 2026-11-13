@@ -6,7 +6,7 @@ from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTa
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
 
-from app.database import Base
+from app.database import AuthBase as Base
 
 # Tables are created by the SQL files in db/migrations/, not by SQLAlchemy.
 USER_FK = "auth.users.user_id"
@@ -31,7 +31,6 @@ class User(SQLAlchemyBaseUserTable[int], Base):
 
     id: Mapped[int] = mapped_column("user_id", Integer, primary_key=True)
     hashed_password: Mapped[str] = mapped_column("password", Text, nullable=False)
-    # Empty only for the instant between a Google sign-up and UserManager.oauth_callback filling it.
     username: Mapped[str] = mapped_column(String(150), nullable=False, default="")
     oauth_accounts: Mapped[list[OAuthAccount]] = relationship("OAuthAccount", lazy="joined")
 

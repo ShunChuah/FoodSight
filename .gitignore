@@ -1,23 +1,36 @@
-# Python bytecode
-__pycache__/
-*.pyc
-*.pyo
+node_modules/
+frontend/node_modules/
+backend/venv/
+backend/.venv/
+.vscode/
+.idea/
 
-# Environment
+frontend/dist/
+dist/
+
 .env
+.env.local
 *.env
+backend/.env
 
 # Data files (raw/cleaned CSVs are generated, not source)
 data/
 
-# IDE
-.vscode/
-.idea/
+# Local graph imports and recovery archives
+neo4j/imports/
+neo4j/backups/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Frontend
-node_modules/
-dist/
+# Testing files (kept locally, never pushed)
+backend/tests/
+backend/scripts/
+backend/requirements-dev.txt
+docs/
+frontend/tests/

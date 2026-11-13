@@ -1,30 +1,42 @@
-import axios from 'axios'
+import axios from "axios";
+
+const chatApi = axios.create({
+  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:8000",
+  withCredentials: true,
+});
+
+export default chatApi;
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
   withCredentials: true,
-})
+});
 
-let onUnauthorized = () => {}
+let onUnauthorized = () => {};
 
 export function setUnauthorizedHandler(handler) {
-  onUnauthorized = handler
+  onUnauthorized = handler;
 }
 
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) onUnauthorized()
-    return Promise.reject(error)
-  },
-)
+export function notifyUnauthorized() {
+  onUnauthorized();
+}
 
-// The backend sends `detail` as either "SOME_CODE" or { code, reason }.
+for (const client of [chatApi, api]) {
+  client.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 401) onUnauthorized();
+      return Promise.reject(error);
+    },
+  );
+}
+
 export function errorCode(error) {
-  const detail = error.response?.data?.detail
-  return typeof detail === 'string' ? detail : detail?.code
+  const detail = error.response?.data?.detail;
+  return typeof detail === "string" ? detail : detail?.code;
 }
 
 export function errorReason(error) {
-  return error.response?.data?.detail?.reason
+  return error.response?.data?.detail?.reason;
 }

@@ -1,0 +1,348 @@
+{
+  "description": "What the chatbot's query model needs on top of ontology.json (the graph's structure) and categories.json (the allowed values). Only what is listed here is shown to the model and may be used in its queries; every other label, property and relationship of ontology.json is left out. A property's vocabulary is the categories.json column <table>.<property>, unless vocabulary names another one. A relationship's description comes from ontology.json unless one is given here. Everything named here must exist in ontology.json, or the backend refuses to start.",
+  "vocabulary_source": "categories.json",
+  "meta": {
+    "domain": "Food and drink outlets in Petaling Jaya (PJ), Selangor, Malaysia. Each Restaurant node is one branch, not a brand.",
+    "currency": "MYR",
+    "timezone": "Asia/Kuala_Lumpur",
+    "missing_means_unknown": "A missing relationship or a null property means UNKNOWN, not 'no'. A restaurant with no HAS_FACILITY link to Delivery may still deliver.",
+    "matching": "Properties with a vocabulary hold its exact values: compare with = or IN. Properties marked match: fuzzy are free text: use toLower(x) CONTAINS toLower($param)."
+  },
+  "nodes": {
+    "City": {
+      "description": "Only one city: Petaling Jaya. Never filter on it.",
+      "properties": {
+        "city_id": {
+          "type": "INTEGER"
+        },
+        "name": {
+          "type": "STRING"
+        }
+      }
+    },
+    "Area": {
+      "description": "One of PJ's official numbered sections. The name is the section code, then familiar places inside it in brackets, e.g. 'PJU 6 (Bandar Utama, Damansara Residensi)'.",
+      "properties": {
+        "area_id": {
+          "type": "INTEGER"
+        },
+        "name": {
+          "type": "STRING",
+          "description": "For a section code, put a regular expression in a parameter and match a.name =~ $area_pattern. Allow an optional space and stop at the number: $area_pattern = '(?i)^SS ?2\\b.*' matches 'SS 2' but not 'SS 21'. For a place name use toLower(a.name) CONTAINS toLower($place).",
+          "match": "fuzzy"
+        }
+      }
+    },
+    "Location": {
+      "description": "Map pin and address of one restaurant.",
+      "properties": {
+        "latitude": {
+          "type": "FLOAT",
+          "description": "WGS84 degrees"
+        },
+        "longitude": {
+          "type": "FLOAT",
+          "description": "WGS84 degrees"
+        },
+        "full_address": {
+          "type": "STRING",
+          "match": "fuzzy"
+        },
+        "postcode": {
+          "type": "STRING",
+          "description": "5 digits, e.g. '47300'. Compare with =."
+        }
+      }
+    },
+    "Restaurant": {
+      "description": "One food or drink outlet.",
+      "properties": {
+        "restaurant_id": {
+          "type": "INTEGER",
+          "description": "Primary key. Always return it."
+        },
+        "name": {
+          "type": "STRING",
+          "match": "fuzzy"
+        },
+        "amenity_type": {
+          "type": "STRING",
+          "description": "Broad OpenStreetMap venue type. For the type a local would say (kopitiam, mamak) use BusinessProfile.restaurant_type."
+        },
+        "brand": {
+          "type": "STRING",
+          "description": "Chain name shared by branches.",
+          "match": "fuzzy"
+        },
+        "phone": {
+          "type": "STRING"
+        },
+        "website": {
+          "type": "STRING"
+        },
+        "business_status": {
+          "type": "STRING",
+          "description": "Google's trading status. For active restaurants filter counted_as_open = true instead; use this only when the user asks about closed or upcoming places. Not the same as open right now."
+        },
+        "counted_as_open": {
+          "type": "BOOLEAN",
+          "description": "true when the restaurant may still be trading (status OPERATIONAL or UNKNOWN). Filter {counted_as_open: true} in every search unless the user asks about closed places."
+        }
+      }
+    },
+    "Cluster": {
+      "description": "A food cluster: a spot where open restaurants are packed close together (at least 5 within 200 m).",
+      "properties": {
+        "restaurant_count": {
+          "type": "INTEGER",
+          "description": "Restaurants in the cluster."
+        }
+      }
+    },
+    "Cuisine": {
+      "description": "A food tradition or main product. A restaurant can serve up to 3, so count DISTINCT restaurants.",
+      "properties": {
+        "name": {
+          "type": "STRING"
+        },
+        "category": {
+          "type": "STRING"
+        }
+      }
+    },
+    "Facility": {
+      "description": "A service or feature the restaurant offers, as reported by Google.",
+      "properties": {
+        "name": {
+          "type": "STRING"
+        },
+        "category": {
+          "type": "STRING"
+        }
+      }
+    },
+    "PriceRange": {
+      "description": "How expensive the restaurant is.",
+      "properties": {
+        "tier": {
+          "type": "STRING"
+        },
+        "avg_meal_price": {
+          "type": "FLOAT",
+          "description": "AI estimate. If the user gives an amount, filter on this, not on tier.",
+          "unit": "MYR per person per meal"
+        }
+      }
+    },
+    "BusinessProfile": {
+      "description": "AI-written profile. Say it is inferred when an answer relies on it.",
+      "properties": {
+        "halal_status": {
+          "type": "STRING",
+          "description": "'unknown' is not 'non-halal'. A halal request filters = 'halal' only."
+        },
+        "target_segment": {
+          "type": "LIST<STRING>",
+          "description": "Up to 3 values, main one first. Filter with 'students' IN bp.target_segment."
+        },
+        "service_style": {
+          "type": "STRING"
+        },
+        "business_style": {
+          "type": "STRING",
+          "description": "Local or international chain. For chains against independents use Restaurant.brand."
+        },
+        "ambiance": {
+          "type": "LIST<STRING>",
+          "description": "Up to 2 values. Filter with 'quiet' IN bp.ambiance."
+        },
+        "restaurant_type": {
+          "type": "STRING",
+          "description": "The kind of place a local would name: use it for kopitiam, mamak, warung, hawker stall or food court."
+        }
+      }
+    },
+    "OperatingHours": {
+      "description": "Opening hours for each day of the week, as text of up to 50 characters.",
+      "properties": {
+        "is_24_7": {
+          "type": "BOOLEAN",
+          "description": "Use this for '24 hours' questions instead of parsing the day text."
+        }
+      }
+    },
+    "Rating": {
+      "description": "Google star rating and review count.",
+      "properties": {
+        "rating_score": {
+          "type": "FLOAT",
+          "range": "1.0-5.0, one decimal place"
+        },
+        "total_reviews": {
+          "type": "INTEGER",
+          "range": "0 or more"
+        }
+      }
+    },
+    "NearbyContext": {
+      "description": "How many places of each kind are near one restaurant. OpenStreetMap maps only some offices, so compare counts between places rather than reading them as totals.",
+      "properties": {
+        "offices_500m": {
+          "type": "INTEGER",
+          "description": "Number of offices within 500 m."
+        },
+        "schools_500m": {
+          "type": "INTEGER",
+          "description": "Number of schools within 500 m."
+        },
+        "universities_1km": {
+          "type": "INTEGER",
+          "description": "Number of universities or colleges within 1 km."
+        },
+        "hospitals_1km": {
+          "type": "INTEGER",
+          "description": "Number of hospitals within 1 km."
+        },
+        "malls_500m": {
+          "type": "INTEGER",
+          "description": "Number of shopping malls within 500 m."
+        },
+        "hotels_500m": {
+          "type": "INTEGER",
+          "description": "Number of hotels within 500 m."
+        }
+      }
+    },
+    "NearbyPlace": {
+      "description": "A school, university, hospital, mall, hotel, office or train station near restaurants, from OpenStreetMap.",
+      "properties": {
+        "kind": {
+          "type": "STRING"
+        },
+        "name": {
+          "type": "STRING",
+          "description": "Match a named place with toLower(np.name) CONTAINS toLower($place).",
+          "match": "fuzzy"
+        },
+        "station_type": {
+          "type": "STRING",
+          "description": "Only for kind 'station'.",
+          "vocabulary": "nearby_context.station_type"
+        }
+      }
+    },
+    "Review": {
+      "description": "One customer review.",
+      "properties": {
+        "text": {
+          "type": "STRING"
+        },
+        "individual_rating": {
+          "type": "INTEGER",
+          "range": "1-5"
+        },
+        "sentiment": {
+          "type": "STRING"
+        },
+        "published_at": {
+          "type": "DATETIME"
+        }
+      }
+    }
+  },
+  "relationships": {
+    "LOCATED_IN": {
+      "cardinality": "exactly 1"
+    },
+    "IN_CLUSTER": {
+      "cardinality": "0 or 1",
+      "description": "The food cluster this restaurant belongs to. A closed restaurant or one in no cluster has none."
+    },
+    "SPANS": {
+      "cardinality": "1 or more",
+      "description": "A section the cluster reaches into, with restaurant_count: how many of its restaurants are in that section."
+    },
+    "IN_AREA": {
+      "cardinality": "0 or 1"
+    },
+    "IN_CITY": {
+      "cardinality": "exactly 1"
+    },
+    "SERVES": {
+      "cardinality": "0 to 3",
+      "description": "A cuisine the restaurant serves, with rank: 1 for the main cuisine, then 2 and 3. Count DISTINCT restaurants when matching several cuisines."
+    },
+    "HAS_FACILITY": {
+      "cardinality": "0 or more"
+    },
+    "HAS_HOURS": {
+      "cardinality": "0 or 1"
+    },
+    "PRICED_AT": {
+      "cardinality": "0 or 1"
+    },
+    "HAS_PROFILE": {
+      "cardinality": "0 or 1",
+      "description": "The AI-written business profile: halal status, target customers, service style, business style, ambiance and restaurant type. At most one per restaurant. Made from business_profile.restaurant_id."
+    },
+    "HAS_RATING": {
+      "cardinality": "0 or 1",
+      "description": "The restaurant's Google star rating and total number of reviews, with the time it was collected. Made from rating.restaurant_id."
+    },
+    "HAS_NEARBY": {
+      "cardinality": "0 or 1",
+      "description": "The counts of places near the restaurant (NearbyContext)."
+    },
+    "NEAR": {
+      "cardinality": "0 or more",
+      "description": "An office, school, university, hospital, mall or hotel counted near the restaurant, with distance_m: straight-line metres between the two pins."
+    },
+    "NEAREST_STATION": {
+      "cardinality": "exactly 1",
+      "description": "The train station closest to the restaurant, with distance_m. The station is a NearbyPlace of kind 'station'."
+    },
+    "HAS_REVIEW": {
+      "cardinality": "0 or more"
+    },
+    "COMPETES_WITH": {
+      "cardinality": "0 or more",
+      "description": "Two restaurants that may still be trading, in the same food cluster, sharing at least one cuisine and the same price tier. Stored once per pair, so query it without a direction: (a)-[:COMPETES_WITH]-(b)."
+    }
+  },
+  "business_definitions": {
+    "active restaurant": "r.counted_as_open = true",
+    "cafe": "MATCH (r)-[:HAS_PROFILE]->(bp:BusinessProfile) WHERE bp.restaurant_type = 'cafe'",
+    "dessert shop": "MATCH (r)-[:HAS_PROFILE]->(bp:BusinessProfile) WHERE bp.restaurant_type = 'dessert_shop' OR r.amenity_type = 'ice_cream'",
+    "market share": "round(100.0 * restaurants of one kind / all active restaurants in the same area, 1)",
+    "chain / independent": "r.brand IS NOT NULL (an outlet of a brand with branches) / r.brand IS NULL",
+    "near a school, university, hospital, mall, hotel or office": "(r)-[n:NEAR]->(np:NearbyPlace {kind: '...'}) with n.distance_m, or the counts on NearbyContext",
+    "food hub or food cluster": "(c:Cluster) ranked by c.restaurant_count; (c)-[:SPANS]->(a:Area) gives the sections it reaches"
+  },
+  "query_expansions": {
+    "Chinese": {
+      "property": "Cuisine.name",
+      "any_of": [
+        "Chinese (Malaysia)",
+        "Chinese (China)",
+        "Chinese (Hong Kong)",
+        "Chinese (Taiwan)"
+      ]
+    },
+    "Western": {
+      "property": "Cuisine.category",
+      "any_of": [
+        "Western"
+      ]
+    }
+  },
+  "cypher_rules": [
+    "Read-only. Use only MATCH, OPTIONAL MATCH, WITH, WHERE, UNWIND, RETURN, ORDER BY, LIMIT.",
+    "Use only the labels, relationship types and properties defined above, in the direction shown.",
+    "Use only vocabulary values in filters. Map the user's words to them with the Covers lists provided.",
+    "Use MATCH for what the user filters on and OPTIONAL MATCH for anything you only display.",
+    "Use count(DISTINCT r) whenever a restaurant can match through several nodes.",
+    "AND binds tighter than OR: bracket the alternatives, WHERE (a OR b) AND c.",
+    "Halal, dietary and accessibility requirements are exact: never swap in a similar value.",
+    "If the question needs data that is not here (for example foot traffic, how busy a place is, sales or rent), use action decline."
+  ]
+}

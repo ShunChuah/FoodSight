@@ -1,0 +1,169 @@
+import { Check, Pause, Play, Sparkles, Volume2 } from "lucide-react";
+import { parseAnswer } from "../../services/answerPresentation";
+import useAnswerSpeech from "../../hooks/useAnswerSpeech";
+import "../../styles/chat.css";
+
+function formatInlineText(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g);
+
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      const value = part.slice(2, -2);
+      const isPrice = /^(?:RM|[A-Z]{3}\s)\d+(?:\.\d+)?(?:[-–]\d+(?:\.\d+)?)?$/.test(value);
+      return (
+        <strong className={isPrice ? "ai-response-price" : undefined} key={`${part}-${index}`}>
+          {value}
+        </strong>
+      );
+    }
+    if (part.length > 2 && part.startsWith("*") && part.endsWith("*")) {
+      return <em key={`${part}-${index}`}>{part.slice(1, -1)}</em>;
+    }
+    return part;
+  });
+}
+
+function FormattedAnswer({ answer }) {
+  const blocks = parseAnswer(answer);
+
+  return (
+    <div className="ai-response-content">
+      {blocks.map((block, index) => {
+        if (block.type === "table") {
+          return (
+            <div className="ai-response-table-wrap" key={`table-${index}`}>
+              <table className="ai-response-table">
+                <thead>
+                  <tr>
+                    {block.header.map((cell, cellIndex) => (
+                      <th key={cellIndex} style={{ textAlign: block.align[cellIndex] || "left" }}>
+                        {formatInlineText(cell)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {row.map((cell, cellIndex) => (
+                        <td key={cellIndex} style={{ textAlign: block.align[cellIndex] || "left" }}>
+                          {formatInlineText(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        if (block.type === "bullets") {
+          return (
+            <ul className="ai-response-list" key={`bullets-${index}`}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{formatInlineText(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+        if (block.type === "list") {
+          return (
+            <ol className="ai-response-list" start={block.start} key={`list-${index}`}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{formatInlineText(item)}</li>
+              ))}
+            </ol>
+          );
+        }
+
+        return (
+          <p className="ai-response-summary" key={`paragraph-${index}`}>
+            {formatInlineText(block.text)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function AIResponseCard({
+  answer,
+  hasDetails = false,
+  onShowExplanation,
+  isExplanationOpen = false,
+  streaming = false,
+  quickReplies = [],
+  onQuickReply,
+  repliesDisabled = false,
+  selectedReply = null,
+}) {
+  const speech = useAnswerSpeech(answer);
+  const isSpeaking = speech.status === "speaking";
+  const isPaused = speech.status === "paused";
+  const speechLabel = isSpeaking ? "Pause Answer" : isPaused ? "Resume Answer" : "Speak Answer";
+  const SpeechIcon = isSpeaking ? Pause : isPaused ? Play : Volume2;
+
+  return (
+    <div className="ai-response-card" aria-busy={streaming}>
+      <FormattedAnswer answer={answer} />
+
+      {!streaming && quickReplies.length > 0 && (
+        <div className={`quick-reply-actions${selectedReply ? " is-answered" : ""}`} role="group"
+          aria-label="Suggested replies">
+          {quickReplies.map((reply) => {
+            const chosen = reply === selectedReply;
+            return (
+              <button
+                className={`quick-reply-button${chosen ? " is-selected" : ""}`}
+                key={reply}
+                type="button"
+                // An answered question keeps its options as a record, so none can be sent again.
+                disabled={repliesDisabled || Boolean(selectedReply)}
+                aria-pressed={selectedReply ? chosen : undefined}
+                onClick={() => onQuickReply && onQuickReply(reply)}
+              >
+                {chosen && <Check size={14} strokeWidth={2.5} aria-hidden="true" />}
+                {reply}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {!streaming && <div className="response-actions">
+        {hasDetails && (
+          <button
+            className="show-explanation-action"
+            type="button"
+            title="View Details"
+            disabled={isExplanationOpen}
+            onClick={() => onShowExplanation && onShowExplanation()}
+          >
+            <Sparkles />
+            <span>View Details</span>
+          </button>
+        )}
+
+        <button
+          className={`speak-action${isSpeaking ? " selected" : ""}`}
+          type="button"
+          title={speech.notice || speechLabel}
+          aria-label={isSpeaking ? "Speak Answer: pause" : isPaused ? "Speak Answer: resume" : "Speak Answer"}
+          aria-describedby={speech.notice ? speech.noticeId : undefined}
+          disabled={speech.disabled}
+          onClick={speech.toggle}
+        >
+          <SpeechIcon aria-hidden="true" />
+          <span>Speak Answer</span>
+        </button>
+      </div>}
+      {speech.notice && (
+        <p className="speech-notice" id={speech.noticeId} role="status">
+          {speech.notice}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default AIResponseCard;
