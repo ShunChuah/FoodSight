@@ -1,5 +1,6 @@
 import { Check, Circle, LoaderCircle } from "lucide-react";
 import { processingSteps } from "../../services/processingSteps";
+import AIResponseSkeleton from "./AIResponseSkeleton";
 import "../../styles/chat.css";
 
 const ICONS = {
@@ -25,6 +26,7 @@ function ProcessingSteps({ stage = null, onStop, stopping = false }) {
           </li>
         ))}
       </ol>
+      <AIResponseSkeleton embedded />
       {onStop && (
         <button type="button" className="processing-stop" onClick={onStop} disabled={stopping}>
           {stopping ? "Stopping…" : "Stop"}
