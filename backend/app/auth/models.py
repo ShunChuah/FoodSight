@@ -33,6 +33,8 @@ class User(SQLAlchemyBaseUserTable[int], Base):
     hashed_password: Mapped[str] = mapped_column("password", Text, nullable=False)
     # Empty only for the instant between a Google sign-up and UserManager.oauth_callback filling it.
     username: Mapped[str] = mapped_column(String(150), nullable=False, default="")
+    # A link to the profile picture; empty means the frontend shows its default image.
+    profile_picture_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     oauth_accounts: Mapped[list[OAuthAccount]] = relationship("OAuthAccount", lazy="joined")
 
 

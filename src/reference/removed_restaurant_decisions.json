@@ -1,0 +1,13 @@
+{
+  "_readme": [
+    "Your decisions about restaurants that are in the database but no longer in OpenStreetMap.",
+    "run_7_loading.py lists the undecided ones in data/review/removed_from_osm.json and applies these on every load.",
+    "Key: the restaurant's osm_id (copy it from data/review/removed_from_osm.json).",
+    "decision: closed = keep it as PERMANENTLY_CLOSED (its history stays; it no longer counts as open);",
+    "          delete = remove it from the database (with its reviews and links) and from the graph;",
+    "          keep   = leave it as it is (OSM deleted it by mistake); it then leaves the review file.",
+    "note: why you decided it (optional, for you).",
+    "Example: \"123456789\": {\"decision\": \"closed\", \"note\": \"Shut; Google says permanently closed\"}"
+  ],
+  "decisions": {}
+}

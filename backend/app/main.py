@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,13 +9,25 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import config
+from app.auth.cleanup import run_token_cleanup
 from app.auth.routes import router as auth_router
 from app.database import engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("foodsight")
 
-app = FastAPI(title="FoodSight API")
+
+@asynccontextmanager
+async def lifespan(app):
+    # Runs beside the app, so a slow database never delays startup.
+    cleanup = asyncio.create_task(run_token_cleanup())
+    yield
+    cleanup.cancel()
+    with suppress(asyncio.CancelledError):
+        await cleanup
+
+
+app = FastAPI(title="FoodSight API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

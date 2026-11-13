@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import avatar from '../assets/avatar.svg'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -28,6 +29,30 @@ function ThemeToggle() {
         />
       </button>
     </div>
+  )
+}
+
+const avatarBox = '-my-2 -mr-2 ml-12 size-[4.125rem] max-w-none'
+
+// The account's profile picture, drawn like the default avatar (a circle with a
+// light grey edge in the same box). No picture, or one that fails to load,
+// shows the default avatar. referrerPolicy: Google's image server can refuse a
+// request that says which page it came from.
+function Avatar({ url }) {
+  const [failed, setFailed] = useState(false)
+  if (!url || failed) {
+    return <img src={avatar} alt="" className={avatarBox} />
+  }
+  return (
+    <span className={`${avatarBox} flex items-center justify-center`}>
+      <img
+        src={url}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="size-[3.1875rem] rounded-full border border-zinc-200 object-cover"
+      />
+    </span>
   )
 }
 
@@ -65,11 +90,8 @@ export default function TopBar() {
         <div className="ml-16">
           <ThemeToggle />
         </div>
-        <img
-          src={avatar}
-          alt=""
-          className="-my-2 -mr-2 ml-12 size-[4.125rem] max-w-none"
-        />
+        {/* key: a new picture link starts fresh, even after an earlier one failed */}
+        <Avatar key={user?.profile_picture_url || 'default'} url={user?.profile_picture_url} />
       </div>
     </header>
   )

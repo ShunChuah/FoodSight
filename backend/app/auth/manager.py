@@ -16,6 +16,7 @@ from app.database import get_async_session
 
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 LINK_MINUTES = config.EMAIL_LINK_LIFETIME_SECONDS // 60
+PICTURE_URL_MAX = 500  # auth.users.profile_picture_url is varchar(500)
 
 PASSWORD_RULES = (
     (r".{8,}", "at least 8 characters"),
@@ -50,16 +51,24 @@ class GoogleClient(GoogleOAuth2):
         return profile["sub"], email
 
 
-async def fetch_google_name(access_token: str) -> str | None:
+async def fetch_google_profile(access_token: str) -> dict:
+    """The Google profile ({"name": ..., "picture": ...}), or {} if Google cannot be reached."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(
                 GOOGLE_USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"}
             )
             response.raise_for_status()
-            return response.json().get("name")
+            return response.json()
     except (httpx.HTTPError, ValueError):
-        return None
+        return {}
+
+
+def picture_url(value) -> str | None:
+    """A profile picture link worth saving: https, and short enough for the column."""
+    if isinstance(value, str) and value.startswith("https://") and len(value) <= PICTURE_URL_MAX:
+        return value
+    return None
 
 
 class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
@@ -101,16 +110,34 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         await session.commit()
 
     async def oauth_callback(self, oauth_name, access_token, account_id, account_email, *args, **kwargs):
+        # First sign-in with this Google account: a new user, or an email account
+        # linking Google for the first time. Later sign-ins find it already linked.
+        first_google_sign_in = await self.user_db.get_by_oauth_account(oauth_name, account_id) is None
         user = await super().oauth_callback(
             oauth_name, access_token, account_id, account_email, *args, **kwargs
         )
-        if not user.username:
-            name = await fetch_google_name(access_token) or account_email.split("@")[0]
-            user = await self.user_db.update(user, {"username": name[:150]})
-        # Someone who registered by email but never opened the verification link:
-        # Google has confirmed the same address, so the account counts as verified.
-        if not user.is_verified and kwargs.get("is_verified_by_default"):
-            user = await self.user_db.update(user, {"is_verified": True})
+        # An email account whose verification link was never opened: whoever registered
+        # it chose its password and name, and may not own this address. Google has now
+        # confirmed the owner, so the owner gets the account with a password nobody
+        # knows (Forgot password sets a real one) and their Google name. Keeping the old
+        # password would let that person into the owner's account.
+        unproven = not user.is_verified and kwargs.get("is_verified_by_default")
+        updates = {}
+        if unproven:
+            updates["hashed_password"] = self.password_helper.hash(self.password_helper.generate())
+            updates["is_verified"] = True
+        if first_google_sign_in or not user.username or unproven:
+            profile = await fetch_google_profile(access_token)
+            if not user.username or unproven:
+                name = profile.get("name") or account_email.split("@")[0]
+                updates["username"] = name[:150]
+            # The Google picture only on the first Google sign-in, and only when the
+            # account has none, so a picture the user chose later is never replaced.
+            picture = picture_url(profile.get("picture"))
+            if first_google_sign_in and picture and not user.profile_picture_url:
+                updates["profile_picture_url"] = picture
+        if updates:
+            user = await self.user_db.update(user, updates)
         return user
 
 

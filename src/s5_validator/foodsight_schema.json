@@ -1,0 +1,769 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://foodsight.my/schemas/pj_final.json",
+  "title": "FoodSight Final Data Schema",
+  "description": "Validates the complete merged + profiled dataset before insertion into PostgreSQL. Mirrors the database rules (types, NOT NULL, number CHECKs, length limits). Allowed values are not listed here: a field marked \"values_from\" takes them from src/reference/categories.json when validate_data.py loads this schema. This is the only place they are checked; the database has no CHECK for any list, so a list can change in categories.json alone.",
+  "type": "object",
+  "required": [
+    "restaurants",
+    "areas",
+    "city"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "city": {
+      "type": "object",
+      "description": "Single city record — Petaling Jaya",
+      "required": [
+        "name",
+        "state",
+        "country"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 150,
+          "minLength": 1
+        },
+        "state": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1
+        },
+        "country": {
+          "type": "string",
+          "maxLength": 100,
+          "minLength": 1
+        },
+        "boundary_geojson": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "areas": {
+      "type": "array",
+      "description": "The official sections of PJ (OSM admin_level 10), named with the familiar places inside them",
+      "items": {
+        "type": "object",
+        "required": [
+          "osm_id",
+          "name",
+          "type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "osm_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "The section's OSM relation ID — maps to area.osm_id (NOT NULL, UNIQUE, migration 021). The loader finds the section by it, so a renamed section keeps its row"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 250,
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "values_from": "area.type"
+          },
+          "boundary_geojson": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "population_density": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "nearby_places": {
+      "type": "array",
+      "description": "Every nearby place (OSM) once: maps to public.nearby_place. Restaurants' nearby_places point to these by osm_type and osm_id.",
+      "items": {
+        "type": "object",
+        "required": [
+          "osm_type",
+          "osm_id",
+          "kind",
+          "name",
+          "latitude",
+          "longitude",
+          "osm_fetched_at"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "osm_type": {
+            "type": "string",
+            "enum": ["node", "way", "relation"]
+          },
+          "osm_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "type": "string",
+            "values_from": "nearby_place.kind",
+            "description": "nearby_place.kind (values from categories.json, checked here only)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "nearby_place.name (NOT NULL, varchar 200)"
+          },
+          "station_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "values_from": "nearby_context.station_type",
+            "description": "Set for stations only (values from categories.json, checked here only)"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "osm_fetched_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "restaurants": {
+      "type": "array",
+      "description": "All F&B establishments with merged + profiled data",
+      "items": {
+        "type": "object",
+        "required": [
+          "osm_id",
+          "osm_type",
+          "name",
+          "amenity_type",
+          "business_status",
+          "latitude",
+          "longitude"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "osm_id": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "description": "OSM unique ID — maps to restaurant.osm_id (UNIQUE)"
+          },
+          "osm_type": {
+            "type": "string",
+            "enum": ["node", "way", "relation"],
+            "description": "The kind of OSM object, as for nearby places — maps to restaurant.osm_type. OSM numbers each kind separately, so osm_id needs it to name one object"
+          },
+          "google_place_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 255
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "description": "restaurant.name (NOT NULL)"
+          },
+          "amenity_type": {
+            "type": "string",
+            "maxLength": 50,
+            "values_from": "restaurant.amenity_type",
+            "description": "restaurant.amenity_type (NOT NULL; values from categories.json, checked here only)"
+          },
+          "brand": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 150
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50
+          },
+          "website": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "business_status": {
+            "type": "string",
+            "values_from": "restaurant.business_status",
+            "description": "restaurant.business_status (NOT NULL; values from categories.json, checked here only). UNKNOWN when there is no Google match"
+          },
+          "latitude": {
+            "type": "number",
+            "minimum": 2.9,
+            "maximum": 3.3,
+            "description": "location.latitude (NOT NULL) — bounded to PJ region"
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": 101.4,
+            "maximum": 101.8,
+            "description": "location.longitude (NOT NULL) — bounded to PJ region"
+          },
+          "full_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500
+          },
+          "postcode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 10,
+            "pattern": "^[0-9]{5}$|^$",
+            "description": "Malaysian 5-digit postcode or empty"
+          },
+          "street": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200,
+            "description": "The road the restaurant is on, e.g. Jalan SS 2/24 — maps to location.street"
+          },
+          "area_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 250,
+            "description": "Which area this restaurant belongs to (FK lookup by name)"
+          },
+          "area_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "values_from": "area.type"
+          },
+          "nearby_context": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Maps to nearby_context table (1:1 with restaurant): OSM places counted around the restaurant's pin and the nearest train station. Null when there is no nearby data.",
+            "additionalProperties": false,
+            "required": [
+              "offices_500m",
+              "schools_500m",
+              "universities_1km",
+              "hospitals_1km",
+              "malls_500m",
+              "hotels_500m",
+              "osm_fetched_at"
+            ],
+            "properties": {
+              "offices_500m": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "schools_500m": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "universities_1km": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "hospitals_1km": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "malls_500m": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "hotels_500m": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "nearest_station": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200,
+                "description": "nearby_context.nearest_station (varchar 200)"
+              },
+              "station_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "values_from": "nearby_context.station_type",
+                "description": "nearby_context.station_type (values from categories.json, checked here only)"
+              },
+              "station_distance_m": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "osm_fetched_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When OSM sent the nearby places (UTC)"
+              }
+            }
+          },
+          "operating_hours": {
+            "type": "object",
+            "description": "Maps to operating_hours table (1:1 with restaurant)",
+            "additionalProperties": false,
+            "properties": {
+              "monday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "tuesday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "wednesday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "thursday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "friday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "saturday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "sunday": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 50
+              },
+              "is_24_7": {
+                "type": "boolean"
+              }
+            }
+          },
+          "cuisine_raw": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Raw OSM cuisine tag (before normalisation)"
+          },
+          "halal_tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Raw OSM diet:halal tag"
+          },
+          "google_types": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Google place types, comma-separated. Profiler input only, not stored"
+          },
+          "google_primary_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Google primaryType, e.g. chinese_restaurant. Profiler input only, not stored"
+          },
+          "google_maps_type_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The label Google Maps shows, e.g. Malaysian restaurant. Profiler input only, not stored"
+          },
+          "google_price_low": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Start of Google's price band per person, RM. Profiler input only, not stored"
+          },
+          "google_price_high": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "End of Google's price band per person, RM; empty for an open top band such as RM100+. Profiler input only, not stored"
+          },
+          "google_price_level": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Google priceLevel, e.g. PRICE_LEVEL_MODERATE. Profiler input only, not stored"
+          },
+          "google_fetched_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When Google sent this restaurant's data (UTC) — restaurant.google_fetched_at and rating.scraped_at"
+          },
+          "editorial_summary": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 1000,
+            "description": "Google's short description of the place — restaurant.editorial_summary (varchar 1000). Empty with no Google match or when Google has none"
+          },
+          "google_maps_uri": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 500,
+            "description": "Link to the Google Maps listing — maps to restaurant.google_maps_uri"
+          },
+          "rating": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Maps to rating table",
+            "additionalProperties": false,
+            "properties": {
+              "rating_score": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 1.0,
+                "maximum": 5.0,
+                "description": "rating.rating_score (CHECK 1.0-5.0)"
+              },
+              "total_reviews": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "rating.total_reviews (CHECK >= 0; NOT NULL in the database, so required with a rating_score by check_rating() in validate_data.py)"
+              }
+            }
+          },
+          "cuisines": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Maps to restaurant_cuisine (one row per cuisine, with its rank) and the cuisine table. check_cuisines() in validate_data.py checks that no name or rank is repeated (PRIMARY KEY and UNIQUE (restaurant_id, rank) in the database)",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "rank"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "values_from": "cuisine.name",
+                  "description": "One of the cuisines in src/reference/categories.json"
+                },
+                "rank": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3,
+                  "description": "restaurant_cuisine.rank: 1 = the most important cuisine"
+                },
+                "origin_country": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 100
+                },
+                "category": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "values_from": "cuisine.category"
+                }
+              }
+            }
+          },
+          "price_range": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Maps to price_range table (1:1 with restaurant)",
+            "additionalProperties": false,
+            "properties": {
+              "tier": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "values_from": "price_range.tier",
+                "description": "price_range.tier (values from categories.json, checked here only)"
+              },
+              "avg_meal_price": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "exclusiveMinimum": 0,
+                "description": "price_range.avg_meal_price (CHECK > 0)"
+              }
+            },
+            "required": [
+              "tier"
+            ]
+          },
+          "business_profile": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Maps to business_profile table (1:1 with restaurant)",
+            "additionalProperties": false,
+            "required": [
+              "halal_status",
+              "evidence_level"
+            ],
+            "properties": {
+              "generated_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time",
+                "description": "When the AI wrote this profile (UTC) — business_profile.generated_at"
+              },
+              "halal_status": {
+                "type": "string",
+                "values_from": "business_profile.halal_status",
+                "description": "business_profile.halal_status (NOT NULL in the database, so required here). Always set to one of the listed values."
+              },
+              "evidence_level": {
+                "type": "string",
+                "values_from": "business_profile.evidence_level",
+                "description": "How much the AI had to work with, set by profile_data.py (not the AI) — business_profile.evidence_level (NOT NULL in the database, so required here)"
+              },
+              "target_segment": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Up to 3 values from business_profile.target_segment, as \"families, students\"; validate_data.py checks each value (the database does not, so the list can change in categories.json alone)"
+              },
+              "restaurant_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100,
+                "values_from": "business_profile.restaurant_type"
+              },
+              "service_style": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100,
+                "values_from": "business_profile.service_style"
+              },
+              "business_style": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100,
+                "values_from": "business_profile.business_style"
+              },
+              "ambiance": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 100,
+                "description": "Up to 2 values from business_profile.ambiance, as \"cosy, modern\"; validate_data.py checks each value"
+              }
+            }
+          },
+          "nearby_places": {
+            "type": "array",
+            "description": "The exact places counted in nearby_context, with their distance: maps to restaurant_nearby_place. validate_data.py also checks that each kind's number of places equals its count.",
+            "items": {
+              "type": "object",
+              "required": [
+                "osm_type",
+                "osm_id",
+                "kind",
+                "distance_m"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "osm_type": {
+                  "type": "string",
+                  "enum": ["node", "way", "relation"]
+                },
+                "osm_id": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "values_from": "nearby_place.kind"
+                },
+                "distance_m": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "restaurant_nearby_place.distance_m: straight-line metres between the two pins"
+                }
+              }
+            }
+          },
+          "facilities": {
+            "type": "array",
+            "description": "Maps to facility + restaurant_facility tables (many-to-many)",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "category"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "values_from": "facility.name",
+                  "description": "facility.name (UNIQUE, NOT NULL; values from categories.json, checked here only)"
+                },
+                "category": {
+                  "type": "string",
+                  "maxLength": 50,
+                  "values_from": "facility.category",
+                  "description": "facility.category (NOT NULL)"
+                }
+              }
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "description": "Maps to review table. Every review of the restaurant's Google place in data/cache/review_cache.json: Google's latest fetch (at most 5) plus older ones it no longer shows, so there is no upper limit (the database has none either)",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "google_review_id"
+              ],
+              "properties": {
+                "google_review_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "description": "Google's ID for the review — review.google_review_id (UNIQUE, NOT NULL in the database, so required here)"
+                },
+                "author_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 200
+                },
+                "text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "individual_rating": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 5,
+                  "description": "review.individual_rating (CHECK 1-5)"
+                },
+                "sentiment": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "values_from": "review.sentiment",
+                  "description": "review.sentiment (values from categories.json, checked here only)"
+                },
+                "published_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

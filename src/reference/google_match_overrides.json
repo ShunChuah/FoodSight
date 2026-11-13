@@ -1,0 +1,10 @@
+{
+  "_readme": [
+    "Hand-checked Google matches. extract_google.py obeys these on every run, before any matching rule.",
+    "Key: the restaurant's osm_id (copy it from data/review/google_match_review.json).",
+    "place_id: the correct Google place ID (google.place_id in the review file), or null when the restaurant has no Google match.",
+    "note: why you decided it (optional, for you).",
+    "Example: \"123456789\": {\"place_id\": \"ChIJ...\", \"note\": \"same shop, checked on Google Maps\"}"
+  ],
+  "overrides": {}
+}

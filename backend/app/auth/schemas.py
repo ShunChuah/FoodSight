@@ -8,6 +8,7 @@ Username = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1,
 
 class UserRead(schemas.BaseUser[int]):
     username: str
+    profile_picture_url: str | None = None
 
 
 class UserCreate(schemas.BaseUserCreate):

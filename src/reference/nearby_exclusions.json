@@ -1,0 +1,30 @@
+{
+  "_readme": [
+    "Hand-checked OpenStreetMap places that are never counted in nearby_context. OSM tags them wrongly (a clinic tagged as a hospital, a toll plaza tagged as a mall) or maps one place more than once (a mall and its wings). clean_osm_nearby.py obeys this list on every run.",
+    "Key: the place's osm_type/osm_id, copied from data/1_raw/osm_nearby_raw.csv (for example node/1730075068).",
+    "kind and name: what the place is in OSM, so the list is easy to read. reason: why it is not counted.",
+    "A place that has been corrected in OpenStreetMap itself can be removed from this list; the cleaner reports entries it no longer finds."
+  ],
+  "exclusions": {
+    "node/1730075068": {"kind": "hospital", "name": "London Children's Clinic", "reason": "a clinic, not a hospital"},
+    "node/13088688113": {"kind": "hospital", "name": "Central Dermatology Specialist Clinic", "reason": "a clinic, not a hospital"},
+    "node/13361282213": {"kind": "hospital", "name": "KIDDO CHILD SPECIALIST CLINIC", "reason": "a clinic, not a hospital"},
+    "node/14203078366": {"kind": "hospital", "name": "Epicare Clinic", "reason": "a clinic, not a hospital"},
+    "node/13123198141": {"kind": "hospital", "name": "Infinite Dental Clinic Ara Damansara", "reason": "a dental clinic, not a hospital"},
+    "node/13366473476": {"kind": "hospital", "name": "Dental Valet", "reason": "a dental clinic, not a hospital"},
+    "node/13361294583": {"kind": "hospital", "name": "Aero Physio Shah Alam", "reason": "a physiotherapy centre, not a hospital"},
+    "node/2707369853": {"kind": "hospital", "name": "Pusat Kesihatan Kampong Melayu Subang", "reason": "a government health clinic, not a hospital"},
+    "node/10939865696": {"kind": "mall", "name": "Plaza Tol Shah Alam", "reason": "a toll plaza, not a mall"},
+    "node/10939878158": {"kind": "mall", "name": "Plaza Tol Bukit Jelutong", "reason": "a toll plaza, not a mall"},
+    "node/11982524618": {"kind": "mall", "name": "Al Azhar Sunnah Mart", "reason": "a shop, not a mall"},
+    "node/11982602148": {"kind": "mall", "name": "Hinode Shop", "reason": "a shop, not a mall"},
+    "node/12039046712": {"kind": "mall", "name": "HappyHome", "reason": "a shop, not a mall"},
+    "node/11982629376": {"kind": "mall", "name": "Designer Stone Gallery", "reason": "a showroom, not a mall"},
+    "way/822253416": {"kind": "mall", "name": "Easyhome Smart Home Life Experience Centre", "reason": "a showroom, not a mall"},
+    "node/12077813169": {"kind": "mall", "name": "Tankquip Resources Sdn Bhd", "reason": "a company, not a mall"},
+    "way/181543130": {"kind": "mall", "name": "1 Utama (Old Wing)", "reason": "a wing of 1 Utama Shopping Centre (relation/11365206), which is counted once"},
+    "relation/13936076": {"kind": "mall", "name": "1 Utama (New Wing)", "reason": "a wing of 1 Utama Shopping Centre (relation/11365206), which is counted once"},
+    "way/464843891": {"kind": "mall", "name": "The Pearl Kuala Lumpur", "reason": "the same complex as Pearl Shopping Gallery (way/464843888), which is counted"},
+    "node/13461845336": {"kind": "university", "name": "Faculty of Art and Social Science", "reason": "a faculty, not a separate university; its campus has no outline in OSM, so the parts rule cannot catch it"}
+  }
+}
