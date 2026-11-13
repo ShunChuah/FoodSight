@@ -160,8 +160,9 @@
       }
     },
     "meals": {
-      "description": "A diner asking for a meal (lunch, dinner, a meal or a restaurant) wants somewhere that serves one, so places that only sell desserts, drinks or baked goods are left out unless the user asks for one of those kinds. Cafes stay because many serve full meals, but come after other meal places (only_if_needed) so coffee chains do not lead. Breakfast and supper are not listed: bakeries and dessert places can suit them.",
-      "terms": ["lunch", "dinner", "meal", "meals", "restaurant", "restaurants", "makan"],
+      "description": "A diner asking for a meal (lunch, dinner, a meal or a restaurant) wants somewhere that serves one, so places that only sell desserts, drinks or baked goods are left out unless the user asks for one of those kinds. Cafes stay because many serve full meals, but come after other meal places (only_if_needed) so coffee chains do not lead. Breakfast and supper are not listed: bakeries and dessert places can suit them. Everyday food words (eat, food, hungry) count too, unless the question also asks for drinks, snacks or sweets (unless_terms). A meal question with no category is still ranked by the Bayesian rating and review count (policy recommendation), so a 5.0 from 2 reviews does not lead.",
+      "terms": ["lunch", "dinner", "meal", "meals", "restaurant", "restaurants", "makan", "eat", "eats", "eating", "food", "foods", "hungry", "lapar"],
+      "unless_terms": ["drink", "drinks", "beverage", "beverages", "boba", "bubble tea", "snack", "snacks", "sweet", "sweets", "dessert", "desserts", "pastry", "pastries"],
       "not_meals": ["dessert_shop", "drinks_shop", "bakery"],
       "only_if_needed": ["cafe"],
       "unless_category": ["dessert", "bakery"]

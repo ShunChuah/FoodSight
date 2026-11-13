@@ -101,12 +101,12 @@ def query_graph(
     wanted = time_asked(user_query, opening_hours.now_local())
     best = _asks_best_rated(user_query, plan)
     intent = recommendation_intent(user_query, plan.intent, plan.cypher) if _discovery(plan) else None
-    rank = bool(intent and intent.active)
+    meal = _meal_only(user_query, plan, intent)
+    rank = bool(intent and (intent.active or meal or _rating_order(plan.cypher)))
     if rank:
         plan = replace(plan, cypher=without_soft_filters(plan.cypher, intent, user_query))
     # An explicit ranking (most popular, cheapest) keeps its order.
     prefer_open = not wanted and not (intent and intent.explicit) and _prefers_open(user_query, plan)
-    meal = _meal_only(user_query, plan, intent)
     widen = bool(wanted or best or prefer_open or rank or meal)
     candidates = candidate_pool() if rank else None
     execution = _run(plan, deadline, more_candidates=widen and returns_restaurants(plan.cypher),
@@ -554,18 +554,33 @@ COMPETITOR_WORDS = re.compile(r"\bcompet\w*|\brivals?\b", re.IGNORECASE)
 RESTAURANT_CONCEPT = re.compile(r"\brestaurants?\b", re.IGNORECASE)
 
 
+# The query's own default order (by rating, or none at all); any other order, such as closing time, is the user's.
+RATING_ORDER = re.compile(r"\bORDER\s+BY\s+(?:coalesce\(\s*)?\w+\.(?:rating_score|average_rating|total_reviews)\b",
+                          re.IGNORECASE)
+
+
+def _rating_order(cypher: str) -> bool:
+    return bool(RATING_ORDER.search(cypher) or not re.search(r"\bORDER\s+BY\b", cypher, re.IGNORECASE))
+
+
+def _term_pattern(terms: list[str]) -> re.Pattern:
+    return re.compile(r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b", re.IGNORECASE)
+
+
 def _meal_words() -> re.Pattern:
-    return re.compile(r"\b(?:" + "|".join(re.escape(term) for term in policy("meals")["terms"]) + r")\b",
-                      re.IGNORECASE)
+    return _term_pattern(policy("meals")["terms"])
 
 
-# Dinner, lunch or a restaurant asks for a meal, so dessert, drinks and bakery places are left out, unless the user
-# asked for one of those kinds (policy "meals").
+# Dinner, lunch, a restaurant or just "something to eat" asks for a meal, so dessert, drinks and bakery places are
+# left out, unless the user asked for one of those kinds (policy "meals").
 def _meal_only(user_query: str, plan: QueryPlan, intent: Any) -> bool:
     settings = policy("meals")
     if plan.business or RESTAURANT_DETAILS_FIELD in plan.requested_fields or not returns_restaurants(plan.cypher):
         return False
     if not _meal_words().search(user_query or ""):
+        return False
+    # "Food and drinks", "a snack to eat" or "something sweet to eat" still want those places.
+    if _term_pattern(settings["unless_terms"]).search(user_query or ""):
         return False
     if intent is not None and intent.category in settings["unless_category"]:
         return False
