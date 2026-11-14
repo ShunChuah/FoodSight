@@ -10,7 +10,7 @@ import AIExplanationPanel from "../explanation/AIExplanationPanel";
 import { sendErrorText, submitChatQuery } from "../../services/submitChatQuery";
 import { detailTabs, isGraphPending } from "../../services/detailsPresentation";
 import { hasMapView } from "../../services/mapPresentation";
-import { repliesFor } from "../../services/quickReplies";
+import { openReplies, repliesFor } from "../../services/quickReplies";
 import { failureText, questionBefore, withoutRetried } from "../../services/failures";
 import "../../styles/chat.css";
 
@@ -163,6 +163,7 @@ function ChatArea({
 
         <ChatInput
           onSendQuery={handleSubmit}
+          quickReplies={showWelcome ? [] : openReplies(messages, pendingQuery)}
           showSuggestions={showWelcome}
           disabled={isSending || hasPendingQuery}
         />

@@ -17,6 +17,7 @@ function pickQuickQueries() {
 
 function ChatInput({
   onSendQuery,
+  quickReplies = [],
   showSuggestions,
   disabled = false,
 }) {
@@ -145,6 +146,18 @@ function ChatInput({
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Open options sit above the input; a picked one stays in the answer card. */}
+      {quickReplies.length > 0 && (
+        <div className="quick-reply-actions is-open" role="group" aria-label="Suggested replies">
+          {quickReplies.map((reply) => (
+            <button className="quick-reply-button" key={reply} type="button" disabled={disabled}
+              onClick={() => onSendQuery(reply)}>
+              {reply}
+            </button>
+          ))}
         </div>
       )}
 

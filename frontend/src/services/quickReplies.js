@@ -6,7 +6,7 @@ export function chosenReply(options, answer) {
   return options.find((option) => normalise(option) === normalise(answer)) ?? null;
 }
 
-// Replies for one assistant message: open on the latest one, kept read-only on earlier ones the user answered.
+// Replies kept in an answer card: only once the user picked one, read-only with the choice marked.
 export function repliesFor(messages, index, pendingQuery = "") {
   const message = messages[index];
   const options = message?.quickReplies ?? [];
@@ -14,6 +14,12 @@ export function repliesFor(messages, index, pendingQuery = "") {
   const next = messages[index + 1];
   const answer = next?.type === "user" ? next.text : index === messages.length - 1 ? pendingQuery : "";
   const selected = chosenReply(options, answer);
-  if (selected) return { options, selected };
-  return index === messages.length - 1 ? { options, selected: null } : { options: [], selected: null };
+  return selected ? { options, selected } : { options: [], selected: null };
+}
+
+// The latest answer's replies while they are still open, shown above the chat input.
+export function openReplies(messages, pendingQuery = "") {
+  const last = messages[messages.length - 1];
+  if (last?.type !== "assistant" || last.failure || !last.quickReplies?.length || pendingQuery.trim()) return [];
+  return last.quickReplies;
 }

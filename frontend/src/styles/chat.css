@@ -752,3 +752,9 @@
 .ai-response-skeleton.is-embedded {
   align-self: stretch;
 }
+
+/* Open replies above the chat input, right-aligned. */
+.quick-reply-actions.is-open {
+  margin: 0 0 10px;
+  justify-content: flex-end;
+}
