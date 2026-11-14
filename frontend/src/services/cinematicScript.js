@@ -175,6 +175,19 @@ export function applyTourScript(scenes, script) {
   });
 }
 
+function firstSentence(text) {
+  // A full stop ends a sentence only before a space or the end, never in "4.6".
+  const found = /^(.*?[.!?])(\s|$)/.exec(text?.trim() ?? "");
+  return found ? found[1] : text;
+}
+
+// The tour's first step keeps one sentence, so it reaches the places quickly.
+export function shortOpening(scenes) {
+  if (!scenes.length) return scenes;
+  const [first, ...rest] = scenes;
+  return [{ ...first, narration: firstSentence(first.narration), caption: firstSentence(first.caption) }, ...rest];
+}
+
 // The tour is worth offering only when it has more to show than the closing view.
 export function hasCinematic(mapData) {
   return cinematicScenes(mapData).length > 1;

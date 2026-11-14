@@ -8,6 +8,8 @@
 .map-controls { position: absolute; top: 10px; z-index: 3; display: flex; flex-direction: column; gap: 6px; }
 .map-controls.is-left { left: 10px; }
 .map-controls.is-right { right: 10px; align-items: flex-end; }
+.map-controls.is-bottom-left { top: auto; bottom: 10px; left: 10px; }
+.map-popover.is-beside { top: auto; right: auto; bottom: 0; left: 40px; max-height: 280px; overflow-y: auto; }
 .map-control-group { display: flex; flex-direction: column; gap: 6px; }
 .map-control { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 8px; color: #3f3f46; cursor: pointer; }
 .map-control svg { width: 16px; height: 16px; }
@@ -42,7 +44,7 @@
 .interactive-map.is-expanded { position: fixed; inset: 0; z-index: 1000; flex-direction: row; gap: 0; padding: 15px;
   background: #fafafa url("../assets/background.png") no-repeat center center; background-size: cover; }
 .interactive-map.is-expanded .map-stage { min-height: 0; }
-.interactive-map.is-expanded .map-note { position: absolute; left: 30px; bottom: 26px; padding: 4px 10px; background: #ffffff; border-radius: 10px; }
+.interactive-map.is-expanded .map-note { position: absolute; left: 70px; bottom: 26px; padding: 4px 10px; background: #ffffff; border-radius: 10px; }
 .map-panel { position: relative; display: flex; flex-direction: column; width: 380px; flex: none; margin-left: 15px; overflow: hidden; background: #ffffff; border: 1px solid #e4e4e7; border-radius: 20px; }
 @media (max-width: 720px) {
   .interactive-map.is-expanded { flex-direction: column; padding: 0; }

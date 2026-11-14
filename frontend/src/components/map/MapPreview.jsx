@@ -17,7 +17,7 @@ import AttributionViewModel from "@arcgis/core/widgets/Attribution/AttributionVi
 import { basemapSpec } from "../../services/mapBasemaps";
 import { RADIUS_COLOR, areaColor, legendEntries, mapOverlays, overlayFacts, overlayGroups, polygonRings } from "../../services/mapOverlays";
 import { mapPlaces } from "../../services/mapPlaces";
-import { SCENE_MS, applyTourScript, cinematicScenes } from "../../services/cinematicScript";
+import { SCENE_MS, applyTourScript, cinematicScenes, shortOpening } from "../../services/cinematicScript";
 import { saveVoicePreference, voicePreference } from "../../services/tourVoice";
 import { tourVoice } from "../../services/narrator";
 import { CinematicBar } from "./CinematicBar";
@@ -160,7 +160,7 @@ function MapPreview({ mapData, darkMode = false, playRequest = 0, script = null 
   const places = useMemo(() => mapPlaces(mapData), [mapData]);
   const overlays = useMemo(() => mapOverlays(mapData), [mapData]);
   const groups = useMemo(() => overlayGroups(mapData), [mapData]);
-  const scenes = useMemo(() => applyTourScript(cinematicScenes(mapData), script), [mapData, script]);
+  const scenes = useMemo(() => shortOpening(applyTourScript(cinematicScenes(mapData), script)), [mapData, script]);
   const handledPlay = useRef(playRequest);
   const [voiceOn, setVoiceOn] = useState(voicePreference);
   const voiceWorks = tourVoice.isSupported();
@@ -171,6 +171,9 @@ function MapPreview({ mapData, darkMode = false, playRequest = 0, script = null 
   const hovered = hover && places.find((place) => place.id === hover.id);
   const scene = state.tour ? scenes[state.tour.scene] : null;
   const tourPlace = scene?.focus.type === "place" ? scene.focus.id : null;
+  // The tour opens each place's details tab; "back" hides it for that place only.
+  const [hiddenTourPlace, setHiddenTourPlace] = useState(null);
+  const tourPanel = Boolean(tourPlace) && hiddenTourPlace !== tourPlace;
   const title = overlays.some((overlay) => overlay.properties?.role) ? "Main competitors" : "Places on this map";
 
   useEffect(() => dispatch({ type: "load", mapData }), [mapData]);
@@ -282,6 +285,7 @@ function MapPreview({ mapData, darkMode = false, playRequest = 0, script = null 
   useEffect(() => {
     if (playRequest === handledPlay.current) return;
     handledPlay.current = playRequest;
+    setHiddenTourPlace(null);
     setHover(null);
     setInfo(null);
     dispatch({ type: "start_tour", scenes: scenes.length });
@@ -412,8 +416,10 @@ function MapPreview({ mapData, darkMode = false, playRequest = 0, script = null 
         onReplay={() => dispatch({ type: "start_tour", scenes: scenes.length })}
         onStep={(step) => dispatch({ type: "tour_step", step })} onClose={() => dispatch({ type: "stop_tour" })} />}
     </div>
-    {state.expanded && !state.tour && places.length > 0 && <PlacePanel places={places} selected={state.selected} title={title}
-      onSelect={(id) => dispatch({ type: "select_place", id })} onBack={() => dispatch({ type: "close_place" })}
+    {state.expanded && (!state.tour || tourPanel) && places.length > 0 && <PlacePanel places={places}
+      selected={state.tour ? tourPlace : state.selected} title={title}
+      onSelect={(id) => dispatch({ type: "select_place", id })}
+      onBack={() => (state.tour ? setHiddenTourPlace(tourPlace) : dispatch({ type: "close_place" }))}
       onClose={() => dispatch({ type: "expand_map", expanded: false })} />}
     {mapData?.message && <p className="map-note">{mapData.message}</p>}
   </div>;
