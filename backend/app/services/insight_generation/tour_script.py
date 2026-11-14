@@ -39,10 +39,10 @@ Rules:
 - title: at most 60 characters. Only a place title starts with "#<rank> <name>", and an area with a rank "#<rank> <area>". Every other title is a short heading without "#", such as "Five quiet cafes matched".
 - Write times in 12-hour form, such as 9 am or 2:45 pm, never 09:00 or 14:45.
 - caption: shown on screen, one or two short sentences, at most 150 characters. RM and km are fine here.
-- narration: read aloud, one to three sentences, at most 60 words. Write words that sound right when spoken: "15 ringgit", "3 kilometres", "400 metres", "number 2". No symbols, markdown, emoji or lists.
+- narration: read aloud, one to three sentences, at most 60 words. The first step opens the tour: one short sentence of at most 15 words, and a caption of one short sentence. Write words that sound right when spoken: "15 ringgit", "3 kilometres", "400 metres", "number 2". No symbols, markdown, emoji or lists.
 - Write complete, friendly sentences without semicolons. Do not start every step the same way.
 - The narrations are read aloud one by one, so keep them even in tone and length: every place narration is two sentences of about 30 to 45 words, saying first what the place is and then why it fits the request. Plain, calm wording, with no exclamation marks and no hype words such as amazing, perfect or must-try.
-- Keep the user's language if the question is not in English."""
+- Write everything in English, whatever language the question is in."""
 
 
 def _feature_steps(map_data: dict) -> dict[str, dict]:

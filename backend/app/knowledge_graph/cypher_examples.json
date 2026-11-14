@@ -11,15 +11,23 @@
     },
     {
       "question": "Cheap food in Damansara Utama",
-      "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:PRICED_AT]->(:PriceRange {tier: 'budget'})\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC\nLIMIT 5",
+      "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
       "parameters": {
         "place": "Damansara Utama"
+      },
+      "intent": {
+        "budget": true,
+        "meal": true
       }
     },
     {
       "question": "One cheap and one expensive place for dinner",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:PRICED_AT]->(p:PriceRange)\nWHERE p.tier IN ['budget', 'luxury']\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH p.tier AS price_tier, r, rt\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nWITH price_tier, collect(r)[0..1] AS picks\nUNWIND picks AS r\nRETURN r.restaurant_id AS restaurant_id, price_tier\nORDER BY price_tier\nLIMIT 2",
-      "parameters": {}
+      "parameters": {},
+      "intent": {
+        "meal": true,
+        "time": "later"
+      }
     },
     {
       "question": "Which areas have the best-rated restaurants?",
@@ -73,6 +81,10 @@
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[n:NEAR]->(np:NearbyPlace {kind: 'mall'})\nWHERE toLower(np.name) CONTAINS toLower($place)\nRETURN r.restaurant_id AS restaurant_id, round(n.distance_m) AS distance_m\nORDER BY distance_m\nLIMIT 5",
       "parameters": {
         "place": "paradigm mall"
+      },
+      "intent": {
+        "meal": true,
+        "time": "later"
       }
     },
     {
@@ -97,17 +109,27 @@
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE a.name =~ $area_pattern\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(rt.rating_score, 0) DESC, coalesce(rt.total_reviews, 0) DESC\nLIMIT 5",
       "parameters": {
         "area_pattern": "(?i)^SS ?2\\b.*"
+      },
+      "intent": {
+        "time": "late"
       }
     },
     {
       "question": "Any halal food near me?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:HAS_PROFILE]->(:BusinessProfile {halal_status: 'halal'})\nMATCH (r)-[:LOCATED_IN]->(l:Location)\nWITH r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                       point({latitude: $latitude, longitude: $longitude})) AS distance_m\nWHERE distance_m <= $default_radius_m\nOPTIONAL MATCH (r)-[:HAS_RATING]->(rt:Rating)\nWITH r, distance_m, coalesce(rt.rating_score, 0) AS score\nORDER BY score DESC, distance_m\nLIMIT 5\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m",
-      "parameters": {}
+      "parameters": {},
+      "intent": {
+        "meal": true
+      }
     },
     {
       "question": "What's the closest mamak?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:HAS_PROFILE]->(:BusinessProfile {restaurant_type: 'mamak'})\nMATCH (r)-[:LOCATED_IN]->(l:Location)\nWITH r, point.distance(point({latitude: l.latitude, longitude: l.longitude}),\n                       point({latitude: $latitude, longitude: $longitude})) AS distance_m\nORDER BY distance_m\nLIMIT 3\nRETURN r.restaurant_id AS restaurant_id, round(distance_m) AS distance_m",
-      "parameters": {}
+      "parameters": {},
+      "intent": {
+        "category": "mamak",
+        "ranking": "distance"
+      }
     },
     {
       "question": "Mixue or Chagee, which one should I go to?",
@@ -124,6 +146,15 @@
       }
     },
     {
+      "question": "Which of these is the cheapest? (a follow-up: the previous answer showed the places with restaurant_id 1001, 1002 and 1003)",
+      "intent": {
+        "answer": "pick_one",
+        "ranking": "price"
+      },
+      "parameters": {},
+      "cypher": "MATCH (r:Restaurant {counted_as_open: true})\nWHERE r.restaurant_id IN [1001, 1002, 1003]\nOPTIONAL MATCH (r)-[:PRICED_AT]->(p:PriceRange)\nRETURN r.restaurant_id AS restaurant_id\nORDER BY coalesce(p.avg_meal_price, 1e9) ASC\nLIMIT 3"
+    },
+    {
       "question": "What do people complain about at cafes?",
       "cypher": "MATCH (r:Restaurant {amenity_type: 'cafe'})-[:HAS_REVIEW]->(v:Review {sentiment: 'negative'})\nRETURN r.name AS restaurant, v.individual_rating AS stars, left(v.text, 300) AS review\nORDER BY v.published_at DESC\nLIMIT 10",
       "parameters": {}
@@ -133,6 +164,10 @@
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:HAS_PROFILE]->(bp:BusinessProfile)\nWHERE bp.restaurant_type = 'cafe'\nMATCH (r)-[:LOCATED_IN]->(:Location)-[:IN_AREA]->(a:Area)\nWHERE toLower(a.name) CONTAINS toLower($place)\nMATCH (r)-[:HAS_RATING]->(rt:Rating)\nWHERE rt.total_reviews >= $default_min_reviews\nRETURN r.restaurant_id AS restaurant_id\nORDER BY rt.rating_score DESC, rt.total_reviews DESC\nLIMIT 5",
       "parameters": {
         "place": "Kota Damansara"
+      },
+      "intent": {
+        "category": "cafe",
+        "ranking": "rating"
       }
     },
     {
@@ -165,19 +200,46 @@
       "question": "Which areas are underserved for Korean food?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:SERVES]->(:Cuisine {name: 'Korean'})\nRETURN DISTINCT r.restaurant_id AS restaurant_id\nLIMIT 5",
       "parameters": {},
-      "intent": {"category": "none", "preferences": [], "budget": false, "location_study": true, "areas": [], "objective": "low_competition", "price_position": "none"}
+      "intent": {
+        "category": "none",
+        "preferences": [],
+        "budget": false,
+        "location_study": true,
+        "areas": [],
+        "objective": "low_competition",
+        "price_position": "none"
+      }
     },
     {
       "question": "Where should I open a new coffee shop in PJ to get more customers?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:HAS_PROFILE]->(bp:BusinessProfile)\nWHERE bp.restaurant_type = 'cafe'\nRETURN DISTINCT r.restaurant_id AS restaurant_id\nLIMIT 5",
       "parameters": {},
-      "intent": {"category": "cafe", "preferences": [], "budget": false, "location_study": true, "areas": [], "objective": "exposure", "price_position": "none"}
+      "intent": {
+        "category": "cafe",
+        "preferences": [],
+        "budget": false,
+        "location_study": true,
+        "areas": [],
+        "objective": "exposure",
+        "price_position": "none"
+      }
     },
     {
       "question": "Is Kota Damansara or SS2 better for a premium Western restaurant?",
       "cypher": "MATCH (r:Restaurant {counted_as_open: true})-[:SERVES]->(:Cuisine {category: 'Western'})\nRETURN DISTINCT r.restaurant_id AS restaurant_id\nLIMIT 5",
       "parameters": {},
-      "intent": {"category": "none", "preferences": [], "budget": false, "location_study": true, "areas": ["Kota Damansara", "SS2"], "objective": "balanced", "price_position": "premium"}
+      "intent": {
+        "category": "none",
+        "preferences": [],
+        "budget": false,
+        "location_study": true,
+        "areas": [
+          "Kota Damansara",
+          "SS2"
+        ],
+        "objective": "balanced",
+        "price_position": "premium"
+      }
     },
     {
       "question": "How many chains vs independent restaurants are there in SS2?",
@@ -241,7 +303,7 @@
     {
       "question": "recommend me cheap but expensive restaurant to have dinner",
       "action": "clarify",
-      "reply": "Sure! Which price range would you like for dinner?",
+      "reply": "Sure! Do you want cheap eats, fine dining or one of each for dinner?",
       "options": [
         "Cheap eats",
         "Fine dining",
@@ -251,7 +313,7 @@
     {
       "question": "recommend me cheap and expensive japanese chinese restaurant",
       "action": "clarify",
-      "reply": "Happy to help! Which price range and cuisine would you like first?",
+      "reply": "Happy to help! Do you mean cheap or fine-dining, and Japanese or Chinese?",
       "options": [
         "Cheap Japanese",
         "Cheap Chinese",

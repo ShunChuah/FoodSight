@@ -23,7 +23,13 @@ def _numbers(text: str) -> list[float]:
 
 # A figure is supported when the prompt holds it, allowing rounding ("about 1,500" for 1,503, "RM36" for RM36.80),
 # but not for small decimals such as ratings (4.9 is not 4.8). Small whole numbers ("three places", "PJU 5") pass.
+# "RM" with no figure ("around RM where available") reads as broken.
+EMPTY_PRICE = re.compile(r"\bRM\b(?!\s*\d)", re.IGNORECASE)
+
+
 def _supported(sentence: str, known: list[float]) -> bool:
+    if EMPTY_PRICE.search(sentence):
+        return False
     return all((value.is_integer() and value <= 12)
                or any(abs(value - figure) <= (max(1.0, 0.02 * figure) if figure >= 10 else 0.05) for figure in known)
                for value in _numbers(sentence))

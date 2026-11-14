@@ -7,8 +7,10 @@ from . import opening_hours
 from ...contracts import QueryPlan, RetrievalResult
 from ..maps.answer_map import answer_map, study_map
 from ..query_generation.coverage import outside_coverage
+from ..query_generation.proximity import default_radius
 from ..query_generation.cypher_generation import (
     CUISINE_NAMES,
+    INTENT_DEFAULTS,
     CypherResult,
     RESTAURANT_DETAILS_FIELD,
     cuisine_labels,
@@ -35,7 +37,7 @@ from .graph_reads import (
 )
 from .market_study import settings as market_settings, study
 from .opening_hours import _yesterday, open_now, time_asked
-from .ranking import candidate_pool, rank_for_intent, recommendation_intent, without_soft_filters
+from .ranking import candidate_pool, price_band, rank_for_intent, recommendation_intent, without_soft_filters
 
 
 # LLM call 1 and the Neo4j query; replies collects the chat title and quick replies.
@@ -49,11 +51,13 @@ def query_graph(
     want_title: bool = False,
     may_clarify: bool = True,
     chat_state: str = "",
+    loosened_plan: QueryPlan | None = None,
 ) -> RetrievalResult:
     replies = replies if replies is not None else {}
     generate = partial(generate_cypher, user_query, conversation_context, location_context, deadline=deadline,
                        chat_state=chat_state)
-    generated = generate(want_title=want_title, may_clarify=may_clarify)
+    # A loosened plan reruns the search without asking the model.
+    generated = CypherResult("success", plan=loosened_plan) if loosened_plan is not None         else generate(want_title=want_title, may_clarify=may_clarify)
     if want_title and generated.chat_title:
         replies["chat_title"] = generated.chat_title
     if generated.status == "clarify" and (not may_clarify or _already_said(user_query, generated.options)):
@@ -90,6 +94,7 @@ def query_graph(
                                failure=None if status == "invalid_query" else _model_failure(generated.status))
 
     plan = generated.plan
+    note_turn(intent={name: value for name, value in plan.intent.items() if value != INTENT_DEFAULTS.get(name)})
     if not execution_enabled():
         return RetrievalResult(status="preview", query_plan=plan)
     progress.report_stage(progress.UNDERSTOOD, question_summary(plan, user_query))
@@ -98,17 +103,21 @@ def query_graph(
         studied = _market_study(plan, generate, user_query, deadline)
         if studied is not None:
             return studied
-    wanted = time_asked(user_query, opening_hours.now_local())
-    best = _asks_best_rated(user_query, plan)
+    wanted = time_asked(plan.intent, opening_hours.now_local())
+    best = _asks_best_rated(plan)
     intent = recommendation_intent(user_query, plan.intent, plan.cypher) if _discovery(plan) else None
-    meal = _meal_only(user_query, plan, intent)
+    meal = _meal_only(plan, intent)
     rank = bool(intent and (intent.active or meal or _rating_order(plan.cypher)))
     if rank:
         plan = replace(plan, cypher=without_soft_filters(plan.cypher, intent, user_query))
     # An explicit ranking (most popular, cheapest) keeps its order.
-    prefer_open = not wanted and not (intent and intent.explicit) and _prefers_open(user_query, plan)
+    prefer_open = not wanted and not (intent and intent.explicit) and _prefers_open(plan)
     widen = bool(wanted or best or prefer_open or rank or meal)
-    candidates = candidate_pool() if rank else None
+    candidates = candidate_pool(intent) if rank else None
+    # A near-me query with no distance limit keeps to the default radius.
+    radius = _missing_radius(plan, user_query)
+    if radius:
+        widen, candidates = True, max(candidates or 0, ALL_MATCHES)
     execution = _run(plan, deadline, more_candidates=widen and returns_restaurants(plan.cypher),
                      pool=candidates)
     if execution.status == "error" and execution.detail:
@@ -129,8 +138,13 @@ def query_graph(
         relaxed = _relax(plan, deadline)
         if relaxed:
             plan, execution, widened = relaxed
+    budget_note = NO_BUDGET_PLACES if loosened_plan is not None else None
 
     rows = [{key: _plain(value) for key, value in row.items()} for row in execution.records]
+    if radius:
+        nearby = [row for row in rows if isinstance(row.get("distance_m"), (int, float)) and row["distance_m"] <= radius]
+        note_turn(radius_added=radius)
+        rows = nearby or rows
     branches = _anchor_question(rows, deadline)
     if branches:
         return _clarification(replies, *branches)
@@ -140,7 +154,8 @@ def query_graph(
         rows = _whole_word_matches(rows, plan)
         if meal:
             rows = _serves_meals(rows)
-        if plan.business and COMPETITOR_WORDS.search(user_query) and RESTAURANT_CONCEPT.search(user_query):
+        # A restaurant concept (intent meal) does not compete with drinks or dessert shops.
+        if plan.business and plan.intent.get("meal") is True:
             rows = _meal_competitors(rows)
         if best:
             rows = _well_reviewed(rows)
@@ -161,6 +176,14 @@ def query_graph(
         rows, dish_message = _dish_matches(rows, plan, user_query, deadline, wanted)
     map_rows = rows
     kg_debug("Cypher rows", rows)
+    if not rows and loosened_plan is None and _wished_budget(plan):
+        # "Cheap" with no price is a wish: with no budget place left, show the most affordable.
+        note_turn(budget_tier_dropped=True)
+        looser = replace(plan, cypher=BUDGET_TIER.sub("true", BUDGET_PATTERN.sub("", plan.cypher)))
+        loosened = query_graph(user_query, conversation_context, location_context, deadline=deadline,
+                               replies=replies, loosened_plan=looser)
+        if loosened.records:
+            return loosened
     if not rows:
         unknown_area = _unknown_area_question(plan, deadline, user_query, conversation_context)
         if unknown_area:
@@ -173,6 +196,10 @@ def query_graph(
                                    message=NO_MATCHES_IN_AREA if plan.business else NO_RESULTS_IN_AREA)
         return RetrievalResult(status="no_results", query_plan=plan, message=NO_RESULTS)
     notes = [_widened_note(widened)] if widened else []
+    if not budget_note and rows and _discovery(plan) and plan.intent.get("budget") is True             and all(price_band(row) > 0 for row in rows):
+        budget_note = NO_BUDGET_PLACES
+    if budget_note:
+        notes.append(budget_note)
     if dish_message:
         notes.append(dish_message)
     missing = _missing_places(rows, named_places(plan.parameters), user_query)
@@ -251,7 +278,7 @@ def question_summary(plan: QueryPlan, user_query: str) -> list[str]:
     words += [_plural(kind) for kind in _quoted(plan.cypher, "restaurant_type")]
     tiers = [TIER_SUMMARY.get(tier, tier) for tier in _quoted(plan.cypher, "tier")]
     words += tiers or (["budget"] if plan.intent.get("budget") is True else [])
-    if time_asked(user_query, opening_hours.now_local()):
+    if time_asked(plan.intent, opening_hours.now_local()):
         words.append("opening hours")
     return progress.summary_words(words)
 OUTCOMES = {"success": "query", "cannot_answer": "decline"}
@@ -261,7 +288,7 @@ OUTCOMES = {"success": "query", "cannot_answer": "decline"}
 def _dish_matches(rows: list[dict[str, Any]], plan: QueryPlan, user_query: str, deadline: float | None,
                   wanted: Any = None) -> tuple[list[dict[str, Any]], str | None]:
     dish = asked_dish(user_query, plan.parameters)
-    if not dish or any(serves_dish(row, dish) for row in rows):
+    if not dish or (rows and all(serves_dish(row, dish) for row in rows)):
         return rows, None
     budget = bool(plan.intent.get("budget")) or plan.intent.get("price_position") == "budget"
     # A wider pool when the places must also be open at the time asked.
@@ -272,9 +299,15 @@ def _dish_matches(rows: list[dict[str, Any]], plan: QueryPlan, user_query: str, 
     if wanted:
         found = [row for row in found
                  if open_now(row.get("hours_today"), wanted, _yesterday(row.get("weekly_hours"), wanted)) is True]
-    found = found[:plan.result_limit]
-    if not found:
-        return rows, None
+    # Places that clearly serve the dish come first; close matches fill the rest.
+    ids = set()
+    confirmed = [row for row in [*rows, *found] if serves_dish(row, dish)
+                 and not (row.get("restaurant_id") in ids or ids.add(row.get("restaurant_id")))]
+    if not confirmed:
+        return (rows, None) if rows else (found[:plan.result_limit], None)
+    close = [row for row in [*rows, *found] if row.get("restaurant_id") not in ids
+             and not ids.add(row.get("restaurant_id"))]
+    found = (confirmed + close)[:plan.result_limit]
     kg_debug("Dish search replaced the results", {"dish": dish, "rows": len(found)})
     if budget and not any(row.get("price_tier") == "budget" for row in found):
         return found, f"I couldn't find a budget {dish} place, so these are the closest matches, cheapest first."
@@ -331,13 +364,13 @@ def _market_study(plan: QueryPlan, generate: Callable[..., CypherResult], user_q
         retry = generate(previous=(plan.cypher, issue))
         if retry.status != "success" or not retry.plan or _competitor_query_issue(retry.plan.cypher):
             return None
-        plan = replace(retry.plan, intent=retry.plan.intent or plan.intent)
+        plan = replace(retry.plan, intent=plan.intent)
     limit = market_settings()["max_competitors"]
     execution = _run(plan, deadline, more_candidates=True, pool=limit)
     if execution.status == "error" and execution.detail:
         retry = generate(previous=(plan.cypher, execution.detail))
         if retry.status == "success" and retry.plan:
-            plan = replace(retry.plan, intent=retry.plan.intent or plan.intent)
+            plan = replace(retry.plan, intent=plan.intent)
             execution = _run(plan, deadline, more_candidates=True, pool=limit)
     note_turn(business=True, cypher=plan.cypher, rows=len(execution.records), study=plan.intent)
     if execution.status != "success":
@@ -359,11 +392,32 @@ def _market_study(plan: QueryPlan, generate: Callable[..., CypherResult], user_q
                            map_result=study_map(areas, competitors, places, timeout_seconds=_query_time(deadline)))
 
 
-BEST_RATED = re.compile(r"\b(?:best|top[- ]rated|highest[- ]rated|best[- ]rated|highly[- ]rated)\b", re.IGNORECASE)
+ALL_MATCHES = 1000
+BUDGET_TIER = re.compile(r"\b\w+\.tier\s*=\s*'budget'|\b\w+\.tier\s+IN\s+\[\s*'budget'\s*\]", re.IGNORECASE)
+BUDGET_PATTERN = re.compile(r"\s*\{\s*tier\s*:\s*'budget'\s*\}")
+NO_BUDGET_PLACES = ("I couldn't find budget-priced places (under RM20) for that, so these are the most affordable ones "
+                    "I found.")
 
 
-def _asks_best_rated(question: str, plan: QueryPlan) -> bool:
-    return bool(BEST_RATED.search(question) and returns_restaurants(plan.cypher)
+# A budget tier the user only wished for (cheap) with no price given.
+def _wished_budget(plan: QueryPlan) -> bool:
+    has_tier = BUDGET_TIER.search(plan.cypher) or BUDGET_PATTERN.search(plan.cypher)
+    own_price = any(isinstance(value, (int, float)) and not isinstance(value, bool) and "price" in name
+                    for name, value in plan.parameters.items())
+    return bool(has_tier and plan.intent.get("budget") is True and not own_price and returns_restaurants(plan.cypher))
+
+
+def _missing_radius(plan: QueryPlan, user_query: str) -> int | None:
+    measures = re.search(r"\$latitude\b", plan.cypher) and re.search(r"\bdistance_m\b", plan.cypher)
+    limited = re.search(r"\bdistance_m\s*<=?", plan.cypher)
+    if not measures or limited or plan.intent.get("ranking") == "distance" or not returns_restaurants(plan.cypher):
+        return None
+    return default_radius(user_query) or policy("proximity")["default_radius_meters"]
+
+
+def _asks_best_rated(plan: QueryPlan) -> bool:
+    asked = plan.intent.get("best") is True or plan.intent.get("ranking") == "rating"
+    return bool(asked and returns_restaurants(plan.cypher)
                 and re.search(r"ORDER\s+BY[^\n]*rating_score", plan.cypher, re.IGNORECASE)
                 and not re.search(r"total_reviews\s*>=?", plan.cypher, re.IGNORECASE))
 
@@ -379,9 +433,12 @@ def _well_reviewed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept or rows
 
 
+# A retry only fixes the query; the first reply's intent is kept.
 def _keep_details(retry: CypherResult, first: CypherResult) -> CypherResult:
     if not retry.plan:
         return retry
+    if first.plan:
+        retry = replace(retry, plan=replace(retry.plan, intent=first.plan.intent))
     if first.plan and first.plan.business and not retry.plan.business:
         retry = replace(retry, plan=replace(retry.plan, business=True))
     if not first.details or retry.details:
@@ -535,23 +592,19 @@ def _open_first(row: dict[str, Any]) -> int:
     return OPEN_FIRST.get(row.get("open_now"), 1)
 
 
-# Ranked places: only those open now move up, and never above an exact match.
-def _open_first_ranked(row: dict[str, Any]) -> tuple[bool, bool]:
-    return bool(row.get("alternative")), row.get("open_now") is not True
+# Open places move up, but never above an exact match or a better fit.
+def _open_first_ranked(row: dict[str, Any]) -> tuple[bool, int, bool]:
+    return bool(row.get("alternative")), -(row.get("fit_tier") or 0), row.get("open_now") is not True
 
 
-PLANNING_WORDS = re.compile(
-    r"\b(?:breakfast|brunch|lunch|dinner|tea ?time|morning|afternoon|evening|tonight|tomorrow|weekends?|later|"
-    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?\b", re.IGNORECASE)
-
-
-def _prefers_open(question: str, plan: QueryPlan) -> bool:
-    return not (PLANNING_WORDS.search(question or "") or RESTAURANT_DETAILS_FIELD in plan.requested_fields
+# Open places go first unless the user plans for later or another day.
+def _prefers_open(plan: QueryPlan) -> bool:
+    planning = plan.intent.get("time") == "later" or plan.intent.get("day", "today") != "today"
+    return not (planning or RESTAURANT_DETAILS_FIELD in plan.requested_fields
                 or len(named_places(plan.parameters)) >= 2)
 
 
 COMPETITOR_WORDS = re.compile(r"\bcompet\w*|\brivals?\b", re.IGNORECASE)
-RESTAURANT_CONCEPT = re.compile(r"\brestaurants?\b", re.IGNORECASE)
 
 
 # The query's own default order (by rating, or none at all); any other order, such as closing time, is the user's.
@@ -563,24 +616,12 @@ def _rating_order(cypher: str) -> bool:
     return bool(RATING_ORDER.search(cypher) or not re.search(r"\bORDER\s+BY\b", cypher, re.IGNORECASE))
 
 
-def _term_pattern(terms: list[str]) -> re.Pattern:
-    return re.compile(r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b", re.IGNORECASE)
-
-
-def _meal_words() -> re.Pattern:
-    return _term_pattern(policy("meals")["terms"])
-
-
-# Dinner, lunch, a restaurant or just "something to eat" asks for a meal, so dessert, drinks and bakery places are
-# left out, unless the user asked for one of those kinds (policy "meals").
-def _meal_only(user_query: str, plan: QueryPlan, intent: Any) -> bool:
+# A meal request leaves out dessert, drink and bakery places (policy "meals").
+def _meal_only(plan: QueryPlan, intent: Any) -> bool:
     settings = policy("meals")
     if plan.business or RESTAURANT_DETAILS_FIELD in plan.requested_fields or not returns_restaurants(plan.cypher):
         return False
-    if not _meal_words().search(user_query or ""):
-        return False
-    # "Food and drinks", "a snack to eat" or "something sweet to eat" still want those places.
-    if _term_pattern(settings["unless_terms"]).search(user_query or ""):
+    if plan.intent.get("meal") is not True:
         return False
     if intent is not None and intent.category in settings["unless_category"]:
         return False
