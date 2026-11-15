@@ -709,3 +709,22 @@
   border-color: var(--dark-border);
   color: var(--dark-text);
 }
+
+/* REGISTER BUSINESS */
+.register-business-action.is-active,
+.register-business-action.is-active:hover {
+  background: #fff3ed;
+  color: #ff6129;
+}
+
+.closed-sidebar-icon-btn.is-active {
+  background: #fef2ed;
+  color: #ff6129;
+}
+
+[data-theme="dark"] .register-business-action.is-active,
+[data-theme="dark"] .register-business-action.is-active:hover,
+[data-theme="dark"] .closed-sidebar-icon-btn.is-active {
+  background: var(--dark-accent-bg);
+  color: #ff6129;
+}

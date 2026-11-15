@@ -1,14 +1,24 @@
-import { Settings, Moon } from "lucide-react";
+import { Settings, Moon, Store } from "lucide-react";
 import { mockUser } from "../../../data/mockUser";
 import defaultProfile from "../../assets/defaultProfile.jpg";
 import "../../styles/sidebar.css";
 
-function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen }) {
+function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen, onRegisterBusiness, registerBusinessActive = false }) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
   return (
     <div className="sidebar-footer">
       <h3>Others</h3>
+
+      <button
+        className={`footer-action-btn setting-footer-action register-business-action${registerBusinessActive ? " is-active" : ""}`}
+        type="button"
+        aria-current={registerBusinessActive ? "page" : undefined}
+        onClick={onRegisterBusiness}
+      >
+        <Store />
+        <span>Register Business</span>
+      </button>
 
       <button
         className="footer-action-btn setting-footer-action"

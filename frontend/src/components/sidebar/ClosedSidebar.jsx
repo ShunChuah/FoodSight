@@ -3,6 +3,7 @@ import {
   SquarePen,
   Search,
   Settings,
+  Store,
 } from "lucide-react";
 import "../../styles/sidebar.css";
 import { mockUser } from "../../../data/mockUser";
@@ -13,6 +14,8 @@ function ClosedSidebar({
   onNewChat,
   onSearchOpen,
   onSettingsOpen,
+  onRegisterBusiness,
+  registerBusinessActive = false,
 }) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
@@ -44,6 +47,17 @@ function ClosedSidebar({
           onClick={onSearchOpen}
         >
           <Search />
+        </button>
+
+        <button
+          className={`closed-sidebar-icon-btn${registerBusinessActive ? " is-active" : ""}`}
+          type="button"
+          title="Register Business"
+          aria-label="Register Business"
+          aria-current={registerBusinessActive ? "page" : undefined}
+          onClick={onRegisterBusiness}
+        >
+          <Store />
         </button>
 
         <button

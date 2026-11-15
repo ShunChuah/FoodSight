@@ -3,6 +3,8 @@ import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
 import Settings from "../components/modals/Settings";
+import RegisterBusiness from "../components/business/RegisterBusiness";
+import { emptyBusinessForm } from "../services/businessForm";
 import { deleteChatBatch } from "../services/deleteChatBatch";
 import { loadShowGraphEvidence, saveShowGraphEvidence } from "../services/detailsPresentation";
 import { pendingGraphs, waitForGraph, withGraphEvidence } from "../services/pendingGraphs";
@@ -37,6 +39,10 @@ function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shouldFocusSearch, setShouldFocusSearch] = useState(false);
+  // "chat" or "register-business". The draft lives here so it survives switching to a chat and back.
+  const [mainView, setMainView] = useState("chat");
+  const [businessForm, setBusinessForm] = useState(emptyBusinessForm);
+  const [businessStep, setBusinessStep] = useState(0);
   const [chats, setChats] = useState([]);
   const [isLoadingChats, setIsLoadingChats] = useState(true);
   const [selectedChatId, setSelectedChatId] = useState(null);
@@ -258,6 +264,12 @@ function DashboardPage() {
 
   const handleNewChat = () => {
     setSelectedChatId(null);
+    setMainView("chat");
+  };
+
+  const handleSelectChat = (chatId) => {
+    setSelectedChatId(chatId);
+    setMainView("chat");
   };
 
   const handleSearchOpen = () => {
@@ -333,7 +345,7 @@ function DashboardPage() {
           chatLoadFailed={chatLoadFailed}
           onRetryChatLoad={handleRetryChatLoad}
           selectedChatId={selectedChatId}
-          setSelectedChatId={setSelectedChatId}
+          setSelectedChatId={handleSelectChat}
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           onNewChat={handleNewChat}
@@ -344,6 +356,8 @@ function DashboardPage() {
           onSearchFocused={handleSearchFocused}
           onCloseSidebar={() => setSidebarOpen(false)}
           onSettingsOpen={() => setSettingsOpen(true)}
+          onRegisterBusiness={() => setMainView("register-business")}
+          registerBusinessActive={mainView === "register-business"}
         />
       ) : (
         <ClosedSidebar
@@ -351,25 +365,37 @@ function DashboardPage() {
           onNewChat={handleNewChat}
           onSearchOpen={handleSearchOpen}
           onSettingsOpen={() => setSettingsOpen(true)}
+          onRegisterBusiness={() => setMainView("register-business")}
+          registerBusinessActive={mainView === "register-business"}
         />
       )}
 
-      <ChatArea
-        key={selectedChat?.id ?? "new-chat"}
-        selectedChat={selectedChat}
-        onPrepareQuery={handlePrepareQuery}
-        onSendQuery={handleSendQuery}
-        isSending={isSending}
-        darkMode={darkMode}
-        showGraphEvidence={showGraphEvidence}
-        pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
-        streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
-        processingStage={selectedOwnsPendingRequest ? processingStage : null}
-        onStopQuery={handleStopQuery}
-        isStopping={isStopping}
-        retryingMessageId={retryingMessageId}
-        onRetryQuery={handleRetryQuery}
-      />
+      {mainView === "register-business" ? (
+        <RegisterBusiness
+          form={businessForm}
+          setForm={setBusinessForm}
+          step={businessStep}
+          setStep={setBusinessStep}
+          darkMode={darkMode}
+        />
+      ) : (
+        <ChatArea
+          key={selectedChat?.id ?? "new-chat"}
+          selectedChat={selectedChat}
+          onPrepareQuery={handlePrepareQuery}
+          onSendQuery={handleSendQuery}
+          isSending={isSending}
+          darkMode={darkMode}
+          showGraphEvidence={showGraphEvidence}
+          pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
+          streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
+          processingStage={selectedOwnsPendingRequest ? processingStage : null}
+          onStopQuery={handleStopQuery}
+          isStopping={isStopping}
+          retryingMessageId={retryingMessageId}
+          onRetryQuery={handleRetryQuery}
+        />
+      )}
 
       {settingsOpen && (
         <Settings
