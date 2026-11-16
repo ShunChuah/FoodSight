@@ -1,4 +1,5 @@
 import asyncio
+from uuid import uuid4
 import json
 import queue
 import threading
@@ -10,11 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from ..auth.backend import current_user
 from ..auth.models import User
-from ..rate_limit import limit_chat
+from ..rate_limit import chat_limiter, limit_chat
+from ..services.insight_generation.tour_script import tour_steps, write_tour_script
 from ..database import get_db
 from ..model import (
     ChatHistory,
@@ -23,6 +26,7 @@ from ..model import (
     ChatMessageGraphJob,
     ChatMessageMap,
     ChatMessageQuickReplies,
+    ChatMessageTour,
     ChatQueryState,
 )
 from ..schemas import (
@@ -37,6 +41,8 @@ from ..schemas import (
     ChatSendResponse,
     DeleteChatResponse,
     GraphEvidenceRead,
+    TourScriptRead,
+    TourScriptRequest,
 )
 from ..services.shared.progress import TurnCancelled, check_cancelled, tracking
 from ..services.chatbot.graph_jobs import graph_status, start_graph_job
@@ -67,6 +73,24 @@ from ..services.shared.messages import response as user_response
 
 # Every route needs a verified user and only sees that user's chats.
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+
+# One streamed turn the user can stop: whichever of its answer and its stop claims it first is saved.
+class ActiveTurn:
+    def __init__(self, user_id: int):
+        self.user_id = user_id
+        self.cancel = threading.Event()
+        self.stopped = threading.Event()
+        self._owner: str | None = None
+        self._lock = threading.Lock()
+
+    def claim(self, who: str) -> bool:
+        with self._lock:
+            self._owner = self._owner or who
+            return self._owner == who
+
+
+ACTIVE_TURNS: dict[str, ActiveTurn] = {}
 STREAM_POLL_SECONDS = 0.5
 TITLE_GENERATED = "title_generated"
 SEARCH_STATE = "search"
@@ -348,20 +372,22 @@ def stream_message(
         get_chat_or_404(db, payload.chat_id, user.id)
     events: queue.Queue = queue.Queue()
     owner, bind = SimpleNamespace(id=user.id), db.get_bind()
-    # Set when the user presses Stop (the browser closes the stream), so no more model calls are made.
-    cancel = threading.Event()
+    turn = ActiveTurn(user.id)
+    turn_id = uuid4().hex
+    ACTIVE_TURNS[turn_id] = turn
 
     @trace_request
     def work() -> None:
         try:
             # Own session: the request's session can close before the stream ends.
             with Session(bind=bind) as session, tracking(
-                    lambda stage, detail: events.put({"type": "stage", "stage": stage, "detail": detail}), cancel):
+                    lambda stage, detail: events.put({"type": "stage", "stage": stage, "detail": detail}), turn.cancel):
                 sent = _send_message(payload, session, owner,
-                                     on_answer=lambda text: events.put({"type": "answer", "text": text}))
+                                     on_answer=lambda text: events.put({"type": "answer", "text": text}),
+                                     claim=lambda: turn.claim("answer"))
             events.put({"type": "done", **jsonable_encoder(sent)})
         except TurnCancelled:
-            print("Chat message stopped by the user; nothing was saved.", flush=True)
+            print("Chat message stopped; the answer was not saved.", flush=True)
         except HTTPException as exc:
             events.put({"type": "error", "status": exc.status_code, "detail": exc.detail})
         except Exception as exc:
@@ -372,9 +398,19 @@ def stream_message(
 
     threading.Thread(target=work, name="chat-send", daemon=True).start()
 
+    def save_stopped() -> dict:
+        with Session(bind=bind) as session:
+            stopped = AssistantTurn(user_response("errors.stopped"), failure="stopped")
+            return {"type": "done", **jsonable_encoder(_send_message(payload, session, owner, fixed_turn=stopped))}
+
     async def lines():
         try:
+            yield json.dumps({"type": "started", "turn": turn_id}) + "\n"
             while True:
+                # Stop: the question is kept with an interrupted answer, sent now rather than after the model.
+                if turn.stopped.is_set() and turn.claim("stopped"):
+                    yield json.dumps(await asyncio.to_thread(save_stopped), ensure_ascii=False, default=str) + "\n"
+                    return
                 try:
                     event = await asyncio.to_thread(events.get, True, STREAM_POLL_SECONDS)
                 except queue.Empty:
@@ -385,14 +421,27 @@ def stream_message(
                     return
                 yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
         finally:
-            # The stream ended early only when the browser stopped reading it.
-            cancel.set()
+            # Stopped, or the browser stopped reading: no more model calls are made for this turn.
+            turn.cancel.set()
+            ACTIVE_TURNS.pop(turn_id, None)
 
     return StreamingResponse(lines(), media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -> ChatSendResponse:
+@router.post("/turns/{turn_id}/stop", status_code=status.HTTP_204_NO_CONTENT)
+def stop_turn(turn_id: str, user: User = Depends(current_user)) -> None:
+    turn = ACTIVE_TURNS.get(turn_id)
+    if turn is None or turn.user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=user_response("interface.turn_not_found"))
+    turn.stopped.set()
+    turn.cancel.set()
+
+
+# fixed_turn saves that reply without generating one (a stopped answer); claim is asked before saving, so a stopped
+# turn and its late answer are never both saved.
+def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None,
+                  fixed_turn: AssistantTurn | None = None, claim=None) -> ChatSendResponse:
     send_started_at = perf_counter()
     user_text = payload.message.strip()
     if not user_text:
@@ -405,7 +454,7 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
     prior_chat = get_chat_or_404(db, payload.chat_id, user.id) if payload.chat_id else None
     preflight_decision = verify_guardrail_token(payload.preflight_token, user_text, payload.chat_id)
     guardrail_source = "token"
-    if not preflight_decision:
+    if not preflight_decision and fixed_turn is None:
         guardrail_source = "reassessed"
         prior_messages = build_llm_messages(prior_chat) if prior_chat else []
         preflight_decision = assess_query_guardrails(user_text, format_conversation_context(prior_messages))
@@ -426,7 +475,7 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
     now = datetime.now(timezone.utc)
 
     try:
-        turn = generate_assistant_response(
+        turn = fixed_turn or generate_assistant_response(
             llm_messages,
             build_location_context(payload),
             payload.location_permission_denied,
@@ -441,8 +490,11 @@ def _send_message(payload: ChatSendRequest, db: Session, user, on_answer=None) -
     except Exception as exc:
         print(f"Assistant response generation failed: {exc}", flush=True)
         turn = AssistantTurn(user_response("errors.unexpected"), failure="unexpected")
-    # Stopped while the answer was being written: keep the chat as it was.
-    check_cancelled()
+    # Stopped while the answer was being written: the stop saves the turn instead.
+    if fixed_turn is None:
+        check_cancelled()
+    if claim is not None and not claim():
+        raise TurnCancelled()
     title = generated_title(turn.chat_title, user_text) if wants_title else None
     if title:
         chat.title = title
@@ -531,6 +583,55 @@ def get_graph_evidence(
         graphStatus=graph_status(message),
         graphData=message.graph_snapshot.data if message.graph_snapshot else None,
     )
+
+
+
+# The Cinematic AI tour's words for one answer, tied to the question. Written by the model the first time Play is
+# pressed and kept, so replays are free. Steps the model can't cover keep the app's own wording.
+@router.post("/{chat_id}/messages/{message_id}/tour", response_model=TourScriptRead)
+def get_tour_script(
+    chat_id: int,
+    message_id: int,
+    payload: TourScriptRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> TourScriptRead:
+    message = db.scalar(
+        select(ChatMessage)
+        .join(ChatHistory)
+        .where(ChatMessage.id == message_id, ChatMessage.chat_id == chat_id, ChatHistory.user_id == user.id,
+               ChatMessage.role == "assistant")
+        .options(selectinload(ChatMessage.map_snapshot))
+    )
+    if not message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=user_response("interface.chat_not_found"))
+    saved = db.get(ChatMessageTour, message_id)
+    if saved and set(payload.steps) <= set(saved.data.get("requested", [])):
+        return TourScriptRead(steps=saved.data.get("steps", {}), source="saved")
+    # Each new script is one model call, so it counts towards the chat limit.
+    if chat_limiter.hit(f"user:{user.id}"):
+        return TourScriptRead(source="limited")
+
+    steps = tour_steps(message.map_snapshot.data if message.map_snapshot else None, payload.steps)
+    questions = db.scalars(
+        select(ChatMessage.content)
+        .where(ChatMessage.chat_id == chat_id, ChatMessage.role == "user", ChatMessage.id < message_id)
+        .order_by(ChatMessage.id.desc())
+        .limit(3)
+    ).all()[::-1]
+    script = write_tour_script(list(questions), message.content, steps)
+    if not script:
+        return TourScriptRead(source="none")
+    data = {"requested": list(dict.fromkeys(payload.steps)), "steps": script}
+    if saved:
+        saved.data = data
+    else:
+        db.add(ChatMessageTour(message_id=message_id, data=data))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()  # Another request saved this answer's tour first.
+    return TourScriptRead(steps=script, source="model")
 
 
 @router.patch("/{chat_id}/title", response_model=ChatRead)

@@ -1,0 +1,357 @@
+/* FLAGGED SECTIONS (resubmitting a rejected registration) */
+.business-section.is-flagged {
+  border-color: #facc15;
+}
+
+.business-flag-notes {
+  margin: -6px 0 18px;
+  padding: 12px 16px;
+  border: 1px solid #facc15;
+  border-radius: 10px;
+  background: #fefce8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.business-flag-notes p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #344054;
+}
+
+.business-flag-notes strong {
+  color: #09090b;
+}
+
+.business-flag-notes .business-flag-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #a16207;
+}
+
+.business-flag-title svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.5;
+}
+
+.business-hours .business-flag-notes {
+  margin: 14px 0 0;
+}
+
+.business-review-row.is-flagged {
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: 10px;
+  background: #fefce8;
+}
+
+/* MY SUBMISSIONS */
+.my-sub-header {
+  margin-bottom: 24px;
+}
+
+.my-sub-card {
+  padding: 0;
+}
+
+.my-sub-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.my-sub-head:focus-visible,
+.my-sub-step-head:focus-visible {
+  outline: 2px solid #ff6129;
+  outline-offset: -2px;
+  border-radius: 16px;
+}
+
+.my-sub-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 22px;
+}
+
+.my-sub-icon {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: #fff3ed;
+  color: #ff6129;
+}
+
+.my-sub-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.my-sub-chevron,
+.my-sub-step-head svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  stroke-width: 2.5;
+  transition: transform 0.2s ease;
+}
+
+.my-sub-chevron.is-open,
+.my-sub-step-head svg.is-open {
+  transform: rotate(180deg);
+}
+
+.my-sub-progress {
+  margin: 0 24px 24px;
+  padding: 22px 24px 24px;
+  border: 1px solid #f0f0f1;
+  border-radius: 16px;
+}
+
+.my-sub-progress h3 {
+  margin: 0 0 18px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.my-sub-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.my-sub-step {
+  position: relative;
+  display: flex;
+  gap: 16px;
+  padding-bottom: 14px;
+}
+
+.my-sub-step:last-child {
+  padding-bottom: 0;
+}
+
+.my-sub-dot {
+  position: relative;
+  z-index: 1;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #ff6129;
+  color: #ffffff;
+}
+
+.my-sub-dot svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 3;
+}
+
+.my-sub-step.is-current .my-sub-dot {
+  background: #ffffff;
+  border: 2px solid #ff6129;
+  box-shadow: inset 0 0 0 5px #ffffff, inset 0 0 0 16px #ff6129;
+}
+
+.my-sub-step.is-pending .my-sub-dot {
+  background: #ffffff;
+  border: 2px solid #d4d4d8;
+}
+
+.my-sub-step.is-approved .my-sub-dot {
+  background: #22c55e;
+}
+
+.my-sub-step.is-rejected .my-sub-dot {
+  background: #ef4444;
+}
+
+.my-sub-line {
+  position: absolute;
+  top: 38px;
+  bottom: 4px;
+  left: 15px;
+  width: 1.5px;
+  background: #ff6129;
+}
+
+.my-sub-step-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.my-sub-step-head {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px 0 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: #09090b;
+  text-align: left;
+  cursor: pointer;
+}
+
+.my-sub-step-label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.my-sub-step.is-approved .my-sub-step-label {
+  color: #16a34a;
+}
+
+.my-sub-step.is-rejected .my-sub-step-label {
+  color: #ef4444;
+}
+
+.my-sub-step.is-pending .my-sub-step-label {
+  color: #71717a;
+}
+
+.my-sub-step-time {
+  font-size: 13px;
+  color: #344054;
+}
+
+.my-sub-step-detail {
+  padding: 8px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.my-sub-step-detail > p {
+  margin: 0;
+  font-size: 14px;
+  color: #344054;
+}
+
+.my-sub-issue {
+  padding: 14px 16px;
+  border: 1px solid #facc15;
+  border-radius: 10px;
+  background: #fefce8;
+}
+
+.my-sub-issue strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.my-sub-issue p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #344054;
+}
+
+.my-sub-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+.my-sub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 40px 24px;
+  font-size: 15px;
+  color: #344054;
+}
+
+.my-sub-empty p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .my-sub-head {
+    padding: 18px;
+  }
+
+  .my-sub-progress {
+    margin: 0 12px 12px;
+    padding: 18px 14px;
+  }
+
+  .my-sub-step-head {
+    flex-wrap: wrap;
+  }
+}
+
+/* DARK MODE */
+[data-theme="dark"] .business-section.is-flagged,
+[data-theme="dark"] .business-flag-notes,
+[data-theme="dark"] .my-sub-issue {
+  border-color: #854d0e;
+}
+
+[data-theme="dark"] .business-flag-notes,
+[data-theme="dark"] .business-review-row.is-flagged,
+[data-theme="dark"] .my-sub-issue {
+  background: #2a2410;
+}
+
+[data-theme="dark"] .business-flag-notes p,
+[data-theme="dark"] .my-sub-issue p,
+[data-theme="dark"] .my-sub-step-detail > p,
+[data-theme="dark"] .my-sub-step-time,
+[data-theme="dark"] .my-sub-empty {
+  color: var(--dark-muted);
+}
+
+[data-theme="dark"] .business-flag-notes strong,
+[data-theme="dark"] .my-sub-step-head,
+[data-theme="dark"] .my-sub-issue strong {
+  color: var(--dark-text);
+}
+
+[data-theme="dark"] .business-flag-notes .business-flag-title {
+  color: #fbbf24;
+}
+
+[data-theme="dark"] .my-sub-progress {
+  border-color: var(--dark-border);
+}
+
+[data-theme="dark"] .my-sub-icon {
+  background: var(--dark-accent-bg);
+}
+
+[data-theme="dark"] .my-sub-step.is-current .my-sub-dot,
+[data-theme="dark"] .my-sub-step.is-pending .my-sub-dot {
+  background: var(--dark-card);
+}
+
+[data-theme="dark"] .my-sub-step.is-current .my-sub-dot {
+  box-shadow: inset 0 0 0 5px var(--dark-card), inset 0 0 0 16px #ff6129;
+}
+
+[data-theme="dark"] .my-sub-step.is-pending .my-sub-dot {
+  border-color: var(--dark-border);
+}

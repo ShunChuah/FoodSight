@@ -152,7 +152,40 @@ def validate_cypher(
             "column naming its group: WITH tier, collect(r)[0..1] AS picks UNWIND picks AS r "
             "RETURN r.restaurant_id AS restaurant_id, tier.",
         )
+    doubled = _one_node_two_names(cypher, variable_labels)
+    if doubled:
+        return (
+            False,
+            f"One {variable_labels[doubled]} node has one name, so {doubled}.name cannot meet two separate conditions "
+            f"(that query finds nothing). To require two {variable_labels[doubled]} values, collect them first: "
+            f"OPTIONAL MATCH (r)-[:HAS_FACILITY]->(f:Facility) WITH r, collect(f.name) AS facilities "
+            "WHERE any(name IN facilities WHERE name IN ['Free Parking Lot', 'Paid Parking Lot']) "
+            "AND 'Good for Children' IN facilities.",
+        )
     return True, None
+
+
+# "f.name IN [parking...]" and later "'Good for Children' IN [f.name]" ask one node to have two names at once.
+NAME_CONDITION = r"(?:\b{v}\.name\s*(?:IN\s*\[|=|<>|STARTS|CONTAINS|=~)|IN\s*\[\s*{v}\.name\s*\])"
+
+
+def _one_node_two_names(cypher: str, variable_labels: dict[str, str]) -> str | None:
+    # collect(...) and CASE ... END never ask one node for two names.
+    outside_collect = re.sub(r"\bcollect\s*\([^)]*\)|\bCASE\b.*?\bEND\b", "", cypher, flags=re.IGNORECASE | re.DOTALL)
+    for variable, label in variable_labels.items():
+        if label not in ("Facility", "Cuisine"):
+            continue
+        found = [match.start() for match in re.finditer(NAME_CONDITION.format(v=re.escape(variable)), outside_collect,
+                                                        flags=re.IGNORECASE)]
+        found += [match.start() for match in re.finditer(rf"\(\s*{re.escape(variable)}\s*:\s*{label}\s*\{{[^}}]*\bname\s*:",
+                                                         outside_collect)]
+        if len(found) < 2:
+            continue
+        between = outside_collect[min(found):max(found)]
+        # "f.name = 'A' OR f.name = 'B'" is one condition with two choices.
+        if not re.search(r"\bOR\b", between, flags=re.IGNORECASE):
+            return variable
+    return None
 
 
 # Restaurant ids returned under other names ("cheap_id") are not recognised as places to show.

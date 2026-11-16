@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -98,6 +98,17 @@ class ChatMessageFailure(Base):
     reason: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
+
+# The Cinematic AI tour's words for an answer, written once by the model and kept (see tour_script.py).
+class ChatMessageTour(Base):
+    __tablename__ = "chat_message_tours"
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
+    )
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class ChatMessageQuickReplies(Base):
     __tablename__ = "chat_message_quick_replies"
 
@@ -148,4 +159,15 @@ class UserPreference(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+
+# Spoken lines for the Cinematic AI tour, kept so the same words are never paid for twice (see speech.py).
+class NarrationAudio(Base):
+    __tablename__ = "narration_audio"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    audio: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc),
     )

@@ -21,6 +21,10 @@ function Sidebar({
   onDeleteChat,
   onCloseSidebar,
   onSettingsOpen,
+  onRegisterBusiness,
+  registerBusinessActive = false,
+  onSubmissions,
+  submissionsActive = false,
   darkMode,
   setDarkMode,
   focusSearch,
@@ -147,7 +151,15 @@ function Sidebar({
             ))}
       </div>
 
-      <SidebarFooter darkMode={darkMode} setDarkMode={setDarkMode} onSettingsOpen={onSettingsOpen} />
+      <SidebarFooter
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        onSettingsOpen={onSettingsOpen}
+        onRegisterBusiness={onRegisterBusiness}
+        registerBusinessActive={registerBusinessActive}
+        onSubmissions={onSubmissions}
+        submissionsActive={submissionsActive}
+      />
 
       {chatPendingDeletion && (
         <GeneralDialog

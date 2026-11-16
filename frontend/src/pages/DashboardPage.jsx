@@ -3,12 +3,17 @@ import Sidebar from "../components/sidebar/Sidebar";
 import ClosedSidebar from "../components/sidebar/ClosedSidebar";
 import ChatArea from "../components/chat/ChatArea";
 import Settings from "../components/modals/Settings";
+import MySubmissions from "../components/business/MySubmissions";
+import RegisterBusiness from "../components/business/RegisterBusiness";
+import { emptyBusinessForm, formForEditing, sectionStep } from "../services/businessForm";
+import { MOCK_MY_SUBMISSIONS } from "../../data/mockMySubmissions";
 import { deleteChatBatch } from "../services/deleteChatBatch";
 import { loadShowGraphEvidence, saveShowGraphEvidence } from "../services/detailsPresentation";
 import { pendingGraphs, waitForGraph, withGraphEvidence } from "../services/pendingGraphs";
 import {
   createChatHistory,
   deleteChatHistory,
+  stopChatTurn,
   fetchChatHistories,
   fetchGraphEvidence,
   preflightChatMessage,
@@ -36,6 +41,15 @@ function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shouldFocusSearch, setShouldFocusSearch] = useState(false);
+  // "chat", "register-business" or "submissions". The draft lives here so it survives switching to a chat and back.
+  const [mainView, setMainView] = useState("chat");
+  const [businessForm, setBusinessForm] = useState(emptyBusinessForm);
+  const [businessStep, setBusinessStep] = useState(0);
+  // Mock until the submissions API exists.
+  const [mySubmissions, setMySubmissions] = useState(MOCK_MY_SUBMISSIONS);
+  const [resubmitting, setResubmitting] = useState(null);
+  // Bumped on Resubmit so the form remounts with the saved answers.
+  const [businessKey, setBusinessKey] = useState(0);
   const [chats, setChats] = useState([]);
   const [isLoadingChats, setIsLoadingChats] = useState(true);
   const [selectedChatId, setSelectedChatId] = useState(null);
@@ -45,6 +59,7 @@ function DashboardPage() {
   const [streamingAnswer, setStreamingAnswer] = useState("");
   const [processingStage, setProcessingStage] = useState(null);
   const [retryingMessageId, setRetryingMessageId] = useState(null);
+  const [isStopping, setIsStopping] = useState(false);
   const [chatLoadFailed, setChatLoadFailed] = useState(false);
   const [chatLoadAttempt, setChatLoadAttempt] = useState(0);
   const [notice, setNotice] = useState("");
@@ -182,7 +197,7 @@ function DashboardPage() {
     setPendingChatId(chatId);
     setPendingQuery(query);
     const controller = new AbortController();
-    stopRef.current = controller;
+    stopRef.current = { controller, turnId: null };
     try {
       const preflight =
         preflightRef.current?.query === query
@@ -198,6 +213,9 @@ function DashboardPage() {
         onStage: (event) => setProcessingStage((previous) => nextStage(previous, event)),
         signal: controller.signal,
         retryOf: retryOfRef.current,
+        onStarted: (turnId) => {
+          if (stopRef.current?.controller === controller) stopRef.current.turnId = turnId;
+        },
       });
 
       const savedChat = await sendPromise;
@@ -218,6 +236,7 @@ function DashboardPage() {
       throw error;
     } finally {
       stopRef.current = null;
+      setIsStopping(false);
       retryOfRef.current = null;
       setRetryingMessageId(null);
       setProcessingStage(null);
@@ -231,7 +250,18 @@ function DashboardPage() {
     }
   };
 
-  const handleStopQuery = () => stopRef.current?.abort();
+  // Asks the server to stop, so the question stays in the chat as interrupted; if it can't be reached, the
+  // stream is dropped instead and nothing is kept.
+  const handleStopQuery = () => {
+    const active = stopRef.current;
+    if (!active || isStopping) return;
+    setIsStopping(true);
+    if (!active.turnId) {
+      active.controller.abort();
+      return;
+    }
+    stopChatTurn(active.turnId).catch(() => active.controller.abort());
+  };
 
   // Try again on a failed answer: the next send replaces it, and it is hidden meanwhile.
   const handleRetryQuery = (messageId) => {
@@ -239,8 +269,31 @@ function DashboardPage() {
     setRetryingMessageId(messageId);
   };
 
+  const handleResubmit = (submission) => {
+    setBusinessForm(formForEditing(submission.form));
+    setBusinessStep(Math.min(...submission.issues.map((issue) => sectionStep(issue.section))));
+    setResubmitting(submission);
+    setBusinessKey((previous) => previous + 1);
+    setMainView("register-business");
+  };
+
+  const handleBusinessSubmitted = (form) => {
+    const now = new Date().toISOString();
+    const sent = { status: "waiting", submittedAt: now, reviewStartedAt: null, decidedAt: null, form, issues: [] };
+    setMySubmissions((previous) => (resubmitting
+      ? previous.map((submission) => (submission.id === resubmitting.id ? { ...submission, ...sent } : submission))
+      : [{ id: `SUB-${Date.now()}`, ...sent }, ...previous]));
+    setResubmitting(null);
+  };
+
   const handleNewChat = () => {
     setSelectedChatId(null);
+    setMainView("chat");
+  };
+
+  const handleSelectChat = (chatId) => {
+    setSelectedChatId(chatId);
+    setMainView("chat");
   };
 
   const handleSearchOpen = () => {
@@ -316,7 +369,7 @@ function DashboardPage() {
           chatLoadFailed={chatLoadFailed}
           onRetryChatLoad={handleRetryChatLoad}
           selectedChatId={selectedChatId}
-          setSelectedChatId={setSelectedChatId}
+          setSelectedChatId={handleSelectChat}
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           onNewChat={handleNewChat}
@@ -327,6 +380,10 @@ function DashboardPage() {
           onSearchFocused={handleSearchFocused}
           onCloseSidebar={() => setSidebarOpen(false)}
           onSettingsOpen={() => setSettingsOpen(true)}
+          onRegisterBusiness={() => setMainView("register-business")}
+          registerBusinessActive={mainView === "register-business"}
+          onSubmissions={() => setMainView("submissions")}
+          submissionsActive={mainView === "submissions"}
         />
       ) : (
         <ClosedSidebar
@@ -334,24 +391,49 @@ function DashboardPage() {
           onNewChat={handleNewChat}
           onSearchOpen={handleSearchOpen}
           onSettingsOpen={() => setSettingsOpen(true)}
+          onRegisterBusiness={() => setMainView("register-business")}
+          registerBusinessActive={mainView === "register-business"}
+          onSubmissions={() => setMainView("submissions")}
+          submissionsActive={mainView === "submissions"}
         />
       )}
 
-      <ChatArea
-        key={selectedChat?.id ?? "new-chat"}
-        selectedChat={selectedChat}
-        onPrepareQuery={handlePrepareQuery}
-        onSendQuery={handleSendQuery}
-        isSending={isSending}
-        darkMode={darkMode}
-        showGraphEvidence={showGraphEvidence}
-        pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
-        streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
-        processingStage={selectedOwnsPendingRequest ? processingStage : null}
-        onStopQuery={handleStopQuery}
-        retryingMessageId={retryingMessageId}
-        onRetryQuery={handleRetryQuery}
-      />
+      {mainView === "register-business" ? (
+        <RegisterBusiness
+          key={businessKey}
+          form={businessForm}
+          setForm={setBusinessForm}
+          step={businessStep}
+          setStep={setBusinessStep}
+          darkMode={darkMode}
+          flags={resubmitting?.issues ?? []}
+          onSubmitted={handleBusinessSubmitted}
+        />
+      ) : mainView === "submissions" ? (
+        <MySubmissions
+          submissions={mySubmissions}
+          onResubmit={handleResubmit}
+          onRegister={() => setMainView("register-business")}
+          darkMode={darkMode}
+        />
+      ) : (
+        <ChatArea
+          key={selectedChat?.id ?? "new-chat"}
+          selectedChat={selectedChat}
+          onPrepareQuery={handlePrepareQuery}
+          onSendQuery={handleSendQuery}
+          isSending={isSending}
+          darkMode={darkMode}
+          showGraphEvidence={showGraphEvidence}
+          pendingQuery={selectedOwnsPendingRequest ? pendingQuery : ""}
+          streamingAnswer={selectedOwnsPendingRequest ? streamingAnswer : ""}
+          processingStage={selectedOwnsPendingRequest ? processingStage : null}
+          onStopQuery={handleStopQuery}
+          isStopping={isStopping}
+          retryingMessageId={retryingMessageId}
+          onRetryQuery={handleRetryQuery}
+        />
+      )}
 
       {settingsOpen && (
         <Settings

@@ -4,20 +4,31 @@ from typing import Any
 from ..shared.config import policy
 from .graph_reads import DETAIL_COLUMNS
 from .presentation import comparison_evidence, distance_label, hours_label, money_label
+from .opening_hours import WEEKDAYS, weekday_today
 from .ranking import opens_at
 
-TIME_WORDS = re.compile(r"\b(?:open\w*|clos\w*|hours?|now|today|tonight|tomorrow|late|early|morning|night|"
-                        r"breakfast|brunch|lunch|dinner|supper|\d{1,2}\s*(?:am|pm))\b", re.IGNORECASE)
 NOON = 12 * 60
 
 
+# The day asked about, when it is not today.
+def asked_day(intent: dict[str, Any] | None) -> str | None:
+    day = (intent or {}).get("day")
+    return day if day in WEEKDAYS and day != weekday_today() else None
+
+
+def about_time(intent: dict[str, Any] | None) -> bool:
+    intent = intent or {}
+    return bool(intent.get("time")) or asked_day(intent) is not None
+
+
 # Today's hours are left out of a list unless the question is about time, or the place only opens at noon or later.
-def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False, hours: bool = True) -> list[dict[str, Any]]:
+def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False, hours: bool = True,
+                         day: str | None = None) -> list[dict[str, Any]]:
     comparisons = comparison_evidence(rows)
     evidence = []
     for row in rows:
         opens = opens_at(row.get("hours_today"))
-        timed = hours or (opens is not None and opens >= NOON)
+        timed = (hours or (opens is not None and opens >= NOON)) and not day
         item = {
             **{key: value for key, value in row.items() if key not in DETAIL_COLUMNS and key != "distance_m"},
             "restaurant_name": row.get("restaurant_name"),
@@ -47,6 +58,9 @@ def _restaurant_evidence(rows: list[dict[str, Any]], card: bool = False, hours: 
             "comparison_facts": [("joint " if item["tied"] else "") + item["description"] for item in comparisons
                                  if row.get("restaurant_name") in item["names"] and len(item["names"]) < len(rows)],
         }
+        if day:
+            weekly = row.get("weekly_hours") if isinstance(row.get("weekly_hours"), dict) else {}
+            item[f"hours_on_{day}"] = hours_label(weekly[day]) if weekly.get(day) else "not known"
         if card:
             item.update(phone=row.get("phone"), address=row.get("address"), website=row.get("website"),
                         weekly_hours={day: hours_label(hours) for day, hours in (row.get("weekly_hours") or {}).items()}

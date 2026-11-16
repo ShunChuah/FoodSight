@@ -49,7 +49,7 @@ DETAIL_COLUMNS = {
     "average_rating", "review_count", "average_price", "price_tier", "halal_status", "restaurant_type", "good_for",
     "ambiance", "service_style", "hours", "cuisines", "facilities", "hours_today", "currency", "anchor_id",
     "phone", "website", "address", "open_now", "opens_at", "weekly_hours", "summary", "nearest_station",
-    "profile_is_a_guess",
+    "profile_is_a_guess", "evidence_level", "fit_tier",
 }
 
 
@@ -223,7 +223,8 @@ def _with_restaurant_details(rows: list[dict[str, Any]], deadline: float | None)
         detail.pop("position", None)
         for key in ("good_for", "ambiance", "service_style"):
             detail[key] = _readable(detail.get(key))
-        detail["profile_is_a_guess"] = detail.pop("evidence_level", None) == "low" or None
+        # Kept for ranking; hidden from the answer.
+        detail["profile_is_a_guess"] = detail.get("evidence_level") == "low" or None
         station, kind, metres = (detail.pop(key, None) for key in ("station", "station_type", "station_distance_m"))
         detail["nearest_station"] = (f"{station}" + (f" ({kind})" if kind and kind != "Other" else "")
                                      + (f", {distance_label(metres)}" if distance_label(metres) else "")

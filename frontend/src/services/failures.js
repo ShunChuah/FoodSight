@@ -4,10 +4,11 @@ const REASONS = {
   model: "The AI service didn't respond.",
   search: "The restaurant search didn't respond.",
   unexpected: "Something went wrong on our side.",
+  stopped: "Interrupted",
 };
 
 export function failureText(reason) {
-  return `${REASONS[reason] ?? REASONS.unexpected} Your question is saved.`;
+  return REASONS[reason] ?? REASONS.unexpected;
 }
 
 // Hides a failed answer and its question while Try again replaces them.

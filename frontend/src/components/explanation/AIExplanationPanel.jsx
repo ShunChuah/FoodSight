@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { Waypoints, Map, PlayCircle, X } from "lucide-react";
+import { LoaderCircle, Waypoints, Map, PlayCircle, X } from "lucide-react";
 import KnowledgeGraphEvidence from "./KnowledgeGraphEvidence";
 import KnowledgeGraphSkeleton from "./KnowledgeGraphSkeleton";
 import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
@@ -7,9 +7,11 @@ import ExplanationMapSkeleton from "./ExplanationMapSkeleton";
 // The ArcGIS SDK is large, so it loads only when a map is opened.
 const MapPreview = lazy(() => import("../map/MapPreview"));
 import { hasMapView } from "../../services/mapPresentation";
+import { cinematicScenes, hasCinematic } from "../../services/cinematicScript";
+import { fetchTourScript } from "../../api/chatApi";
 import "../../styles/explanation.css";
 
-function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending = false, darkMode = false, onClose }) {
+function AIExplanationPanel({ tabs, chatId = null, messageId = null, mapImage, mapData, graphData, graphPending = false, darkMode = false, onClose }) {
   const showMap = tabs.includes("map");
   const showKnowledge = tabs.includes("knowledge");
   const [selectedTab, setSelectedTab] = useState(tabs[0]);
@@ -17,6 +19,22 @@ function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending =
   const displayedMapImage = mapImage;
   const [settledMapImage, setSettledMapImage] = useState(null);
   const isMapLoading = Boolean(displayedMapImage) && settledMapImage !== displayedMapImage;
+  const interactiveMap = hasMapView(mapData);
+  const [playRequest, setPlayRequest] = useState(0);
+  const [script, setScript] = useState(null);
+  const [preparing, setPreparing] = useState(false);
+
+  // The first Play asks for the tour's words tied to the question; if that fails, the app's own wording plays.
+  const playTour = async () => {
+    if (preparing) return;
+    if (script === null && chatId != null && messageId != null) {
+      setPreparing(true);
+      const ids = cinematicScenes(mapData).map((scene) => scene.id);
+      setScript(await fetchTourScript(chatId, messageId, ids).catch(() => ({})));
+      setPreparing(false);
+    }
+    setPlayRequest((count) => count + 1);
+  };
 
   return (
     <aside className="ai-explanation-panel">
@@ -58,8 +76,8 @@ function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending =
       <div className="explanation-content">
         {activeTab === "map" ? (
           <section className="map-evidence-section" role="tabpanel">
-            {hasMapView(mapData) ? (
-              <Suspense fallback={<ExplanationMapSkeleton />}><MapPreview mapData={mapData} darkMode={darkMode} /></Suspense>
+            {interactiveMap ? (
+              <Suspense fallback={<ExplanationMapSkeleton />}><MapPreview mapData={mapData} darkMode={darkMode} playRequest={playRequest} script={script} /></Suspense>
             ) : (
             <div className={`explanation-map-frame${displayedMapImage ? "" : " is-empty"}`}>
               {displayedMapImage && isMapLoading && <ExplanationMapSkeleton />}
@@ -78,12 +96,13 @@ function AIExplanationPanel({ tabs, mapImage, mapData, graphData, graphPending =
             </div>
             )}
 
-            <div className="cinematic-action-row">
-              <button className="play-cinematic-panel-btn" title="Cinematic playback isn’t available yet" type="button" disabled>
-                <PlayCircle />
-                <span>Play Cinematic AI</span>
+            {interactiveMap && hasCinematic(mapData) && <div className="cinematic-action-row">
+              <button className="play-cinematic-panel-btn" title="Watch how the answer was found on the map" type="button"
+                onClick={playTour} disabled={preparing} aria-busy={preparing || undefined}>
+                {preparing ? <LoaderCircle className="is-spinning" /> : <PlayCircle />}
+                <span>{preparing ? "Preparing tour…" : "Play Cinematic AI"}</span>
               </button>
-            </div>
+            </div>}
           </section>
         ) : (
           <div className="kg-evidence-panel" role="tabpanel">

@@ -139,7 +139,7 @@ class RetrievalResult:
 
 
 # Turns that failed for a reason worth retrying, shown as a card with Try again.
-FAILURE_REASONS = ("timeout", "model", "search", "unexpected")
+FAILURE_REASONS = ("timeout", "model", "search", "unexpected", "stopped")
 
 
 @dataclass(frozen=True)

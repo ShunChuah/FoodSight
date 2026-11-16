@@ -46,10 +46,6 @@ RETURN area_name, collect([kind, places]) AS nearby
 DIMENSIONS = ("market", "competition", "generators", "price", "differentiation", "confidence", "competitor_strength")
 OBJECTIVES = ("balanced", "exposure", "low_competition", "strongest_market")
 PRICE_POSITIONS = ("none", "budget", "mid", "premium")
-RESTAURANT = re.compile(r"\brestaurants?\b", re.IGNORECASE)
-CUSTOMERS = re.compile(r"\b(?:students?|universit\w*|offices?|office workers|famil\w*|kids|tourists?|travellers?|"
-                       r"shoppers?|mall|commuters?|patients|hospital)\b", re.IGNORECASE)
-TARGET_PRICE = re.compile(r"\bRM\s?(\d+(?:\.\d+)?)", re.IGNORECASE)
 # Competitor ratings run from about 3.5 to 4.8 in PJ: lower leaves more room to stand out.
 TOP_RATING, LOW_RATING = 4.8, 3.5
 
@@ -316,7 +312,7 @@ def study(competitor_ids: list[Any], intent: dict[str, Any], question: str,
         return None
     rows = market.records
     # A Korean restaurant does not compete with a drinks shop that sells Korean drinks.
-    if RESTAURANT.search(question or "") and intent.get("category") in (None, "none"):
+    if intent.get("meal") is True and intent.get("category") in (None, "none"):
         excluded = set(values["not_restaurant_competitors"])
         rows = [{**row, "rivals": [place for place in row.get("rivals") or []
                                    if place and place.get("kind") not in excluded]} for row in rows]
@@ -333,8 +329,7 @@ def study(competitor_ids: list[Any], intent: dict[str, Any], question: str,
 
     objective = intent.get("objective") if intent.get("objective") in OBJECTIVES else "balanced"
     price_position = intent.get("price_position") if intent.get("price_position") in PRICE_POSITIONS else "none"
-    target = TARGET_PRICE.search(question or "")
-    target_price = float(target[1]) if target else None
+    target_price = float(intent["target_price"]) if isinstance(intent.get("target_price"), (int, float))         and intent["target_price"] > 0 else None
     boosted = {kind for name in intent.get("preferences") or [] for kind in values["preference_nearby"].get(name, [])}
     weights = _weights(objective, price_position, target_price)
     for area, dimensions in zip(areas, _dimensions(areas, price_position, target_price, boosted, objective)):
@@ -346,7 +341,7 @@ def study(competitor_ids: list[Any], intent: dict[str, Any], question: str,
     # A score is only worth showing when it compares enough areas on enough data.
     show = len(eligible) >= 3 and all(area["dimensions"]["confidence"] >= values["show_score_min_confidence"]
                                       for area, _ in chosen)
-    focus = bool(boosted) or bool(CUSTOMERS.search(question or ""))
+    focus = bool(boosted) or intent.get("customer_focus") is True
     picked = [{**area, "role": role, "show_score": show, "pj": pj, "objective": objective,
                "price_position": price_position, "target_price": target_price, "customer_focus": focus}
               for area, role in chosen]
