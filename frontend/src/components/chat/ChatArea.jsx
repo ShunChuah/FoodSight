@@ -43,6 +43,7 @@ function ChatArea({
   const showWelcome =
     !hasPendingQuery && !failedSend && (!selectedChat || messages.length === 0);
   const resultRef = useRef(null);
+  const [role, setRole] = useState("diner");
   const [explanationMessageId, setExplanationMessageId] = useState(null);
   const tabsFor = (message) => detailTabs(message, { showKnowledgeGraph: showGraphEvidence });
   const explanationMessage = messages.find((message) => message.id === explanationMessageId);
@@ -103,7 +104,7 @@ function ChatArea({
     >
       <section className="chat-card">
         {showWelcome ? (
-          <WelcomeScreen darkMode={darkMode} />
+          <WelcomeScreen darkMode={darkMode} role={role} onRoleChange={setRole} />
         ) : (
           <div className="chat-result-area" ref={resultRef}>
             {messages.map((message, index) => {
@@ -165,6 +166,7 @@ function ChatArea({
           onSendQuery={handleSubmit}
           quickReplies={showWelcome ? [] : openReplies(messages, pendingQuery)}
           showSuggestions={showWelcome}
+          role={role}
           disabled={isSending || hasPendingQuery}
         />
       </section>

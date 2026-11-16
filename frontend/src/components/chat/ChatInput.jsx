@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleStop, ExternalLink, Mic, Send } from "lucide-react";
 import "../../styles/chat.css";
 import { QUICK_QUERY_COUNT, quickQueries } from "../../../data/quickQueriesTemplate";
@@ -6,8 +6,8 @@ import { QUICK_QUERY_COUNT, quickQueries } from "../../../data/quickQueriesTempl
 const MAX_MESSAGE_CHARACTERS = 1000;
 const MESSAGE_LIMIT_NOTICE = `Your message is too long. Please keep it under ${MAX_MESSAGE_CHARACTERS.toLocaleString("en-US")} characters.`;
 
-function pickQuickQueries() {
-  const shuffled = [...quickQueries];
+function pickQuickQueries(list) {
+  const shuffled = [...list];
   for (let i = shuffled.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
@@ -19,9 +19,10 @@ function ChatInput({
   onSendQuery,
   quickReplies = [],
   showSuggestions,
+  role = "diner",
   disabled = false,
 }) {
-  const [queries] = useState(pickQuickQueries);
+  const queries = useMemo(() => pickQuickQueries(quickQueries[role]), [role]);
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [micPermissionTooltip, setMicPermissionTooltip] = useState("");
