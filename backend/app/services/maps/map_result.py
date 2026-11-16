@@ -8,6 +8,8 @@ MAP_PROPERTY_FIELDS = (
     "address", "area", "venue_type", "average_rating", "review_count", "cuisines", "price_tier",
     "average_price", "currency", "phone", "website", "hours_today", "facilities", "distance_m",
     "restaurant_type", "weekly_hours", "summary", "halal_status",
+    # For the Cinematic AI tour, which explains why each place fits the question.
+    "ambiance", "good_for", "service_style",
 )
 
 

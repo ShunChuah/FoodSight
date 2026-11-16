@@ -1,10 +1,13 @@
-import { ClipboardCheck, Settings, Moon } from "lucide-react";
+import { ClipboardCheck, FileCheck2, Settings, Moon, Store } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import ProfilePicture from "./ProfilePicture";
 import "../../styles/sidebar.css";
 
-function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen, onProfileOpen }) {
+function SidebarFooter({
+  darkMode, setDarkMode, onSettingsOpen, onProfileOpen,
+  onRegisterBusiness, registerBusinessActive = false, onSubmissions, submissionsActive = false,
+}) {
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -17,12 +20,32 @@ function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen, onProfileOpen })
         <button
           className="footer-action-btn setting-footer-action"
           type="button"
-          onClick={() => navigate("/admin")}
+          onClick={() => navigate("/admin/pipeline")}
         >
           <ClipboardCheck />
           <span>Review</span>
         </button>
       )}
+
+      <button
+        className={`footer-action-btn setting-footer-action register-business-action${registerBusinessActive ? " is-active" : ""}`}
+        type="button"
+        aria-current={registerBusinessActive ? "page" : undefined}
+        onClick={onRegisterBusiness}
+      >
+        <Store />
+        <span>Register Business</span>
+      </button>
+
+      <button
+        className={`footer-action-btn setting-footer-action register-business-action${submissionsActive ? " is-active" : ""}`}
+        type="button"
+        aria-current={submissionsActive ? "page" : undefined}
+        onClick={onSubmissions}
+      >
+        <FileCheck2 />
+        <span>Submissions</span>
+      </button>
 
       <button
         className="footer-action-btn setting-footer-action"

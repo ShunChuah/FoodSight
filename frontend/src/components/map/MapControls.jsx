@@ -28,7 +28,6 @@ export function MapControls({ state, groups, legend, locating, onZoom, onLocate,
         {satellite ? <MapIcon aria-hidden="true" /> : <Satellite aria-hidden="true" />}
       </ControlButton>
       {groups.length > 0 && <ControlButton label="Map layers" pressed={panel === "layers"} onClick={() => toggle("layers")}><Layers aria-hidden="true" /></ControlButton>}
-      {legend.length > 0 && <ControlButton label="Legend" pressed={panel === "legend"} onClick={() => toggle("legend")}><List aria-hidden="true" /></ControlButton>}
       {panel === "layers" && <div className="map-popover" role="group" aria-label="Map layers">
         <p className="map-popover-title">Map layers</p>
         {groups.map((group) => {
@@ -39,11 +38,15 @@ export function MapControls({ state, groups, legend, locating, onZoom, onLocate,
           </button>;
         })}
       </div>}
-      {panel === "legend" && <div className="map-popover" role="group" aria-label="Legend">
+    </div>
+    {/* Hidden while the Cinematic AI caption bar shows. */}
+    {legend.length > 0 && !state.tour && <div className="map-controls is-bottom-left">
+      <ControlButton label="Legend" pressed={panel === "legend"} onClick={() => toggle("legend")}><List aria-hidden="true" /></ControlButton>
+      {panel === "legend" && <div className="map-popover is-beside" role="group" aria-label="Legend">
         <p className="map-popover-title">Legend</p>
         {legend.map((entry) => <p key={entry.id} className="map-legend-row"><i style={{ background: entry.color }} />{entry.label}</p>)}
       </div>}
-    </div>
+    </div>}
   </>;
 }
 

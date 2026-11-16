@@ -5,6 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
@@ -12,7 +13,7 @@ from typing import Any
 
 from ...contracts import QueryPlan
 from ..shared.cache import QUERY_REPLIES
-from ..shared.config import policy
+from ..shared.config import app_timezone, policy
 from ..shared.diagnostics import kg_debug, log_timing
 from ..shared.llm import LLMServiceError, call_llm, parse_json_object
 from .cypher_validation import GraphSchema, SchemaRelationship, validate_cypher
@@ -41,6 +42,14 @@ MAX_OPTIONS = 4
 RECOMMENDATION = policy("recommendation")
 STUDY_OBJECTIVES = ["balanced", *policy("market_study")["objectives"]]
 PRICE_POSITIONS = ["none", "budget", "mid", "premium"]
+ANSWER_SHAPES = ("list", "pick_one")
+WEEKDAY_NAMES = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+RANKING_CHOICES = ("relevance", "rating", "popularity", "price", "distance")
+# The intent used when a reply has none.
+INTENT_DEFAULTS = {"category": "none", "preferences": [], "budget": False, "location_study": False, "areas": [],
+                   "objective": "balanced", "price_position": "none", "meal": False, "answer": "list",
+                   "day": "today", "time": "", "ranking": "relevance", "best": False, "target_price": 0,
+                   "customer_focus": False}
 
 # What a restaurant search is after, named by the model so the app can rank by it.
 INTENT_SCHEMA = {
@@ -53,8 +62,17 @@ INTENT_SCHEMA = {
         "areas": {"type": "array", "items": {"type": "string"}},
         "objective": {"type": "string", "enum": STUDY_OBJECTIVES},
         "price_position": {"type": "string", "enum": PRICE_POSITIONS},
+        "meal": {"type": "boolean"},
+        "answer": {"type": "string", "enum": list(ANSWER_SHAPES)},
+        "day": {"type": "string", "enum": ["today", *WEEKDAY_NAMES]},
+        "time": {"type": "string"},
+        "ranking": {"type": "string", "enum": list(RANKING_CHOICES)},
+        "best": {"type": "boolean"},
+        "target_price": {"type": "number"},
+        "customer_focus": {"type": "boolean"},
     },
-    "required": ["category", "preferences", "budget", "location_study", "areas", "objective", "price_position"],
+    "required": ["category", "preferences", "budget", "location_study", "areas", "objective", "price_position",
+                 "meal", "answer", "day", "time", "ranking", "best", "target_price", "customer_focus"],
     "additionalProperties": False,
 }
 
@@ -106,98 +124,68 @@ NO_TITLE_RULE = "This chat already has a title: set chat_title to \"\"."
 TASK = """You turn one question about food and drink places in Petaling Jaya into one read-only Neo4j 5 Cypher query.
 Use only the graph described below. Read the vocabularies carefully: filters on a categorical property must use its exact values."""
 
-OUTPUT_RULES = """# Output rules
-- Every value taken from the user (names, words, numbers) goes in parameters and is referenced as $name. Vocabulary values may be written inline as quoted strings.
-- When rows are restaurants, return one row per restaurant with r.restaurant_id AS restaurant_id, plus only values
-  you computed or that explain the match (for example distance_m, a count, or t.name AS competitor_of).
-  Do not return names, locations, areas, ratings, prices, cuisines, halal status, facilities or hours:
-  the application adds them for every restaurant_id. Use the number of restaurants under Defaults.
-- When rows are areas or other groups, return a.name AS area_name (or the group value) plus counts or averages with short
-  descriptive aliases. Use LIMIT 5 unless the user asks for a number, up to {group_limit}.
-- For "open now", "open late" or a time: return the closest or best places as usual (h.is_24_7 = true only when the
-  user wants 24 hours); the app checks the opening hours.
-- Every condition the user asked for goes in a WHERE right after a MATCH or a WITH, or in a MATCH pattern.
-- avg(), sum(), min(), max() and count() aggregate over rows and skip nulls. Never pass them a list; group with RETURN or WITH instead.
-- After RETURN DISTINCT or a RETURN with an aggregation, ORDER BY may only use the returned aliases, never x.property.
-- Restaurant names the user types rarely match the stored name exactly ("ZUS Coffee SS2" is stored as
-  "ZUS Coffee - SS2, Petaling Jaya"). Match them word by word against the name and area together:
+OUTPUT_RULES = """# Writing the Cypher
+- Every value taken from the user (names, words, numbers) goes in parameters and is referenced as $name. Vocabulary
+  values may be written inline as quoted strings.
+- Every condition goes in a WHERE right after a MATCH or a WITH, or in a MATCH pattern.
+- avg(), sum(), min(), max() and count() aggregate over rows and skip nulls; never pass them a list. After RETURN
+  DISTINCT or an aggregation, ORDER BY may only use the returned aliases. Several groups come from one query, one row
+  per group; never UNION.
+- A restaurant the user names rarely matches the stored name exactly ("ZUS Coffee SS2" is stored as "ZUS Coffee -
+  SS2, Petaling Jaya"). Match it word by word against the name and area together:
   WITH r, toLower(r.name + ' ' + coalesce(a.name, '')) AS label WHERE all(word IN $name_words WHERE label CONTAINS word),
-  where $name_words is the user's name in lowercase words (leave out "the", "restaurant", "restoran" and "cafe" unless
-  they are the only words). For several named places use $places, a list of word lists, with any(words IN $places ...).
-- Meanings: popular or famous = most reviews (total_reviews). Hidden gems = rating_score of at least 4.5 with
-  20 to 300 reviews.
-  Competitors of a restaurant concept serve meals: leave out drinks shops, dessert shops, bakeries and cafes unless
-  the concept is one of them.
-  Competition or competitors in an area or cuisine = places of the same kind there; use COMPETES_WITH only when the
-  user names one restaurant. Muslim-friendly = halal_status 'halal'.
-- Location studies come first: any question about which area suits an F&B concept (where to open one, which area
-  has the least or most competition for it, which areas are underserved for it, the strongest existing market for it,
-  or whether named areas suit it) sets intent location_study true and returns only the concept's direct competitors:
-  every active restaurant matching its cuisine, kind and halal requirement, as RETURN DISTINCT r.restaurant_id AS
-  restaurant_id with no ORDER BY and LIMIT 5 (the app reads them all). Never use Area, IN_AREA, counts, shares or a
-  price, customer or atmosphere filter for these, even for one named area: the app compares the areas itself.
-- Other business questions (competition, gaps, shares, segments) are answered with area or group rows:
-  counts, shares and averages of active restaurants, not lists of places. Match every active restaurant first (never
-  filter that MATCH to the kind) and count the kind with count(DISTINCT CASE WHEN ... THEN r END) in the same WITH,
-  so totals, shares and zero counts are right; a cuisine is CASE WHEN EXISTS {{ (r)-[:SERVES]->(:Cuisine {{name: 'Thai'}}) }}. Saturated or crowded: compare the area's share with all of PJ's, and return PJ's own counts and share under the same aliases with a pj_ prefix (cafes and pj_cafes, all_restaurants and pj_all_restaurants).
-  Cuisines missing from one
-  area: start from (c:Cuisine) and OPTIONAL MATCH the restaurants. Pricing a planned outlet: one row with its
-  competitors' count and lowest, average and highest price in that area, the area's average price and the same
-  kind's average across PJ, so there is a benchmark even without competitors. Several groups (cuisines, tiers,
-  statuses) come from one query, one row per group; never UNION. Areas ranked by an average (rating, price) need at
-  least 10 restaurants. Comparing areas the user names: only those areas, one row each. Sentiment over time: count
-  each sentiment per period (for example per year of v.published_at).
-- Questions about what people say, praise or complain about: query Review (text, sentiment, individual_rating) and
-  return r.name AS restaurant, v.sentiment AS sentiment, v.individual_rating AS stars, left(v.text, 300) AS review,
-  up to 10 rows. Never return author_name.
-- A dish the user names (roti canai, char kuey teow): menus are not recorded. Match both the cuisine whose Covers list
-  names it and, since many places are named after their dish, the restaurant name:
-  WHERE EXISTS {{ MATCH (r)-[:SERVES]->(:Cuisine {{name: 'Indian Muslim'}}) }} OR toLower(r.name) CONTAINS $dish.
+  with $name_words the name in lowercase words (leave out "the", "restaurant", "restoran" and "cafe" unless they are
+  the only words). For several named places use $places, a list of word lists, with any(words IN $places ...).
+- A dish (roti canai, char kuey teow): menus are not recorded. Match the cuisine whose Covers list names it or the
+  restaurant name: WHERE EXISTS {{ MATCH (r)-[:SERVES]->(:Cuisine {{name: 'Indian Muslim'}}) }} OR
+  toLower(r.name) CONTAINS $dish.
+- Meanings: popular or famous = most reviews. Hidden gems = rating_score of at least 4.5 with 20 to 300 reviews.
+  Competition in an area or cuisine = places of the same kind there; COMPETES_WITH only when the user names one
+  restaurant.
+- Location studies (location_study true): return only the concept's direct competitors, every active restaurant
+  matching its cuisine, kind and halal requirement, as RETURN DISTINCT r.restaurant_id AS restaurant_id with no ORDER
+  BY and LIMIT 5 (the app reads them all and compares the areas itself). Never use Area, counts, shares or price,
+  customer or atmosphere filters for these, even for one named area.
+- Other business questions (competition, gaps, shares, segments) return area or group rows of counts, shares and
+  averages, not lists of places. Match every active restaurant first and count the kind with
+  count(DISTINCT CASE WHEN ... THEN r END) in the same WITH, so totals, shares and zero counts are right; a cuisine is
+  CASE WHEN EXISTS {{ (r)-[:SERVES]->(:Cuisine {{name: 'Thai'}}) }}. Saturated or crowded: compare the area's share
+  with PJ's, returning PJ's own figures under the same aliases with a pj_ prefix (cafes and pj_cafes). Cuisines
+  missing from an area: start from (c:Cuisine) and OPTIONAL MATCH the restaurants. Pricing a planned outlet: one row
+  with its competitors' count and lowest, average and highest price there, the area's average price and the kind's
+  average across PJ. Areas ranked by an average need at least 10 restaurants. Areas the user names: only those, one
+  row each. Sentiment over time: count each sentiment per period.
+- What people say, praise or complain about: query Review and return r.name AS restaurant, v.sentiment AS
+  sentiment, v.individual_rating AS stars, left(v.text, 300) AS review, up to 10 rows. Never return author_name.
 
 # Choosing the action
-Write every reply as a friendly local food guide talking to a customer, in plain words: never mention vocabularies,
-datasets, properties, queries or the graph. When an action does not use a field, set it to "" or [].
-- query (the usual action): write the Cypher in cypher, never in reply. When a vague word in the request changes
-  the results and has a sensible default, do not ask: just use the default (for example cheap = budget, or the
-  Defaults above).
-  details is true only when the user asks about one particular restaurant they named or referred to (more about it,
-  its hours, phone, address, location, halal status or booking); it is false for searches, lists and comparisons.
-  With details true, find the place and return only r.restaurant_id: the app adds its profile, hours, facilities,
-  rating and contact details, so never OPTIONAL MATCH them.
-  business is true when the user asks as a business owner, operator or analyst (opening or running a place,
-  competitors, pricing, market research such as counts, shares, brands, closures or what customers say across
-  places), also in a follow-up; false for diners choosing where to eat.
-- clarify: only when the request can mean clearly different things, no default is safe, and the answers would differ
-  a lot (for example "BBQ" could mean cooking at the table or barbecued dishes; "coffee shop" could mean a cafe or a
-  kopitiam), or a business question about the user's own place that you cannot identify (for example "a second
-  outlet" without its brand or cuisine). Also clarify when the request asks for things one place cannot all be, such
-  as cheap and expensive at once, or two cuisines run together with no "and" or "or" ("Japanese Chinese" could mean
-  either cuisine or one place serving both). Cuisines joined by "and" or "or" are clear: search for any of them.
-  A restaurant named with its area ("ZUS Coffee SS2") is specific: never ask which branch.
-  reply is one short, friendly question that asks what to choose without listing the choices, since the app shows
-  the options as buttons right under it ("Which price range do you mean?", not "Do you mean cheap food or fine
-  dining?"), and never letters or numbers them. options are the short answers the user can tap (2 to 5 words): one
-  for every sensible reading, from 2 up to {max_options}, so never leave out a likely reading just to offer two. Each
-  one is complete on its own and written as the user would say it ("Cheap Japanese", not "A", "The first
-  one" or "I mean cheap Japanese"). Each option is a different reading that leads to a different search: never
-  offer the same thing in other words ("One cheap and one expensive" and "One budget and one premium" are the same
-  option). For cheap and expensive at once, offer "Cheap eats", "Fine dining" and "One of each". Ask at
-  most one question. Never ask for something the user already said or that the conversation already answered, and
-  never ask for the user's location when their position is available.
-- explain: a general food or drink question that needs no particular place (for example what a dish is, or the
-  difference between a kopitiam and a mamak). reply is a short, friendly answer of at most 80 words; you may use the
-  vocabulary definitions above. Do not name or recommend particular places. Never use explain for questions about
-  places, reviews or numbers in Petaling Jaya: query them.
-- decline: the question is not about food and drink, or it needs information the graph does not have. If it needs
-  a category value that is not in its vocabulary (for example Wi-Fi or a drive-through), never use a different
-  value as a stand-in (Dine-in is not Wi-Fi, Curbside Pickup is not a drive-through): decline. reply is one friendly sentence saying what you cannot help with;
-  for a business question, add one short sentence on what you can compare instead (for example competitors, prices or
-  ratings in that area). options may offer up to
-  {max_options} food and drink requests you can answer instead, written as the user would ask them; otherwise [].
-  When the question is not about food or drink at all, options must be [].
-- A place clearly outside Petaling Jaya (for example Kuala Lumpur city centre, Subang Jaya or Shah Alam): decline,
-  say you cover Petaling Jaya only, and offer the user's request in nearby Petaling Jaya areas as options
-  (for example "Nasi lemak in SS 2"). Never search such a place as an Area.
+Write every reply as a friendly local food guide in plain English, whatever language the user writes in: never
+mention vocabularies, datasets, properties, queries or the graph. A field an action does not use is "" or [].
+- query (the usual action): the Cypher goes in cypher, never in reply. A vague word with a sensible default needs
+  no question: use the default. details is true only when the user asks about one restaurant they named or referred
+  to (more about it, its hours, phone, address, halal status or booking); then return only r.restaurant_id, since
+  the app adds everything else. business is true when the user asks as an owner, operator or analyst (opening or
+  running a place, competitors, pricing, market research), also in a follow-up; a plain count with no business
+  context ("how many Korean restaurants are in Uptown?") is a diner's question.
+- clarify: only when the request can mean clearly different things, no default is safe and the answers would differ
+  a lot ("BBQ" could be cooking at the table or barbecued dishes), when it asks for things one place cannot all be
+  (cheap and expensive at once; "Japanese Chinese" with no "and" or "or"), or when a business question is about
+  the user's own place and you cannot identify it. A restaurant or brand the user names, with or without its area,
+  is never a reason to ask: query it with details true. reply is one short question that names the choices in plain
+  words ("Do you mean cheap eats, fine dining or one of each?"), never lettered or numbered. options are 2 to
+  {max_options} short answers the user can tap (2 to 5 words, no brackets), one for every sensible reading on its own
+  and any mix of them, each leading to a different search ("Cheap eats", "Fine dining", "One of each"). Ask at most one
+  question, and never for something already said, answered, or the user's position when it is available.
+- explain: a general food or drink question needing no particular place (what a dish is, a kopitiam versus a
+  mamak): reply in at most 80 words, naming no places. Questions about places, reviews or numbers in Petaling Jaya
+  are always queries.
+- decline: the question is not about food and drink, or needs information that is not recorded. A value missing from
+  a vocabulary (Wi-Fi, a drive-through) is never replaced by another one: decline. reply is one friendly sentence; for
+  a business question add what you can compare instead. options may offer up to {max_options} food and drink requests
+  you can answer instead, or [] when the question is not about food or drink.
+- A place clearly outside Petaling Jaya (Kuala Lumpur city centre, Subang Jaya, Shah Alam): decline, say you cover
+  Petaling Jaya only, and offer the request in nearby Petaling Jaya areas as options ("Nasi lemak in SS 2"). Never
+  search such a place as an Area.
 Return JSON only."""
 
 
@@ -308,8 +296,16 @@ def allowed_values(column: str) -> set[str]:
     return set(load_vocabulary()["columns"][column]["values"])
 
 
+# PJ stores sections in Malay: "Section 17" is "Seksyen 17"; SS, PJU and PJS stay as written.
+SECTION = re.compile(r"\b(?:section|sec\.?|seksyen)\s*\??\s*(\d+[A-Za-z]?)\b", re.IGNORECASE)
+
+
 def normalise_area_patterns(cypher: str, parameters: dict[str, Any]) -> dict[str, Any]:
     parameters = dict(parameters)
+    for name in [*re.findall(r"=~\s*\$(\w+)", cypher),
+                 *re.findall(r"CONTAINS\s+(?:toLower\(\s*)?\$(\w+)", cypher, flags=re.IGNORECASE)]:
+        if isinstance(parameters.get(name), str):
+            parameters[name] = SECTION.sub(r"Seksyen \1", parameters[name])
     for name in re.findall(r"=~\s*\$(\w+)", cypher):
         pattern = parameters.get(name)
         if isinstance(pattern, str):
@@ -429,55 +425,68 @@ def schema_prompt() -> str:
 
 
 def defaults_prompt() -> str:
-    proximity, ranking, results = policy("proximity"), policy("ranking"), policy("results")
+    proximity, results = policy("proximity"), policy("results")
     venues = ", ".join(f"{venue} {_km(radius)}" for venue, radius in proximity["venue_radius_meters"].items())
-    choices: dict[str, list[str]] = {}
-    for word, metric in ranking["choices"].items():
-        if metric not in RANKING_METRICS:
-            raise ValueError(f"query_assumptions.json ranking choice {word!r} names an unknown metric {metric!r}")
-        choices.setdefault(metric, []).append(f'"{word}"')
     nearest = proximity["modes"]["nearest_search"]["default_limit"]
+    preferences = "; ".join(f"{name} ({', '.join(entry['terms'][:3])})"
+                            for name, entry in RECOMMENDATION["preferences"].items())
     lines = [
-        "# Defaults (what to assume when the user does not say)",
-        f"- Only when the user asks for places near them or near a restaurant they named, and gives no distance: "
-        f"WHERE distance_m <= ${DEFAULT_RADIUS}. The app sets it (near me {_km(proximity['default_radius_meters'])}, "
-        f"{venues}, walking distance {_km(proximity['walking_radius_meters'])}, delivery "
-        f"{_km(proximity['delivery_radius_meters'])}). When the user gives a distance, use $radius_m with their value "
-        "instead. Never add a distance filter otherwise: a search in an area or in all of Petaling Jaya has none.",
+        "# Requirements go in the Cypher, wishes go in intent",
+        "- The Cypher keeps only what the user requires: a named area, place or distance, a cuisine or dish, a kind of "
+        "place they name, halal (only when they ask for halal, Muslim-friendly or no pork), a price they give as a "
+        "number, and a facility, atmosphere or customer group they make a must (\"must have a kids menu\", \"only with "
+        "outdoor seating\"). Everything else is a wish and goes in intent: moods and occasions, cheap or premium "
+        "without a number, best or popular, opening times and the day. The app ranks by the wishes, checks opening "
+        "hours and keeps meal places itself, so never write them as Cypher conditions. A long message still gets one "
+        "short query for its main question.",
+        "",
+        "# intent (fields that do not apply keep these defaults: category none, preferences [], budget false, "
+        "location_study false, areas [], objective balanced, price_position none, meal false, answer list, day today, "
+        "time \"\", ranking relevance, best false, target_price 0, customer_focus false)",
+        "Read every field from the whole question and the conversation, in any wording or language.",
+        "- category: a kind of place the user names (" + ", ".join(RECOMMENDATION["categories"]) + "); none for "
+        "restaurants, food or places in general. preferences: moods, occasions and who it suits, only those the user "
+        "mentions, from " + preferences + ".",
+        "- budget: true for cheap or affordable. meal: true when they want a proper meal (eat, food, hungry, makan, "
+        "lunch, dinner, a restaurant), false when they also or only want drinks, desserts, snacks or pastries; for a "
+        "business, true when the concept serves meals.",
+        "- time: \"\" unless they ask about opening times, since it removes places closed then: \"now\" for open now, "
+        "\"late\" for supper or late night, their time as HH:MM (\"after 10pm\" = \"22:00\"), \"later\" for a meal or "
+        "part of the day that is not now (breakfast, dinner, tonight). day: today unless they name another day, worked "
+        "out from today's weekday given with the question.",
+        "- ranking: rating for top or highest rated, popularity for most popular or famous, price for cheapest, distance "
+        "for nearest or closest, otherwise relevance (also for best, good and near me). best: true when they want the "
+        "best or top places.",
+        f"- answer: pick_one when they want one place chosen from places already shown (which is cheapest, which one "
+        f"is closest); otherwise list. For pick_one, return all those places by the restaurant_id values in the "
+        f"conversation (never ids from the examples), in the order asked, LIMIT {RESTAURANT_LIMIT}.",
+        "- location_study: true when they ask where to open an F&B outlet, which area suits a concept, has the least "
+        "competition or the strongest market for it, or whether named areas suit it. Then areas are the areas they "
+        "named as written ([] for all of PJ); objective is exposure (more customers, visibility), low_competition or "
+        "strongest_market, otherwise balanced; price_position is budget, mid or premium when they say so; "
+        "target_price is the price per person they name (RM15 = 15); customer_focus is true when they name who the "
+        "outlet is for.",
+        "",
+        "# Locations",
+        f"- Near the user or a restaurant they named, with no distance given: WHERE distance_m <= ${DEFAULT_RADIUS} (the "
+        f"app sets it: near me {_km(proximity['default_radius_meters'])}, {venues}, walking distance "
+        f"{_km(proximity['walking_radius_meters'])}, delivery {_km(proximity['delivery_radius_meters'])}). A distance "
+        f"the user gives: $radius_m. Nearest or closest: ORDER BY distance_m, LIMIT {nearest}, no radius. A search in "
+        "an area or in all of Petaling Jaya has no distance.",
         "- Near a named mall, school, university, hospital, hotel or office: (r)-[n:NEAR]->(np:NearbyPlace) WHERE "
         "toLower(np.name) CONTAINS toLower($place), nearest first by n.distance_m. Near a named train station: "
         "(r)-[s:NEAREST_STATION]->(st:NearbyPlace) WHERE toLower(st.name) CONTAINS toLower($place) AND s.distance_m "
         f"<= ${DEFAULT_RADIUS}. Any other landmark has no pin: match restaurants whose name or area contains it, with "
         "the spellings people use (1 Utama: '1 utama', '1utama', 'bandar utama').",
-        f"- Nearest or closest: ORDER BY distance_m without a radius filter, LIMIT {nearest} unless the user asks for more.",
-        f"- Best, top rated, highly rated or good: highest rt.rating_score among places with "
-        f"rt.total_reviews >= ${DEFAULT_MIN_REVIEWS}, ties broken by rt.total_reviews. When the user gives a number "
-        "of reviews, use their value in another parameter. No minimum rating unless the user gives one.",
-        "- Ranking words: " + "; ".join(f"{', '.join(words)} = {RANKING_METRICS[metric]}"
-                                        for metric, words in choices.items()) + ".",
-        f"- When the user does not say how to rank places, rank by {RANKING_METRICS[ranking['default_field']]}.",
-        "- intent says what a search for places is after, so the app can rank the matches (anything else: category "
-        "none, no preferences, budget false, location_study false, areas [], objective balanced, price_position none). "
-        "category: only a kind of place the user names ("
-        + ", ".join(RECOMMENDATION["categories"]) + "); none for restaurants, food or places in general. "
-        "preferences: the mood, occasion and who-it-suits wishes, from " + "; ".join(
-            f"{name} ({', '.join(entry['terms'][:4])})" for name, entry in RECOMMENDATION["preferences"].items())
-        + ". budget: true when they want it cheap or affordable. location_study: true when the user asks where "
-        "to open an F&B outlet, which area suits a concept, which area has the least competition or the strongest "
-        "existing market for one, or whether named areas suit one; then areas are the areas they named, as written "
-        "([] for all of PJ); objective is exposure for more customers or visibility, low_competition for fewer "
-        "competitors, strongest_market for the strongest existing market, otherwise balanced; price_position is "
-        "budget, mid or premium when they say so, otherwise none.",
-        "- Preferences go in intent, not in the Cypher: match only the kind of place and the user's requirements, and "
-        "the app ranks by the preferences. Filter on ambiance, target_segment or a facility only when the user makes "
-        "it a requirement (\"must have a kids menu\", \"only places with outdoor seating\"). A long message still "
-        "gets one short query for its main question: never try to cover every detail in the Cypher.",
-        "- A meal (" + ", ".join(policy("meals")["terms"][:4]) + ", a restaurant) needs a place that serves one: "
-        "add WHERE NOT EXISTS { MATCH (r)-[:HAS_PROFILE]->(bp:BusinessProfile) WHERE bp.restaurant_type IN "
-        + str(policy("meals")["not_meals"]) + " }, unless the user asks for desserts, drinks or a bakery.",
-        f"- Number of restaurants: LIMIT {results['discovery_limit']}; LIMIT {results['default_limit']} when the user "
-        f"asks for a few; the number the user asks for, up to {RESTAURANT_LIMIT}.",
         f"- Never put ${DEFAULT_RADIUS} or ${DEFAULT_MIN_REVIEWS} in parameters: the app sets them.",
+        "",
+        "# Results",
+        f"- Restaurants: one row each, r.restaurant_id AS restaurant_id plus only values you computed (distance_m, a "
+        f"count, t.name AS competitor_of); the app adds names, ratings, prices, hours and the rest. LIMIT "
+        f"{results['discovery_limit']}, {results['default_limit']} for a few, or the number asked up to "
+        f"{RESTAURANT_LIMIT}. Order by rt.rating_score unless the user asks for another order.",
+        f"- Areas or other groups: a.name AS area_name (or the group value) plus counts or averages with short "
+        f"aliases, LIMIT 5, or the number asked up to {GROUP_LIMIT}.",
     ]
     return "\n".join(lines)
 
@@ -572,6 +581,8 @@ def question_prompt(
         parts.append(f"The user said they are in or near this area: {area.group(1).strip()}")
     else:
         parts.append("The user's position is not available: never use $latitude, $longitude or a distance filter.")
+    # The day only, so a cached reply lasts the whole day.
+    parts.append(f"Today is {WEEKDAY_NAMES[datetime.now(app_timezone()).weekday()].capitalize()}.")
     parts.append(f"Question: {question}")
     if COMPETITOR_LIST.search(question) or AREA_FIGURES.search(question):
         parts.append(NOT_LOCATION_STUDY_HINT)
@@ -639,24 +650,11 @@ OPTION_LABEL = re.compile(r"(?:(?<=\s)|^)(?:\(\s*[A-Da-d1-4]\s*\)|[A-D]\)(?=\s))
 OPTION_PREFIX = re.compile(r"^\s*(?:\(\s*[A-Da-d1-9]\s*\)|[A-Da-d1-9][.)])\s+")
 
 
+# A button is the short choice: "One of each (1 cheap, 1 expensive)" becomes "One of each".
 def _option_text(option: str) -> str:
-    return " ".join(OPTION_LABEL.sub("", OPTION_PREFIX.sub("", option)).split())[:80]
-
-
-LISTED_CHOICES = "Which of these do you mean?"
-OPTION_FILLER = {"a", "an", "the", "for", "of", "in", "at", "to", "with", "and", "or", "food", "place", "places"}
-
-
-# A question that spells out the options ("one cheap place, or ...?") repeats the buttons under it, so it
-# becomes a short ask.
-def _question_text(reply: str, options: tuple[str, ...]) -> str:
-    words = set(re.findall(r"[a-z0-9]+", reply.lower()))
-    listed = sum(1 for option in options
-                 if (needed := set(re.findall(r"[a-z0-9]+", option.lower())) - OPTION_FILLER) and needed <= words)
-    if listed < 2 and not (listed and re.search(r"\bor\b", reply, re.IGNORECASE)):
-        return reply
-    opening = re.match(r"^(.*?[.!])\s+", reply)
-    return f"{opening[1]} {LISTED_CHOICES}" if opening and not opening[1].endswith("?") else LISTED_CHOICES
+    text = OPTION_LABEL.sub("", OPTION_PREFIX.sub("", option))
+    short = re.sub(r"\s*\([^)]*\)", "", text)
+    return " ".join((short if short.strip() else text).split())[:80]
 
 
 def _read_reply(raw, question, conversation_context, location_context, want_title) -> CypherResult:
@@ -673,7 +671,7 @@ def _read_reply(raw, question, conversation_context, location_context, want_titl
     action = payload.get("action") if payload.get("action") in ACTIONS else "query"
     # Only a clarifying question loses its choice labels; an explanation keeps its own wording and line breaks.
     if action == "clarify":
-        reply = _question_text(" ".join(OPTION_LABEL.sub("", reply).split()), options)
+        reply = " ".join(OPTION_LABEL.sub("", reply).split())
     incomplete = (action == "decline" and not reply) or (action == "explain" and not reply) or \
         (action == "clarify" and (not reply or len(options) < 2))
     if incomplete and payload["cypher"].strip():
@@ -700,20 +698,26 @@ def _read_reply(raw, question, conversation_context, location_context, want_titl
     if NAME_LABEL.search(payload["cypher"]) or "replace(replace(replace(" in cypher:
         parameters = _apostrophe_free_words(parameters, cypher)
     kg_debug("Cypher (unvalidated)", {"cypher": cypher, "parameters": parameters})
+    repaired = without_contradictions(cypher)
+    if repaired != cypher:
+        kg_debug("Dropped conditions that can never help", {"before": cypher, "after": repaired})
+        cypher = repaired
 
     if not coordinates and re.search(r"\$(?:latitude|longitude)\b", cypher):
         error = ("The user's position is not available, so $latitude and $longitude cannot be used. "
                  "Search the named area (or all of Petaling Jaya) without distances.")
     else:
-        error = check_cypher(cypher, parameters)
+        error = check_cypher(cypher, parameters) or contradiction_error(cypher)
     if error:
         kg_debug("Cypher rejected", error)
         return CypherResult("rejected_validation", error=error, cypher=cypher, chat_title=title)
     # Fixed after validation, so the check sees the model's own query.
     parameters = normalise_area_patterns(cypher, parameters)
     details = payload.get("details") is True
-    plan = build_plan(cypher, parameters, details, business=payload.get("business") is True,
-                      intent=payload.get("intent") if isinstance(payload.get("intent"), dict) else None)
+    intent = payload.get("intent") if isinstance(payload.get("intent"), dict) else None
+    if normalised_intent(intent)["answer"] == "pick_one":
+        cypher = every_shown_place(cypher)
+    plan = build_plan(cypher, parameters, details, business=payload.get("business") is True, intent=intent)
     return CypherResult("success", plan=plan, cypher=cypher, chat_title=title,
                         details=details)
 
@@ -809,8 +813,70 @@ def build_plan(cypher: str, parameters: dict[str, Any], details: bool = False, b
         result_limit=min([maximum, *limits]),
         requested_fields=(RESTAURANT_DETAILS_FIELD,) if details else (),
         business=business,
-        intent=intent or {},
+        intent=normalised_intent(intent),
     )
+
+
+CLOCK_VALUE = re.compile(r"([01]?\d|2[0-3]):([0-5]\d)")
+# Conditions that can never help: a membership test compared with a boolean, an empty list, always true or false.
+CONTRADICTIONS = re.compile(
+    r"'[^']*'\s+IN\s+(?:coalesce\([^)]*\)|\[[^\]]*\]|\w+\.\w+)\s*=\s*(?:false|true)\b"
+    r"|\)\s*=\s*false\b|\bIN\s*\[\s*\]|\bIS\s+(?:NOT\s+)?NULL\s+OR\s+true\b|\btrue\s*=\s*false\b",
+    re.IGNORECASE)
+
+
+# The same conditions as whole expressions, dropped by the app instead of a second model call.
+DROPPABLE = re.compile(
+    r"\(\s*[^()]*?\)\s*=\s*false\b"
+    r"|'[^']*'\s+IN\s+(?:coalesce\([^)]*\)|\[[^\]]*\]|\w+\.\w+)\s*=\s*(?:false|true)\b"
+    r"|(?:'[^']*'|\b\w+(?:\.\w+)?)\s+IN\s*\[\s*\]"
+    r"|(?:'[^']*'|\b\w+(?:\.\w+)?)\s+IS\s+(?:NOT\s+)?NULL\s+OR\s+true\b"
+    r"|\btrue\s*=\s*false\b",
+    re.IGNORECASE)
+
+
+def without_contradictions(cypher: str) -> str:
+    return DROPPABLE.sub("true", cypher)
+
+
+def contradiction_error(cypher: str) -> str | None:
+    found = CONTRADICTIONS.search(cypher)
+    if not found:
+        return None
+    return (f"The condition near \"{found.group(0)}\" can never help: it is always true, always false or tests an "
+            "empty list. Leave a preference out of the Cypher (it goes in intent), and write a requirement plainly, "
+            "for example 'quiet' IN coalesce(bp.ambiance, []).")
+SHOWN_IDS = re.compile(r"\.restaurant_id\s+IN\s+\[([^\]]*)\]", re.IGNORECASE)
+
+
+# A pick-one query keeps every shown place, so a tie or the true closest is never cut.
+def every_shown_place(cypher: str) -> str:
+    shown = SHOWN_IDS.search(cypher)
+    if not shown:
+        return cypher
+    count = len([value for value in shown.group(1).split(",") if value.strip()])
+    return re.sub(r"\bLIMIT\s+(\d+)\s*$", lambda match: f"LIMIT {max(int(match.group(1)), min(count, RESTAURANT_LIMIT))}",
+                  cypher.rstrip(), flags=re.IGNORECASE)
+
+
+# Every intent field present and valid.
+def normalised_intent(intent: dict[str, Any] | None) -> dict[str, Any]:
+    intent = {**INTENT_DEFAULTS, **(intent if isinstance(intent, dict) else {})}
+    choices = {"answer": ANSWER_SHAPES, "day": ("today", *WEEKDAY_NAMES), "ranking": RANKING_CHOICES}
+    for name, allowed in choices.items():
+        value = str(intent.get(name) or "").strip().lower()
+        intent[name] = value if value in allowed else INTENT_DEFAULTS[name]
+    # Today's weekday from the model means today.
+    if intent["day"] == WEEKDAY_NAMES[datetime.now(app_timezone()).weekday()]:
+        intent["day"] = "today"
+    time = str(intent.get("time") or "").strip().lower()
+    clock = CLOCK_VALUE.fullmatch(time)
+    intent["time"] = (f"{int(clock[1]):02d}:{clock[2]}" if clock else time if time in ("now", "late", "later") else "")
+    for name in ("meal", "budget", "location_study", "customer_focus", "best"):
+        intent[name] = intent.get(name) is True
+    price = intent.get("target_price")
+    intent["target_price"] = float(price) if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0 else 0
+    return intent
 
 
 def returns_restaurants(cypher: str) -> bool:

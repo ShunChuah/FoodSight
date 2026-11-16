@@ -463,3 +463,28 @@
   );
   background-size: 200% 100%;
 }
+
+.play-cinematic-panel-btn:hover {
+  background: #e8551f;
+}
+
+.play-cinematic-panel-btn:disabled {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.play-cinematic-panel-btn .is-spinning {
+  animation: cinematic-spin 0.9s linear infinite;
+}
+
+@keyframes cinematic-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .play-cinematic-panel-btn .is-spinning {
+    animation: none;
+  }
+}

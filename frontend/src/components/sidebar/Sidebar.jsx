@@ -22,6 +22,10 @@ function Sidebar({
   onCloseSidebar,
   onSettingsOpen,
   onProfileOpen,
+  onRegisterBusiness,
+  registerBusinessActive = false,
+  onSubmissions,
+  submissionsActive = false,
   darkMode,
   setDarkMode,
   focusSearch,
@@ -153,6 +157,10 @@ function Sidebar({
         setDarkMode={setDarkMode}
         onSettingsOpen={onSettingsOpen}
         onProfileOpen={onProfileOpen}
+        onRegisterBusiness={onRegisterBusiness}
+        registerBusinessActive={registerBusinessActive}
+        onSubmissions={onSubmissions}
+        submissionsActive={submissionsActive}
       />
 
       {chatPendingDeletion && (

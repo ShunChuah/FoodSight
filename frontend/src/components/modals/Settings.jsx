@@ -16,6 +16,7 @@ function Settings({
   hasChats,
   historyLoading = false,
   chatBusy = false,
+  showChatOptions = true,
 }) {
   const { logout } = useAuth();
   const dialogRef = useRef(null);
@@ -114,17 +115,19 @@ function Settings({
             <span className="settings-password-icon" aria-hidden="true"><LockKeyhole /></span>
             <span>Change Password</span>
           </button>
-          <button
-            ref={clearButtonRef}
-            className="settings-menu-item"
-            type="button"
-            disabled={historyLoading || chatBusy || !hasChats}
-            title={chatBusy ? "Wait for your answer to finish before clearing chats." : undefined}
-            onClick={() => { setError(""); setNotice(""); setConfirmingClear(true); }}
-          >
-            <Eraser aria-hidden="true" />
-            <span>Clear all chat history</span>
-          </button>
+          {showChatOptions && (
+            <button
+              ref={clearButtonRef}
+              className="settings-menu-item"
+              type="button"
+              disabled={historyLoading || chatBusy || !hasChats}
+              title={chatBusy ? "Wait for your answer to finish before clearing chats." : undefined}
+              onClick={() => { setError(""); setNotice(""); setConfirmingClear(true); }}
+            >
+              <Eraser aria-hidden="true" />
+              <span>Clear all chat history</span>
+            </button>
+          )}
           <button
             className="settings-menu-item"
             type="button"
@@ -138,21 +141,22 @@ function Settings({
               <span className="settings-theme-thumb" />
             </span>
           </button>
-          <button
-            className="settings-menu-item"
-            type="button"
-            role="switch"
-            aria-checked={showGraphEvidence}
-            title="Show the Knowledge Graph Evidence tab in View Details"
-            onClick={onToggleGraphEvidence}
-          >
-            <Waypoints aria-hidden="true" />
-            <span>Knowledge Graph Evidence</span>
-            <span className="settings-theme-switch" aria-hidden="true">
-              <span className="settings-theme-thumb" />
-            </span>
-          </button>
-          {/* Ends the session; the protected route then sends the user to the login page. */}
+          {showChatOptions && (
+            <button
+              className="settings-menu-item"
+              type="button"
+              role="switch"
+              aria-checked={showGraphEvidence}
+              title="Show the Knowledge Graph Evidence tab in View Details"
+              onClick={onToggleGraphEvidence}
+            >
+              <Waypoints aria-hidden="true" />
+              <span>Knowledge Graph Evidence</span>
+              <span className="settings-theme-switch" aria-hidden="true">
+                <span className="settings-theme-thumb" />
+              </span>
+            </button>
+          )}
           <button className="settings-menu-item settings-logout" type="button" onClick={logout}>
             <LogOut aria-hidden="true" />
             <span>Log Out</span>

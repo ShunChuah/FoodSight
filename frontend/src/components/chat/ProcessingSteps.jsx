@@ -1,5 +1,6 @@
 import { Check, Circle, LoaderCircle } from "lucide-react";
 import { processingSteps } from "../../services/processingSteps";
+import AIResponseSkeleton from "./AIResponseSkeleton";
 import "../../styles/chat.css";
 
 const ICONS = {
@@ -8,7 +9,7 @@ const ICONS = {
   waiting: <Circle className="processing-icon is-waiting" size={16} strokeWidth={2} aria-hidden="true" />,
 };
 
-function ProcessingSteps({ stage = null, onStop }) {
+function ProcessingSteps({ stage = null, onStop, stopping = false }) {
   const steps = processingSteps(stage);
   const current = steps.find((step) => step.state === "current");
   return (
@@ -25,9 +26,10 @@ function ProcessingSteps({ stage = null, onStop }) {
           </li>
         ))}
       </ol>
+      <AIResponseSkeleton embedded />
       {onStop && (
-        <button type="button" className="processing-stop" onClick={onStop}>
-          Stop
+        <button type="button" className="processing-stop" onClick={onStop} disabled={stopping}>
+          {stopping ? "Stopping…" : "Stop"}
         </button>
       )}
     </div>

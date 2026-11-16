@@ -245,6 +245,7 @@
 }
 
 @keyframes chat-title-scroll {
+
   0%,
   15% {
     transform: translateX(0);
@@ -506,7 +507,7 @@
   transition: transform 0.25s ease;
 }
 
-.dark-toggle input:checked + .dark-toggle-slider {
+.dark-toggle input:checked+.dark-toggle-slider {
   transform: translateX(18px);
 }
 
@@ -657,12 +658,10 @@
 
 [data-theme="dark"] .history-skeleton-line,
 [data-theme="dark"] .history-skeleton-action {
-  background: linear-gradient(
-    90deg,
-    var(--dark-skeleton-start) 25%,
-    var(--dark-skeleton-mid) 50%,
-    var(--dark-skeleton-start) 75%
-  );
+  background: linear-gradient(90deg,
+      var(--dark-skeleton-start) 25%,
+      var(--dark-skeleton-mid) 50%,
+      var(--dark-skeleton-start) 75%);
   background-size: 200% 100%;
 }
 
@@ -718,4 +717,23 @@
   background: transparent;
   border: none;
   transform: scale(1.294);
+}
+
+/* REGISTER BUSINESS */
+.register-business-action.is-active,
+.register-business-action.is-active:hover {
+  background: #fff3ed;
+  color: #ff6129;
+}
+
+.closed-sidebar-icon-btn.is-active {
+  background: #fef2ed;
+  color: #ff6129;
+}
+
+[data-theme="dark"] .register-business-action.is-active,
+[data-theme="dark"] .register-business-action.is-active:hover,
+[data-theme="dark"] .closed-sidebar-icon-btn.is-active {
+  background: var(--dark-accent-bg);
+  color: #ff6129;
 }

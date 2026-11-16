@@ -16,21 +16,18 @@ def weekday_today() -> str:
     return WEEKDAYS[now_local().weekday()]
 
 
-OPEN_NOW_WORDS = re.compile(r"\b(?:open (?:right )?now|currently open|still open|open at the moment)\b", re.IGNORECASE)
-LATE_WORDS = re.compile(r"\b(?:supper|late[- ]night|late at night|open(?:s|ing)? (?:till |until )?late)\b",
-                        re.IGNORECASE)
 LATE_HOUR, NIGHT_ENDS_HOUR = 23, 5
-CLOCK_TIME = re.compile(r"\b(?:after|past|at|by|around)\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
 
 
-def time_asked(question: str, now: datetime) -> datetime | None:
-    clock = CLOCK_TIME.search(question or "")
+# The moment a place must be open, from intent time ("now", "late" or "HH:MM").
+def time_asked(intent: dict[str, Any] | None, now: datetime) -> datetime | None:
+    time = str((intent or {}).get("time") or "")
+    clock = re.fullmatch(r"(\d{1,2}):(\d{2})", time)
     if clock:
-        hour = int(clock.group(1)) % 12 + (12 if clock.group(3).lower() == "pm" else 0)
-        return now.replace(hour=hour, minute=int(clock.group(2) or 0), second=0, microsecond=0)
-    if OPEN_NOW_WORDS.search(question or ""):
+        return now.replace(hour=int(clock.group(1)), minute=int(clock.group(2)), second=0, microsecond=0)
+    if time == "now":
         return now
-    if LATE_WORDS.search(question or ""):
+    if time == "late":
         # During the night itself, supper means open right now.
         if now.hour >= LATE_HOUR or now.hour < NIGHT_ENDS_HOUR:
             return now

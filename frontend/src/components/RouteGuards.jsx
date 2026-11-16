@@ -7,7 +7,8 @@ export function ProtectedRoute() {
   return user ? <Outlet /> : <Navigate to="/login" replace />
 }
 
-// Admin pages (the review page): only accounts with is_superuser. The backend checks it too.
+// Admin pages (business submissions, and the pipeline review page): only accounts with is_superuser.
+// The pipeline review page's backend checks it too; business submissions have no backend yet.
 export function AdminRoute() {
   const { user, loading } = useAuth()
   if (loading) return null

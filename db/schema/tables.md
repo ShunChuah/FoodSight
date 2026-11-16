@@ -21,6 +21,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - [public.chat_message_graphs](#publicchat_message_graphs)
 - [public.chat_message_maps](#publicchat_message_maps)
 - [public.chat_message_quick_replies](#publicchat_message_quick_replies)
+- [public.chat_message_tours](#publicchat_message_tours)
 - [public.chat_messages](#publicchat_messages)
 - [public.chat_query](#publicchat_query)
 - [public.chat_query_states](#publicchat_query_states)
@@ -34,6 +35,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - [public.location](#publiclocation)
 - [public.map_marker](#publicmap_marker)
 - [public.map_result](#publicmap_result)
+- [public.narration_audio](#publicnarration_audio)
 - [public.nearby_context](#publicnearby_context)
 - [public.nearby_place](#publicnearby_place)
 - [public.operating_hours](#publicoperating_hours)
@@ -211,6 +213,16 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - PRIMARY KEY (message_id)
 - FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
 
+## public.chat_message_tours
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `data` | json | yes |  |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
 ## public.chat_messages
 
 | Column | Type | Required | Default |
@@ -384,6 +396,16 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 
 - PRIMARY KEY (map_result_id)
 - FOREIGN KEY (graph_result_id) REFERENCES graph_query_result(graph_result_id) ON DELETE CASCADE
+
+## public.narration_audio
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `key` | character varying(64) | yes |  |
+| `audio` | bytea | yes |  |
+| `created_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (key)
 
 ## public.nearby_context
 

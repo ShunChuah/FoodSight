@@ -16,6 +16,7 @@ from app.auth.routes import router as auth_router
 from app.database import auth_engine
 from app.errors import handle_unexpected_errors
 from app.routes.chat import router as chat_router
+from app.routes.narration import router as narration_router
 from app.routes.preferences import router as preferences_router
 from app.services.shared.neo4j import warm_up
 
@@ -69,6 +70,7 @@ async def health():
 
 router.include_router(auth_router)
 router.include_router(chat_router)
+router.include_router(narration_router)
 router.include_router(preferences_router)
 router.include_router(admin_router)
 app.include_router(router)

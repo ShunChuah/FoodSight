@@ -10,7 +10,7 @@ from ..shared.progress import TurnCancelled
 from ..shared.messages import response
 from .analysis_answer import _analysis
 from .answer_checks import _checked_payload, _numbers, asked_dish, dish_note, supported_claims
-from .answer_evidence import TIME_WORDS, _restaurant_evidence
+from .answer_evidence import _restaurant_evidence, about_time, asked_day
 from .answer_model import _model_answer
 from .answer_prompts import ANSWER_INSTRUCTIONS, CARD_FORMAT, COMPARE_FORMAT, LIST_FORMAT
 from .answer_text import _earlier_chat, _without_markers
@@ -48,7 +48,8 @@ def answer_layout(retrieval: RetrievalResult) -> str:
         return "areas" if shortlist else "reviews" if reviews else "restaurants" if restaurants else "groups"
     if card:
         return "card"
-    return "compare" if len(rows) >= 2 and len(named_places(plan.parameters)) >= 2 else "list"
+    picks_one = plan.intent.get("answer") == "pick_one"
+    return "compare" if len(rows) >= 2 and (len(named_places(plan.parameters)) >= 2 or picks_one) else "list"
 
 
 # Only the places the model has started describing.
@@ -76,7 +77,8 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     layout = answer_layout(retrieval)
     note_turn(layout=layout)
     if layout in ANALYSIS_LAYOUTS:
-        return _analysis(user_query, rows, note, conversation_context, deadline, layout, on_answer)
+        return _analysis(user_query, rows, note, conversation_context, deadline, layout, on_answer,
+                         business=retrieval.query_plan.business)
     card = layout == "card"
     if layout == "compare":
         rows = _brand_branches(rows, named_places(retrieval.query_plan.parameters))
@@ -84,7 +86,8 @@ def _answer(user_query: str, retrieval: RetrievalResult, conversation_context: s
     unconfirmed = dish_note(rows, dish) if dish else None
     if unconfirmed:
         note = f"{note}\n\n{unconfirmed}" if note else unconfirmed
-    evidence = _restaurant_evidence(rows, card, hours=card or bool(TIME_WORDS.search(user_query)))
+    intent = retrieval.query_plan.intent
+    evidence = _restaurant_evidence(rows, card, hours=card or about_time(intent), day=asked_day(intent))
     fallback = _restaurant_fallback(rows, card, user_query, compare=layout == "compare")
     if note:
         fallback = f"{note}\n\n{fallback}"

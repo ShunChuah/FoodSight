@@ -87,7 +87,7 @@ class ChatMessageRead(BaseModel):
     graphData: dict | None = None
     graphStatus: GraphStatus | None = None
     quickReplies: list[str] = Field(default_factory=list)
-    failure: Literal["timeout", "model", "search", "unexpected"] | None = None
+    failure: Literal["timeout", "model", "search", "unexpected", "stopped"] | None = None
     createdAt: datetime
 
 
@@ -115,6 +115,16 @@ class ChatSendResponse(BaseModel):
 class GraphEvidenceRead(BaseModel):
     graphStatus: GraphStatus | None = None
     graphData: dict | None = None
+
+
+class TourScriptRequest(BaseModel):
+    steps: list[str] = Field(..., min_length=1, max_length=20)
+
+
+class TourScriptRead(BaseModel):
+    # step id -> {"title", "caption", "narration"}; steps left out keep the app's own wording.
+    steps: dict[str, dict[str, str]] = Field(default_factory=dict)
+    source: Literal["saved", "model", "none", "limited"]
 
 
 class DeleteChatResponse(BaseModel):

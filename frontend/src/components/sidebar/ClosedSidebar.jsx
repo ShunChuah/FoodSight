@@ -1,9 +1,11 @@
 import {
   ClipboardCheck,
+  FileCheck2,
   PanelLeft,
   SquarePen,
   Search,
   Settings,
+  Store,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
@@ -16,6 +18,10 @@ function ClosedSidebar({
   onSearchOpen,
   onSettingsOpen,
   onProfileOpen,
+  onRegisterBusiness,
+  registerBusinessActive = false,
+  onSubmissions,
+  submissionsActive = false,
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -56,11 +62,33 @@ function ClosedSidebar({
             type="button"
             title="Review"
             aria-label="Review"
-            onClick={() => navigate("/admin")}
+            onClick={() => navigate("/admin/pipeline")}
           >
             <ClipboardCheck />
           </button>
         )}
+
+        <button
+          className={`closed-sidebar-icon-btn${registerBusinessActive ? " is-active" : ""}`}
+          type="button"
+          title="Register Business"
+          aria-label="Register Business"
+          aria-current={registerBusinessActive ? "page" : undefined}
+          onClick={onRegisterBusiness}
+        >
+          <Store />
+        </button>
+
+        <button
+          className={`closed-sidebar-icon-btn${submissionsActive ? " is-active" : ""}`}
+          type="button"
+          title="Submissions"
+          aria-label="Submissions"
+          aria-current={submissionsActive ? "page" : undefined}
+          onClick={onSubmissions}
+        >
+          <FileCheck2 />
+        </button>
 
         <button
           className="closed-sidebar-icon-btn"

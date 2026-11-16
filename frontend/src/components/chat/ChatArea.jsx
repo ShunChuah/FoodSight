@@ -10,7 +10,7 @@ import AIExplanationPanel from "../explanation/AIExplanationPanel";
 import { sendErrorText, submitChatQuery } from "../../services/submitChatQuery";
 import { detailTabs, isGraphPending } from "../../services/detailsPresentation";
 import { hasMapView } from "../../services/mapPresentation";
-import { repliesFor } from "../../services/quickReplies";
+import { openReplies, repliesFor } from "../../services/quickReplies";
 import { failureText, questionBefore, withoutRetried } from "../../services/failures";
 import "../../styles/chat.css";
 
@@ -27,6 +27,7 @@ function ChatArea({
   streamingAnswer = "",
   processingStage = null,
   onStopQuery,
+  isStopping = false,
   retryingMessageId = null,
   onRetryQuery,
 }) {
@@ -42,6 +43,7 @@ function ChatArea({
   const showWelcome =
     !hasPendingQuery && !failedSend && (!selectedChat || messages.length === 0);
   const resultRef = useRef(null);
+  const [role, setRole] = useState("diner");
   const [explanationMessageId, setExplanationMessageId] = useState(null);
   const tabsFor = (message) => detailTabs(message, { showKnowledgeGraph: showGraphEvidence });
   const explanationMessage = messages.find((message) => message.id === explanationMessageId);
@@ -102,7 +104,7 @@ function ChatArea({
     >
       <section className="chat-card">
         {showWelcome ? (
-          <WelcomeScreen darkMode={darkMode} />
+          <WelcomeScreen darkMode={darkMode} role={role} onRoleChange={setRole} />
         ) : (
           <div className="chat-result-area" ref={resultRef}>
             {messages.map((message, index) => {
@@ -143,7 +145,7 @@ function ChatArea({
                 )}
                 {isSending && (streamingAnswer
                   ? <AIResponseCard answer={streamingAnswer} streaming />
-                  : <ProcessingSteps stage={processingStage} onStop={onStopQuery} />)}
+                  : <ProcessingSteps stage={processingStage} onStop={onStopQuery} stopping={isStopping} />)}
               </>
             )}
 
@@ -162,7 +164,9 @@ function ChatArea({
 
         <ChatInput
           onSendQuery={handleSubmit}
+          quickReplies={showWelcome ? [] : openReplies(messages, pendingQuery)}
           showSuggestions={showWelcome}
+          role={role}
           disabled={isSending || hasPendingQuery}
         />
       </section>
@@ -179,6 +183,8 @@ function ChatArea({
         <AIExplanationPanel
           key={explanationMessageId}
           tabs={explanationTabs}
+          chatId={selectedChat?.id ?? null}
+          messageId={explanationMessageId}
           mapImage={explanationMessage.mapImage}
           mapData={explanationMessage.mapData}
           graphData={explanationMessage.graphData}

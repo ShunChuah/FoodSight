@@ -25,6 +25,9 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 # Chat messages one user may send; 0 turns a limit off.
 CHAT_LIMIT_PER_MINUTE = int(os.getenv("CHAT_LIMIT_PER_MINUTE") or 10)
 CHAT_LIMIT_PER_DAY = int(os.getenv("CHAT_LIMIT_PER_DAY") or 200)
+# New spoken lines for the map tour one user may have made (lines already saved are free); 0 turns a limit off.
+NARRATION_LIMIT_PER_HOUR = int(os.getenv("NARRATION_LIMIT_PER_HOUR") or 60)
+NARRATION_LIMIT_PER_DAY = int(os.getenv("NARRATION_LIMIT_PER_DAY") or 200)
 
 SMTP_HOST = os.getenv("SMTP_HOST") or "smtp.gmail.com"
 SMTP_PORT = int(os.getenv("SMTP_PORT") or 587)

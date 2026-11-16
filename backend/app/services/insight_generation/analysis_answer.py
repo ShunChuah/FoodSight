@@ -62,8 +62,12 @@ NOT_A_COUNT = re.compile(r"pct|share|rating|price|spend|avg|average|per_|ratio|r
 
 # The model writes the briefing; the code writes the figures, so every number is exact.
 def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, conversation_context: str,
-              deadline: float | None, kind: str, on_answer: Callable[[str], None] | None = None) -> AnswerResult:
-    fallback = render_area_analysis(rows) if kind == "areas" else render_analysis(rows, kind, question=user_query)
+              deadline: float | None, kind: str, on_answer: Callable[[str], None] | None = None,
+              business: bool = True) -> AnswerResult:
+    # A diner's count gets the figures, not business advice.
+    diner = not business and kind == "groups"
+    fallback = render_area_analysis(rows) if kind == "areas" else render_analysis(rows, kind, question=user_query,
+                                                                                    diner=diner)
     if note:
         fallback = f"{note}\n\n{fallback}"
     areas = kind == "areas"
@@ -79,7 +83,8 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
         kg_debug("No evidence for the analysis", rows)
         return AnswerResult(status="fallback", text=response("errors.no_results"))
     sample = _review_sample(rows) if kind == "reviews" else ""
-    prompt = _earlier_chat(conversation_context) + f"User question: {user_query}\n\n{sample}Evidence:\n" + "\n".join(
+    audience = "The user is a diner, not a business: set implication and recommendation to \"\".\n\n" if diner else ""
+    prompt = _earlier_chat(conversation_context) + audience + f"User question: {user_query}\n\n{sample}Evidence:\n" + "\n".join(
         (f"[A{index}] " if areas else "- ") + json.dumps(item, ensure_ascii=False, default=str)
         for index, item in enumerate(evidence, 1))
     known = _numbers(prompt)
@@ -92,9 +97,9 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
             output_format = AREAS_FORMAT
         else:
             render = lambda payload: render_analysis(  # noqa: E731
-                rows, kind, _checked_payload(payload, known) or {"answer": ""}, user_query)
+                rows, kind, _checked_payload(payload, known) or {"answer": ""}, user_query, diner)
             partial = lambda payload: render_analysis(  # noqa: E731
-                rows, kind, _checked_payload(payload, known, streaming=True) or {"answer": ""}, user_query)
+                rows, kind, _checked_payload(payload, known, streaming=True) or {"answer": ""}, user_query, diner)
             output_format = ANALYSIS_FORMAT
         answer = _model_answer(prompt, ANALYST_INSTRUCTIONS + "\n\n" + output_format, deadline, render, partial,
                                note, on_answer)
@@ -110,7 +115,8 @@ def _analysis(user_query: str, rows: list[dict[str, Any]], note: str | None, con
     return AnswerResult(status="success", text=f"{note}\n\n{answer}" if note else answer, used_llm=True)
 
 
-def render_analysis(rows: list[dict[str, Any]], kind: str, payload: dict | None = None, question: str = "") -> str:
+def render_analysis(rows: list[dict[str, Any]], kind: str, payload: dict | None = None, question: str = "",
+                    diner: bool = False) -> str:
     if payload is not None and not _text_of(payload.get("answer")):
         raise ValueError("invalid_response_json")
     payload = payload or {}
@@ -128,7 +134,7 @@ def render_analysis(rows: list[dict[str, Any]], kind: str, payload: dict | None 
                 if re.search(r"[A-Za-z]", _text_of(item))]
     if findings and titles["findings"]:
         lines += ["", f"**{titles['findings']}**", *findings]
-    for key in ("implication", "recommendation"):
+    for key in () if diner else ("implication", "recommendation"):
         if _text_of(payload.get(key)):
             lines += ["", f"**{titles[key]}**", _sentence(_text_of(payload[key]))]
     lines += ["", _sentence(_text_of(payload.get("limitation")) or LIMITATIONS[kind])]

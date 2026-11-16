@@ -2,7 +2,6 @@ import re
 from typing import Any
 
 from .answer_checks import CLOCK
-from .answer_evidence import TIME_WORDS
 from .answer_prompts import CARD_FIELDS
 from .answer_text import _and, _sentence, _without_markers, _without_technical, area_label, clean_opening
 from .presentation import distance_label, hours_label, money_label
@@ -162,6 +161,9 @@ def _without_sources(text: str) -> str:
     return re.sub(r",\s*(?=[.;:!?,]|$)", "", text)
 
 
+# A details card only talks about hours or contact details when the question is about them.
+TIME_WORDS = re.compile(r"\b(?:open\w*|clos\w*|hours?|now|today|tonight|tomorrow|late|early|morning|night|"
+                        r"breakfast|brunch|lunch|dinner|supper|\d{1,2}\s*(?:am|pm))\b", re.IGNORECASE)
 CONTACT_WORDS = re.compile(r"\b(?:phone|call|contact|number|whatsapp)\b", re.IGNORECASE)
 
 
