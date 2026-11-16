@@ -11,10 +11,19 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 
 - [auth.access_token](#authaccess_token)
 - [auth.oauth_account](#authoauth_account)
+- [auth.user_picture](#authuser_picture)
 - [auth.users](#authusers)
 - [public.area](#publicarea)
 - [public.business_profile](#publicbusiness_profile)
+- [public.chat_histories](#publicchat_histories)
+- [public.chat_message_failures](#publicchat_message_failures)
+- [public.chat_message_graph_jobs](#publicchat_message_graph_jobs)
+- [public.chat_message_graphs](#publicchat_message_graphs)
+- [public.chat_message_maps](#publicchat_message_maps)
+- [public.chat_message_quick_replies](#publicchat_message_quick_replies)
+- [public.chat_messages](#publicchat_messages)
 - [public.chat_query](#publicchat_query)
+- [public.chat_query_states](#publicchat_query_states)
 - [public.chat_session](#publicchat_session)
 - [public.city](#publiccity)
 - [public.cluster](#publiccluster)
@@ -34,8 +43,10 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - [public.restaurant_cuisine](#publicrestaurant_cuisine)
 - [public.restaurant_facility](#publicrestaurant_facility)
 - [public.restaurant_nearby_place](#publicrestaurant_nearby_place)
+- [public.restaurant_photo](#publicrestaurant_photo)
 - [public.review](#publicreview)
 - [public.spatial_analysis_result](#publicspatial_analysis_result)
+- [public.user_preferences](#publicuser_preferences)
 
 ## auth.access_token
 
@@ -67,6 +78,18 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - UNIQUE (oauth_name, account_id)
 - FOREIGN KEY (user_id) REFERENCES auth.users(user_id) ON DELETE CASCADE
 - CREATE INDEX idx_oauth_account_user ON auth.oauth_account USING btree (user_id)
+
+## auth.user_picture
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `user_id` | integer | yes |  |
+| `image` | bytea | yes |  |
+| `content_type` | character varying(20) | yes |  |
+| `updated_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (user_id)
+- FOREIGN KEY (user_id) REFERENCES auth.users(user_id) ON DELETE CASCADE
 
 ## auth.users
 
@@ -121,6 +144,89 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - UNIQUE (restaurant_id)
 - FOREIGN KEY (restaurant_id) REFERENCES restaurant(restaurant_id) ON DELETE CASCADE
 
+## public.chat_histories
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `id` | integer | yes | nextval('chat_histories_id_seq'::regclass) |
+| `user_id` | integer | yes |  |
+| `title` | character varying(160) | yes |  |
+| `pinned` | boolean | yes | false |
+| `created_at` | timestamp with time zone | yes | now() |
+| `updated_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (id)
+- FOREIGN KEY (user_id) REFERENCES auth.users(user_id) ON DELETE CASCADE
+- CREATE INDEX ix_chat_histories_updated_at ON public.chat_histories USING btree (updated_at)
+- CREATE INDEX ix_chat_histories_user_id ON public.chat_histories USING btree (user_id)
+
+## public.chat_message_failures
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `reason` | character varying(20) | yes |  |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
+## public.chat_message_graph_jobs
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `status` | character varying(10) | yes | 'pending'::character varying |
+| `created_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
+## public.chat_message_graphs
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `data` | json | yes |  |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
+## public.chat_message_maps
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `data` | json | yes |  |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
+## public.chat_message_quick_replies
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `message_id` | integer | yes |  |
+| `replies` | json | yes |  |
+
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE
+
+## public.chat_messages
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `id` | integer | yes | nextval('chat_messages_id_seq'::regclass) |
+| `chat_id` | integer | yes |  |
+| `role` | character varying(20) | yes |  |
+| `content` | text | yes |  |
+| `map_image` | character varying(500) | no |  |
+| `created_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (id)
+- FOREIGN KEY (chat_id) REFERENCES chat_histories(id) ON DELETE CASCADE
+- CREATE INDEX ix_chat_messages_chat_id ON public.chat_messages USING btree (chat_id)
+- CREATE INDEX ix_chat_messages_created_at ON public.chat_messages USING btree (created_at)
+
 ## public.chat_query
 
 | Column | Type | Required | Default |
@@ -133,6 +239,16 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - PRIMARY KEY (query_id)
 - FOREIGN KEY (chat_id) REFERENCES chat_session(chat_id) ON DELETE CASCADE
 - CREATE INDEX idx_query_chat ON public.chat_query USING btree (chat_id)
+
+## public.chat_query_states
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `chat_id` | integer | yes |  |
+| `state` | json | yes | '{}'::json |
+
+- PRIMARY KEY (chat_id)
+- FOREIGN KEY (chat_id) REFERENCES chat_histories(id) ON DELETE CASCADE
 
 ## public.chat_session
 
@@ -436,6 +552,24 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - CHECK ((distance_m >= 0))
 - CREATE INDEX idx_restaurant_nearby_place_place ON public.restaurant_nearby_place USING btree (nearby_place_id)
 
+## public.restaurant_photo
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `restaurant_id` | integer | yes |  |
+| `position` | smallint | yes |  |
+| `google_place_id` | character varying(255) | yes |  |
+| `image` | bytea | yes |  |
+| `content_type` | character varying(20) | yes |  |
+| `width_px` | integer | no |  |
+| `height_px` | integer | no |  |
+| `author_name` | character varying(255) | no |  |
+| `author_uri` | character varying(500) | no |  |
+| `fetched_at` | timestamp with time zone | yes |  |
+
+- PRIMARY KEY (restaurant_id, "position")
+- FOREIGN KEY (restaurant_id) REFERENCES restaurant(restaurant_id) ON DELETE CASCADE
+
 ## public.review
 
 | Column | Type | Required | Default |
@@ -468,6 +602,17 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 
 - PRIMARY KEY (analysis_id)
 - FOREIGN KEY (map_result_id) REFERENCES map_result(map_result_id) ON DELETE CASCADE
+
+## public.user_preferences
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `user_id` | integer | yes |  |
+| `theme` | character varying(10) | yes | 'light'::character varying |
+| `updated_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (user_id)
+- FOREIGN KEY (user_id) REFERENCES auth.users(user_id) ON DELETE CASCADE
 
 ## Trigger functions
 

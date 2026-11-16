@@ -20,6 +20,11 @@ After each: the change check (UC10)       → data/reports/changes_<source>_<dat
            then the scheduler (UC9)       → data/state/schedule.json: the source's
                                              next extraction date (Google's moves
                                              only after a --refresh-google)
+After Google: the photos                  → data/cache/photos/<place_id>/
+              (extract_photos.py)            data/cache/photo_cache.json
+                                             (up to 3 per Google place; only places
+                                             that still need them; never counted as
+                                             a change; a failure never fails stage 1)
 
 Usage:
   python run_1_extraction.py                 # run both stages (an OSM day: saved
@@ -80,6 +85,16 @@ def main():
         except Exception as exc:
             logger.error("Scheduler for %s failed: %s (the schedule stays as it was)", source, exc)
 
+    def photos():
+        """Google's photos of the matched restaurants, after the Google
+        extraction and its change check, so they never count as a change. A
+        failure is reported but never fails stage 1: the Google data is fine."""
+        try:
+            from src.s1_scrapers.extract_photos import run as run_photos
+            run_photos(refresh=args.refresh_google)
+        except Exception as exc:
+            logger.error("Photos failed: %s (the Google data is fine; the next run tries again)", exc)
+
     # ------------------------------------------------------------------
     # Stage 1: OSM extraction
     # ------------------------------------------------------------------
@@ -113,6 +128,7 @@ def main():
             sys.exit(1)
         else:
             changes("google")
+            photos()
 
     logger.info("Extraction pipeline complete.")
 

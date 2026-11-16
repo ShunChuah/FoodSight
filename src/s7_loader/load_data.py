@@ -44,6 +44,13 @@ A restaurant without an AI profile (business_profile is None) is not loaded.
 run_4_profiling.py already leaves out every restaurant with no usable AI
 answer (data/review/ai_failed.json), so this is only a safety.
 
+PHOTOS (sync_photos()): public.restaurant_photo is brought up to date with the
+photos stage 1 downloaded (data/cache/photo_cache.json and data/cache/photos/,
+keyed by Google place): added, replaced (another download time) or deleted,
+for every restaurant in the database with a Google place. Without the table
+(migration 026 not run) photos are skipped and the summary says so; the rest
+of the load goes on. Photos are not in the graph.
+
 STAGE 8 TO-DO LIST (data/state/graph_todo.json): every row this load added,
 updated or deleted, with the value before and after, so run_8_graph.py updates
 only those in Neo4j. A load adds to the list; run_8_graph.py empties it.
@@ -90,6 +97,9 @@ REMOVED_FILE = os.path.join("data", "review", "removed_from_osm.json")
 DECISIONS = ("closed", "delete", "keep")
 CLOSED_STATUS = "PERMANENTLY_CLOSED"
 EXAMPLES_SHOWN = 15  # changes listed by name in the summary
+# Google's photos, downloaded in stage 1 (src/s1_scrapers/extract_photos.py)
+PHOTO_CACHE_FILE = os.path.join("data", "cache", "photo_cache.json")
+PHOTO_MIGRATION = "db/migrations/026_restaurant_photo.sql"
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 # nearby_context count columns, from nearby_place.kind in categories.json
@@ -1066,6 +1076,78 @@ def write_todo(changes):
 
 
 # ---------------------------------------------------------------------------
+# Photos
+# ---------------------------------------------------------------------------
+
+
+def sync_photos(cur, changes):
+    """Bring public.restaurant_photo up to date with the photos stage 1
+    downloaded (PHOTO_CACHE_FILE, keyed by Google place). Every restaurant in
+    the database with a Google place gets that place's photos: a new one is
+    added, one with another download time is replaced, one no longer listed is
+    deleted, and photos of a place the restaurant no longer has (its Google
+    match changed or went) are deleted. A place stage 1 has not asked yet
+    leaves the restaurant's photos as they are. Photos are not in the graph, so
+    nothing goes on the stage 8 to-do list. Without the table (migration 026
+    not run yet) nothing is done and the summary says so."""
+    cur.execute("SELECT to_regclass('public.restaurant_photo')")
+    if cur.fetchone()[0] is None:
+        changes.counts["photos table missing"] = 1
+        return
+    cache = {}
+    if os.path.exists(PHOTO_CACHE_FILE):
+        with open(PHOTO_CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+
+    cur.execute("SELECT restaurant_id, google_place_id FROM restaurant WHERE google_place_id IS NOT NULL")
+    place_of = dict(cur.fetchall())
+    cur.execute("SELECT restaurant_id, position, google_place_id, fetched_at FROM restaurant_photo")
+    have = {(rid, pos): (place_id, fetched_at) for rid, pos, place_id, fetched_at in cur.fetchall()}
+
+    def delete(rid, pos):
+        cur.execute("DELETE FROM restaurant_photo WHERE restaurant_id = %s AND position = %s", (rid, pos))
+        changes.counts["photos deleted"] += 1
+
+    # Photos of a place the restaurant no longer has
+    for (rid, pos), (place_id, _) in list(have.items()):
+        if place_of.get(rid) != place_id:
+            delete(rid, pos)
+            del have[(rid, pos)]
+
+    for rid, place_id in place_of.items():
+        entry = cache.get(place_id)
+        if entry is None:
+            continue  # not asked yet in stage 1
+        wanted = {p["position"]: p for p in entry.get("photos") or []}
+        for pos in [pos for (r, pos) in have if r == rid and pos not in wanted]:
+            delete(rid, pos)
+        for pos, photo in wanted.items():
+            fetched_at = datetime.fromisoformat(photo["fetched_at"])
+            current = have.get((rid, pos))
+            if current and current[1] == fetched_at:
+                changes.counts["photos unchanged"] += 1
+                continue
+            if not os.path.exists(photo["file"]):
+                changes.counts["photo files missing"] += 1
+                continue
+            with open(photo["file"], "rb") as f:
+                image = f.read()
+            cur.execute(
+                """INSERT INTO restaurant_photo (restaurant_id, position, google_place_id, image, content_type,
+                                                 width_px, height_px, author_name, author_uri, fetched_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   ON CONFLICT (restaurant_id, position) DO UPDATE SET
+                       google_place_id = EXCLUDED.google_place_id, image = EXCLUDED.image,
+                       content_type = EXCLUDED.content_type, width_px = EXCLUDED.width_px,
+                       height_px = EXCLUDED.height_px, author_name = EXCLUDED.author_name,
+                       author_uri = EXCLUDED.author_uri, fetched_at = EXCLUDED.fetched_at""",
+                (rid, pos, place_id, psycopg2.Binary(image), photo["content_type"], photo.get("width_px"),
+                 photo.get("height_px"), photo.get("author_name"), photo.get("author_uri"), fetched_at),
+            )
+            changes.counts["photos replaced" if current else "photos added"] += 1
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1147,6 +1229,7 @@ def main(input_file=INPUT_FILE, dry_run=False):
         delete_gone_areas(cur, gone_areas, changes)
         delete_gone_cuisines(cur, ctx.cuisine_ids, changes)
         recount_not_in_file(cur, lost_link, changes)
+        sync_photos(cur, changes)
         not_in_file = [row for osm_id, row in db.restaurants.items() if osm_id not in in_file]
 
         if dry_run:
@@ -1190,6 +1273,14 @@ def main(input_file=INPUT_FILE, dry_run=False):
     print(f"  nearby counts     : {c['nearby counts updated']} restaurants updated; links "
           f"+{c['links added']} / -{c['links removed']}, {c['links moved']} distances changed")
     print(f"  sections changed  : {c['section changed']} restaurants")
+    if c["photos table missing"]:
+        print(f"  photos            : not loaded: the table restaurant_photo does not exist yet "
+              f"(run {PHOTO_MIGRATION}, then run_7_loading.py again)")
+    else:
+        print(f"  photos            : {c['photos added']} added, {c['photos replaced']} replaced, "
+              f"{c['photos deleted']} deleted, {c['photos unchanged']} unchanged"
+              + (f"; {c['photo files missing']} files missing in data/cache/photos/"
+                 if c["photo files missing"] else ""))
     if not_in_file:
         print(f"  not in this data  : {len(not_in_file)} restaurants in the database, left as they are"
               + (f" ({c['recounted']} recounted)" if c["recounted"] else ""))

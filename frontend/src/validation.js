@@ -6,14 +6,17 @@ export const emailRules = {
 }
 
 // Mirrors PASSWORD_RULES in backend/app/auth/manager.py, which is the real check.
+export const meetsPasswordRule = (value) =>
+  value.length >= 8 &&
+  /[A-Z]/.test(value) &&
+  /[a-z]/.test(value) &&
+  /\d/.test(value) &&
+  /[^A-Za-z0-9]/.test(value)
+
 export const newPasswordRules = {
   required: 'Password is required.',
   validate: (value) =>
-    (value.length >= 8 &&
-      /[A-Z]/.test(value) &&
-      /[a-z]/.test(value) &&
-      /\d/.test(value) &&
-      /[^A-Za-z0-9]/.test(value)) ||
+    meetsPasswordRule(value) ||
     'Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a special character.',
 }
 

@@ -46,6 +46,7 @@ REPORTS_DIR = os.path.join("data", "reports")
 DEFAULT_DAYS = {"osm": 7, "google": 14}
 MIN_DAYS, MAX_DAYS = 1, 60
 THRESHOLD = 0.03      # change share at or above which a source is extracted more often
+                      # (also CHANGE_THRESHOLD in backend/app/admin/history.py, for the admin chart: change both together)
 HISTORY_SHOWN = 5     # earlier extractions shown to the AI
 NAMES = {"osm": "OpenStreetMap (OSM)", "google": "Google Places"}
 

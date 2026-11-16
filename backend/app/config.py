@@ -1,4 +1,10 @@
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Settings are read on import, so .env must be loaded first whichever module imports this one.
+load_dotenv()
 
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT") or 5432)
@@ -16,6 +22,10 @@ EMAIL_LINK_LIFETIME_SECONDS = 15 * 60
 COOKIE_NAME = "foodsight_session"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
+# Chat messages one user may send; 0 turns a limit off.
+CHAT_LIMIT_PER_MINUTE = int(os.getenv("CHAT_LIMIT_PER_MINUTE") or 10)
+CHAT_LIMIT_PER_DAY = int(os.getenv("CHAT_LIMIT_PER_DAY") or 200)
+
 SMTP_HOST = os.getenv("SMTP_HOST") or "smtp.gmail.com"
 SMTP_PORT = int(os.getenv("SMTP_PORT") or 587)
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -24,3 +34,10 @@ MAIL_FROM = os.getenv("MAIL_FROM") or SMTP_USER
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+# The admin review page reads the pipeline's data/ folder and writes the decision files in
+# src/reference/. Docker Compose mounts both into the backend container and sets these; the
+# defaults fit a backend started from backend/ on the host.
+_REPO = Path(__file__).resolve().parents[2]
+PIPELINE_DATA_DIR = Path(os.getenv("PIPELINE_DATA_DIR") or _REPO / "data")
+PIPELINE_REFERENCE_DIR = Path(os.getenv("PIPELINE_REFERENCE_DIR") or _REPO / "src" / "reference")

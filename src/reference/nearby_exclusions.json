@@ -3,7 +3,8 @@
     "Hand-checked OpenStreetMap places that are never counted in nearby_context. OSM tags them wrongly (a clinic tagged as a hospital, a toll plaza tagged as a mall) or maps one place more than once (a mall and its wings). clean_osm_nearby.py obeys this list on every run.",
     "Key: the place's osm_type/osm_id, copied from data/1_raw/osm_nearby_raw.csv (for example node/1730075068).",
     "kind and name: what the place is in OSM, so the list is easy to read. reason: why it is not counted.",
-    "A place that has been corrected in OpenStreetMap itself can be removed from this list; the cleaner reports entries it no longer finds."
+    "A place that has been corrected in OpenStreetMap itself can be removed from this list; the cleaner reports entries it no longer finds.",
+    "The admin review page (/admin, Nearby places) writes this file too: kind and name from public.nearby_place, the admin's reason, decided_by (the admin's username) and decided_at. The nightly update (run_update.py) applies an added or removed place that night (stages 2-8, no AI)."
   ],
   "exclusions": {
     "node/1730075068": {"kind": "hospital", "name": "London Children's Clinic", "reason": "a clinic, not a hospital"},
@@ -25,6 +26,7 @@
     "way/181543130": {"kind": "mall", "name": "1 Utama (Old Wing)", "reason": "a wing of 1 Utama Shopping Centre (relation/11365206), which is counted once"},
     "relation/13936076": {"kind": "mall", "name": "1 Utama (New Wing)", "reason": "a wing of 1 Utama Shopping Centre (relation/11365206), which is counted once"},
     "way/464843891": {"kind": "mall", "name": "The Pearl Kuala Lumpur", "reason": "the same complex as Pearl Shopping Gallery (way/464843888), which is counted"},
-    "node/13461845336": {"kind": "university", "name": "Faculty of Art and Social Science", "reason": "a faculty, not a separate university; its campus has no outline in OSM, so the parts rule cannot catch it"}
+    "node/13461845336": {"kind": "university", "name": "Faculty of Art and Social Science", "reason": "a faculty, not a separate university; its campus has no outline in OSM, so the parts rule cannot catch it"},
+    "way/1184150856": {"kind": "office", "name": "Tower B", "reason": "Plaza 33 already include both Tower A and Tower B", "decided_by": "Chuah", "decided_at": "2026-11-15T20:50:36+00:00"}
   }
 }

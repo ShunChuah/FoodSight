@@ -205,6 +205,8 @@ RATE_LIMIT_SLEEP = 0.1
 # without an entry is never matched automatically (a person can still accept
 # it in OVERRIDES_FILE).
 MAX_DISTANCE_BY_STRENGTH = {"same": 50, "brand": 50}
+# (The admin review page offers Google's pin beyond 50 m: AUTO_MATCH_M in
+# backend/app/admin/routes.py; change both together.)
 STRENGTH_ORDER = ["same", "brand", "close", "weak"]  # best first
 # Name strengths alike enough to show a person when they are not matched
 REVIEW_STRENGTHS = ("same", "brand", "close")
@@ -215,8 +217,8 @@ SEARCH_RADIUS_M = 100
 
 # Why a restaurant is held for review (the `reason` of each review item)
 REVIEW_REASONS = {
-    "too_far": "Same or brand name, but the pins are farther apart than the "
-               "automatic limit (50 m).",
+    "too_far": "Same or brand name, but the pins are too far apart "
+               "(matched automatically only within 50 m).",
     "name_partly_alike": "The names are only partly alike (at least half the words "
                          "shared); such names are never matched automatically.",
     "shared_google_place": "Two or more OSM restaurants with different names matched "
@@ -477,8 +479,8 @@ def best_match(osm_name, osm_lat, osm_lon, candidates):
 def review_reason(osm_name, osm_lat, osm_lon, place):
     """(reason, reason_text) when a Google place that is not a match is still
     worth a person's look, or None. It must be a food place within
-    SEARCH_RADIUS_M whose name is "same" or "brand" but too far for the
-    automatic limit (too_far), or "close" (name_partly_alike). A place that
+    SEARCH_RADIUS_M whose name is "same" or "brand" but too far apart to be
+    matched automatically (too_far), or "close" (name_partly_alike). A place that
     passes match_problem() is a match, not a review, and gives None."""
     if _not_food(place["types"]) or place["lat"] is None or place["lon"] is None:
         return None
@@ -497,7 +499,7 @@ def review_reason(osm_name, osm_lat, osm_lon, place):
     if distance > limit:
         return "too_far", (
             f"{strength.capitalize()} name, but the pins are {distance:.0f} m apart "
-            f"(automatic limit {limit} m)."
+            f"(matched automatically only within {limit} m)."
         )
     return None
 

@@ -4,7 +4,9 @@
     "Key: the restaurant's osm_id (copy it from data/review/google_match_review.json).",
     "place_id: the correct Google place ID (google.place_id in the review file), or null when the restaurant has no Google match.",
     "note: why you decided it (optional, for you).",
-    "Example: \"123456789\": {\"place_id\": \"ChIJ...\", \"note\": \"same shop, checked on Google Maps\"}"
+    "Example: \"123456789\": {\"place_id\": \"ChIJ...\", \"note\": \"same shop, checked on Google Maps\"}",
+    "The admin review page (/admin, Google matches) writes this file too, adding decided_by (the admin's username) and decided_at. The nightly update (run_update.py) applies a new or changed place_id that night; a note alone starts nothing.",
+    "pin (optional): \"google\" saves Google's pin in the database instead of OSM's (run_3_merging.py reads it). Without it OSM's pin is used. The admin review page offers it when the pins are more than 50 m apart."
   ],
   "overrides": {}
 }

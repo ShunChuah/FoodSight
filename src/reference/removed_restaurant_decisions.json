@@ -7,7 +7,8 @@
     "          delete = remove it from the database (with its reviews and links) and from the graph;",
     "          keep   = leave it as it is (OSM deleted it by mistake); it then leaves the review file.",
     "note: why you decided it (optional, for you).",
-    "Example: \"123456789\": {\"decision\": \"closed\", \"note\": \"Shut; Google says permanently closed\"}"
+    "Example: \"123456789\": {\"decision\": \"closed\", \"note\": \"Shut; Google says permanently closed\"}",
+    "The admin review page (/admin, Removed restaurants) writes this file too, adding decided_by (the admin's username) and decided_at. The nightly update (run_update.py) applies a new or changed decision that night (stages 7-8)."
   ],
   "decisions": {}
 }

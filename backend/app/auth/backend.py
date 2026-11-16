@@ -17,9 +17,8 @@ COOKIE_SETTINGS = dict(
 )
 
 
+# After a Google login the browser is on the backend URL, so send it back to the frontend.
 class RedirectCookieTransport(CookieTransport):
-    """After a Google login the browser is on the backend URL, so send it back to the frontend."""
-
     async def get_login_response(self, token):
         response = RedirectResponse(f"{config.FRONTEND_URL}/chat", status_code=302)
         return self._set_login_cookie(response, token)
@@ -42,3 +41,6 @@ oauth_backend = AuthenticationBackend(
 
 fastapi_users = FastAPIUsers[User, int](get_user_manager, [auth_backend])
 current_user = fastapi_users.current_user(active=True, verified=True)
+# Admin pages (the review page): also auth.users.is_superuser, set by hand in pgAdmin.
+# Not logged in gives 401, logged in but not an admin 403.
+current_admin = fastapi_users.current_user(active=True, verified=True, superuser=True)

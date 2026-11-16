@@ -35,9 +35,8 @@ async def get_access_token_db(session=Depends(get_async_session)):
     yield SQLAlchemyAccessTokenDatabase(session, AccessToken)
 
 
+# The stock client reads the People API, which is disabled by default in a Google Cloud project.
 class GoogleClient(GoogleOAuth2):
-    """The stock client reads the People API, which is disabled by default in a Google Cloud project."""
-
     async def get_id_email(self, token: str) -> tuple[str, str | None]:
         async with self.get_httpx_client() as client:
             response = await client.get(

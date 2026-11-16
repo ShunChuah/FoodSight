@@ -1,26 +1,48 @@
 services:
   backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    env_file: .env
+    build:
+      context: ./backend
+    restart: unless-stopped
+    # Development: reload on every saved change in backend/ (mounted below).
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Postgres runs on the host machine, not in a container.
       DB_HOST: host.docker.internal
+      # Neo4j runs in Neo4j Desktop on the host machine, not in a container.
+      NEO4J_URI: bolt://host.docker.internal:7687
+      NEO4J_EXECUTE_QUERIES: "true"
+      # File change events do not cross the Windows-to-container mount, so poll instead.
       WATCHFILES_FORCE_POLLING: "true"
+      # The admin review page: where the two pipeline folders below are mounted.
+      PIPELINE_DATA_DIR: /pipeline/data
+      PIPELINE_REFERENCE_DIR: /pipeline/reference
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
     volumes:
       - ./backend:/app
+      # The admin review page reads the pipeline's review, report, state and log files (read-only)
+      # and writes the admin's decisions into the decision files in src/reference/.
+      - ./data:/pipeline/data:ro
+      - ./src/reference:/pipeline/reference
 
   frontend:
-    build: ./frontend
-    ports:
-      - "5173:5173"
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    # Only the VITE_* values from .env, so the frontend container never sees the backend's secrets.
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+      VITE_ARCGIS_API_KEY: ${VITE_ARCGIS_API_KEY:-}
+    ports:
+      - "5173:5173"
     volumes:
       - ./frontend:/app
+      # Keeps the container's own node_modules (Linux builds) instead of the Windows folder.
       - /app/node_modules
     depends_on:
       - backend

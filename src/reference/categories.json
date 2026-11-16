@@ -996,7 +996,7 @@
       }
     },
     "price_range.tier": {
-      "meaning": "The price band that price_range.avg_meal_price (what one person usually pays for a meal, in RM) falls in. avg_meal_price is the middle of Google's price band (priceRange, e.g. RM20-40 gives RM30; an open top band such as RM100+ gives its start) when Google has one. A wide band whose middle falls in another tier than Google's price level (such as RM20-100 for a Moderate KFC, middle RM60 = upscale) uses the AI's estimate instead, kept inside the band. Otherwise the AI estimates it; when Google gives only a price level (priceLevel), the estimate is kept inside the range of the tier whose google_level lists it. The code then sets the tier from min_price below, so the tier and the price always agree.",
+      "meaning": "The price band that price_range.avg_meal_price (what one person usually pays for a meal, in RM) falls in. avg_meal_price is the AI's estimate. When Google has a price band (priceRange, e.g. RM20-40), the estimate is kept inside it: raised to its start, or lowered to RM1 under its end (RM20 in a RM1-20 band becomes RM19, so it stays budget); an open top band such as RM100+ has no end. Inside the band the estimate decides even when it falls in another tier than Google's price level (Haidilao, band RM40-160, is Moderate but about RM100 = upscale). Only when the AI gave no estimate is the band's middle used (RM20-40 gives RM30; RM100+ gives RM100). Without a band, when Google gives only a price level (priceLevel), the estimate is kept inside the range of the tier whose google_level lists it. The code then sets the tier from min_price below, so the tier and the price always agree.",
       "filled_by": "lookup",
       "pick": "one",
       "values": {

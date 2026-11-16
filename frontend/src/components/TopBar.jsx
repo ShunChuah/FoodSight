@@ -7,22 +7,22 @@ import Logo from './Logo.jsx'
 import { MoonIcon } from './icons.jsx'
 
 const navLink = ({ isActive }) =>
-  `text-base text-ink hover:text-brand dark:text-white ${isActive ? 'font-semibold' : 'font-normal'}`
+  `text-[0.875rem] text-ink hover:text-brand dark:text-white ${isActive ? 'font-semibold' : 'font-normal'}`
 
 function ThemeToggle() {
   const { theme, toggleTheme } = useTheme()
   const dark = theme === 'dark'
   return (
-    <div className="flex h-11 items-center gap-3 rounded-lg border border-transparent bg-white pl-3 pr-2 text-ink shadow-sm dark:border-white dark:bg-surface-dark dark:text-white">
+    <div className="flex h-11 items-center gap-3 rounded-[0.625rem] border border-gray-200 bg-white pl-3 pr-2 text-ink dark:border-line-dark dark:bg-surface-dark dark:text-white">
       <MoonIcon />
-      <span className="text-base">Dark Mode</span>
+      <span className="text-[0.875rem] font-normal">Dark Mode</span>
       <button
         type="button"
         role="switch"
         aria-checked={dark}
         aria-label="Dark mode"
         onClick={toggleTheme}
-        className={`relative ml-1 h-[1.625rem] w-[3.25rem] cursor-pointer rounded-full transition-colors ${dark ? 'bg-brand' : 'bg-[#4a2c1d]'}`}
+        className={`relative ml-1 h-[1.625rem] w-[3.25rem] cursor-pointer rounded-full transition-colors ${dark ? 'bg-[#5a321f]' : 'bg-gray-200'}`}
       >
         <span
           className={`absolute top-1 left-1 size-[1.125rem] rounded-full bg-white transition-transform ${dark ? 'translate-x-[1.625rem]' : ''}`}
@@ -67,11 +67,11 @@ export default function TopBar() {
         <nav className="flex items-center gap-4">
           {user ? (
             <>
-              <span className="text-base font-semibold text-ink dark:text-white">{user.username}</span>
+              <span className="text-[0.875rem] font-medium text-ink dark:text-white">{user.username}</span>
               <button
                 type="button"
                 onClick={logout}
-                className="cursor-pointer text-base text-ink hover:text-brand dark:text-white"
+                className="cursor-pointer text-[0.875rem] font-normal text-ink hover:text-brand dark:text-white"
               >
                 Log out
               </button>
@@ -90,8 +90,9 @@ export default function TopBar() {
         <div className="ml-16">
           <ThemeToggle />
         </div>
-        {/* key: a new picture link starts fresh, even after an earlier one failed */}
-        <Avatar key={user?.profile_picture_url || 'default'} url={user?.profile_picture_url} />
+        {/* Only for a logged-in user: a visitor has no picture to show.
+            key: a new picture link starts fresh, even after an earlier one failed */}
+        {user && <Avatar key={user.profile_picture_url || 'default'} url={user.profile_picture_url} />}
       </div>
     </header>
   )

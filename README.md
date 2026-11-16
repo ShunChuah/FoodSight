@@ -35,6 +35,7 @@ docker compose logs -f backend  # view backend logs
 - Register with a username, email and password, then open the verification link sent by email. Login is blocked until the email is verified.
 - Passwords need at least 8 characters with an uppercase letter, a lowercase letter, a number and a special character.
 - A login session lasts 1 hour. Verification and reset links last 15 minutes.
+- On the dashboard, Settings → Edit Profile (or your name at the bottom of the sidebar) shows your email and name, lets you change the name, and lets you upload a profile picture (JPG, PNG or WebP, up to 2 MB) by clicking the picture. Settings → Change Password needs your current password and logs out your other browsers. Picture upload needs `db/migrations/025_user_picture.sql` to have been run.
 - Without `SMTP_USER` and `SMTP_PASSWORD` in `.env`, no email is sent. The link is printed in the backend log instead: run `docker compose logs backend` and copy it.
 - Without `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, "Continue with Google" shows a "not set up" message. See `.env.example` for how to get both.
 
@@ -63,26 +64,28 @@ The data comes from OpenStreetMap (every food business in Petaling Jaya, and wha
 
 | Stage | Command | What it does |
 |---|---|---|
-| 1 | `python run_1_extraction.py` | OSM and Google data into `data/1_raw/`; then the change check and the next extraction date |
+| 1 | `python run_1_extraction.py` | OSM and Google data into `data/1_raw/`; then the change check and the next extraction date; then Google's first 3 photos of each restaurant that still needs them (`data/cache/photos/`) |
 | 2 | `python run_2_preprocessing.py` | cleans each source |
 | 3 | `python run_3_merging.py` | joins OSM and Google by rules (no AI) |
 | 4 | `python run_4_profiling.py` | the AI: chooses between the sources and profiles each new or changed restaurant; review sentiments |
 | 5 | `python run_5_validation.py` | checks every record before it is loaded |
 | 6 | `python run_6_clustering.py` | finds food clusters (DBSCAN) |
-| 7 | `python run_7_loading.py` | brings PostgreSQL up to date (`--dry-run` shows the changes and undoes them) |
+| 7 | `python run_7_loading.py` | brings PostgreSQL up to date, photos included (`--dry-run` shows the changes and undoes them; photos need `db/migrations/026_restaurant_photo.sql` to have been run) |
 | 8 | `python run_8_graph.py` | copies what changed into Neo4j (`--fresh` rebuilds the whole graph) |
 
-**The daily update:** `python run_update.py` does all of this by itself: it extracts what is due (OpenStreetMap and Google each have their own schedule, which an AI adjusts from how much changed), runs the stages, and continues the next day if something stopped halfway. Windows Task Scheduler runs it every night at midnight. `python run_update.py --status` shows what is due; `--force osm|google|both` extracts now.
+**The daily update:** `python run_update.py` does all of this by itself: it extracts what is due (OpenStreetMap and Google each have their own schedule, which an AI adjusts from how much changed), runs the stages, and continues the next day if something stopped halfway. Windows Task Scheduler runs it every night at midnight. `python run_update.py --status` shows what is due; `--force osm|google|both` extracts now. A new decision in `src/reference/` (from the admin review page or by hand) is applied that night too.
+
+**The admin review page:** `http://localhost:5173/admin`, or **Review** in the chat sidebar, for admins only. It shows what the pipeline needs a person for (Google matches to check, restaurants gone from OpenStreetMap, nearby places counted wrongly) and writes your decisions into the files in `src/reference/` for the next nightly update. To make an account an admin, run this in pgAdmin: `UPDATE auth.users SET is_superuser = true WHERE email = 'you@example.com';`
 
 **Where things are:**
 
 | Folder | What |
 |---|---|
 | `data/logs/` | everything each run printed, one file per day |
-| `data/review/` | things that need you: Google matches to check, restaurants gone from OpenStreetMap, failed AI answers |
+| `data/review/` | things that need you: Google matches to check, restaurants gone from OpenStreetMap, failed AI answers (the admin review page shows them) |
 | `data/reports/` | what changed in each extraction |
 | `data/archive/` | a dated copy of each extraction that changed something |
 | `data/state/` | the schedule, the graph's to-do list, the daily runner's bookmark |
-| `src/reference/` | files you edit by hand: categories, Google match decisions, nearby exclusions, decisions about removed restaurants |
+| `src/reference/` | files you edit by hand or through the admin review page: categories (by hand only), Google match decisions, nearby exclusions, decisions about removed restaurants |
 
 The full description of every rule is in [CLAUDE.md](CLAUDE.md).

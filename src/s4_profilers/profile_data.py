@@ -22,11 +22,10 @@ disagree (only when they do). The AI answers in JSON:
                        origin_country and category come from that file. Names
                        outside the list are dropped; none left → "Other"
   3. price_range     — {tier, avg_meal_price}, see price_range_for():
-                       avg_meal_price: the middle of Google's price band when
-                       there is one (but the AI's estimate, kept inside the
-                       band, when the middle and Google's price level give
-                       different tiers); otherwise the AI's estimate, kept
-                       inside the tier of Google's price level when there is one
+                       avg_meal_price: the AI's estimate, kept inside Google's
+                       price band when there is one (the band's middle only if
+                       the AI gave none); without a band, kept inside the tier
+                       of Google's price level when there is one
                        tier: not asked from the AI; set from avg_meal_price
                        using the price bands in src/reference/categories.json
   4. business_profile — target_segment, service_style, restaurant_type,
@@ -276,7 +275,8 @@ def tier_for_price(price):
 
 def band_middle(low, high):
     """The middle of Google's price band (RM20-40 → 30); its start when the
-    top is open (RM100+); None without a band."""
+    top is open (RM100+); None without a band. Used only when the AI gave no
+    estimate."""
     if low is not None and high is not None:
         return (low + high) / 2
     return low if low is not None else high
@@ -294,33 +294,34 @@ def keep_inside(price, tier):
 
 
 def keep_in_band(price, low, high):
-    """Move a price into Google's band: up to its start, or down to its end.
-    An open band (RM100+) has no end."""
+    """Move a price into Google's band: up to its start, or down to RM1 under
+    its end, so RM20 in a RM1-20 band becomes RM19 and stays budget (the band
+    ends where the next tier starts). An open band (RM100+) has no end."""
     if low is not None and price < low:
         return low
-    if high is not None and price > high:
-        return high
+    if high is not None and price >= high:
+        return max(high - 1, low) if low is not None else high - 1
     return price
 
 
 def price_range_for(restaurant, llm_price):
     """Return {tier, avg_meal_price} for a restaurant.
 
-    Google's price band → its middle. But when the middle and Google's price
-    level give different tiers (a wide band, such as RM20-120 for a
-    "Moderate" KFC), the AI's estimate decides, kept inside the band; without
-    an estimate the middle is used. No band → the AI's estimate (None if
-    there is none), kept inside the tier of Google's price level when Google
-    gives one. The tier follows from the price, or from the level when there
-    is no price, so the two always agree.
+    Google's price band → the AI's estimate, kept inside the band; the band's
+    middle only when there is no estimate (a failed call). The middle alone
+    would give every place in the same band the same price (all 274 RM1-20
+    places RM10.5 on the November data). Inside the band the estimate decides
+    even when its tier differs from Google's price level: the level is a
+    coarse label (Haidilao, band RM40-160, is "Moderate" though about RM100).
+    No band → the AI's estimate (None if there is none), kept inside the tier
+    of Google's price level when Google gives one. The tier follows from the
+    price, or from the level when there is no price, so the two always agree.
     """
     low, high = restaurant.get("google_price_low"), restaurant.get("google_price_high")
     middle = band_middle(low, high)
     level_tier = LEVEL_TIER.get(restaurant.get("google_price_level") or "")
     if middle is not None and middle > 0:
-        price = middle
-        if level_tier and tier_for_price(middle) != level_tier and llm_price is not None:
-            price = keep_in_band(llm_price, low, high)
+        price = keep_in_band(llm_price, low, high) if llm_price is not None else middle
     else:
         price = llm_price
         if price is not None and level_tier:

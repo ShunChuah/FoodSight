@@ -5,28 +5,58 @@ midnight; it can also be run by hand).
 Each run does the first of these that applies:
   1. An extraction is due (its next date in data/state/schedule.json is today
      or earlier, see the scheduler, UC9): stage 1 for it, then stages 2-8.
-     This also finishes any earlier unfinished run, since stages 2-8 always
-     process all the data.
+     This also finishes any earlier unfinished run and applies any new
+     decision (case 2), since stages 2-8 always process all the data.
         OSM due        python run_1_extraction.py
         Google due     python run_1_extraction.py --skip-osm --refresh-google
         both due       python run_1_extraction.py --refresh-google
-  2. Nothing due, but the last run stopped halfway: the stages from the one
-     that failed to stage 8 (from stage 4 at the latest when case 3 also
-     applies, so both are done tonight).
-  3. Nothing else, but stage 4 left restaurants or reviews without an AI
+     A Google refresh with new Google match decisions waiting first runs the
+     decision step (python run_1_extraction.py --skip-osm, see case 2). A
+     restaurant held for review is not in google_raw.csv, so a restaurant
+     released as "same place" is a new Google row. Taken in by the decision
+     step (whose change report the scheduler ignores), it is not counted again
+     by the refresh, which then counts only real Google changes; otherwise 30
+     approvals would look like a 4.7% change and the scheduler would refresh
+     more often (more paid calls) with nothing changed on Google.
+  2. Nothing due, but a decision file in src/reference/ changed since the run
+     that last applied it (written by the admin review page, or by hand):
+     from the first stage that reads it to stage 8. Only what the pipeline
+     reads counts (a place ID, an excluded place, a decision); a note, who
+     decided or the layout do not.
+        google_match_overrides.json        stage 1 for Google only
+                                           (python run_1_extraction.py
+                                           --skip-osm: saved Google answers,
+                                           no paid Place Details calls, no date
+                                           moves; only the photos of newly
+                                           approved restaurants are paid),
+                                           then 2-8
+        nearby_exclusions.json             stages 2-8 (no AI)
+        removed_restaurant_decisions.json  stages 7-8
+     The fingerprint of each file as last applied is kept in decisions_applied
+     in data/state/run_state.json.
+  3. Nothing else, but the last run stopped halfway: the stages from the one
+     that failed to stage 8.
+  4. Nothing else, but stage 4 left restaurants or reviews without an AI
      answer (data/review/ai_failed.json is not empty: an AI server error, for
      example): stages 4-8. Stage 4 asks only those; every other answer comes
      from its cache. This is tried every night until they have an answer.
-  4. Nothing else, but the graph to-do list is not empty (Neo4j was closed
+  5. Nothing else, but the graph to-do list is not empty (Neo4j was closed
      last time): stage 8 only.
-  5. Nothing to do: one line in the day's log.
+  6. Nothing to do: one line in the day's log.
+When several of cases 2 to 5 apply, all are done tonight: the run starts at
+the earliest stage any of them needs (an unfinished stage 6 with AI failures
+waiting starts at stage 4).
 
 "Extracted" means stage 1 rewrote the source's raw file (osm_raw.csv or
 google_raw.csv; each is written only when its extraction succeeded), whatever
 happened after it. When something fails:
   - stage 1, nothing extracted: the source stays due and the next run tries
-    again (a warning says so). An unfinished run, AI failures or a waiting
-    graph to-do list are still dealt with tonight (as in cases 2 to 4).
+    again (a warning says so). New decisions, an unfinished run, AI failures
+    or a waiting graph to-do list are still dealt with tonight (as in cases 2
+    to 5).
+  - the decision step (stage 1 --skip-osm) did not rewrite google_raw.csv:
+    a warning, the Google match decisions stay waiting for the next run, and
+    the run goes on.
   - stage 1, one source extracted and the other not (OSM worked, the Google
     refresh did not): stages 2-8 still run; a warning names the one not
     extracted.
@@ -38,12 +68,13 @@ happened after it. When something fails:
     full paid refresh each time.
   - stage 4 finished, but some restaurants or reviews still have no AI
     answer: the run goes on (they are left out for now) with a warning, and
-    the next run asks them again (case 1 or 3).
+    the next run asks them again (case 1 or 4).
   - stages 2-7 (stage 4 out of AI quota, for example): the bookmark in
     data/state/run_state.json remembers the stage; the next run continues
-    from it (case 2), unless an extraction is due (case 1 does it all).
+    from it (case 3), unless an extraction is due (case 1 does it all). A
+    decision counts as applied only once the stage that reads it succeeded.
   - stage 8 (Neo4j Desktop not started): never blocks anything. The graph
-    to-do list keeps the changes, and case 4 retries on every run.
+    to-do list keeps the changes, and case 5 retries on every run.
 
 Each stage is its own process and writes into the day's log as usual
 (data/logs/YYYY-MM-DD.log), so a night's whole run is in one file. Warnings
@@ -59,6 +90,7 @@ Usage:
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import subprocess
@@ -91,6 +123,15 @@ STAGES = {
     8: "run_8_graph.py",
 }
 QUOTA_EXIT = 2   # run_4_profiling.py stops with this when the AI's daily quota is used up
+# The decision files (written by the admin review page, or by hand) and the
+# first stage that reads each one (case 2)
+REFERENCE_DIR = os.path.join("src", "reference")
+OVERRIDES = "google_match_overrides.json"   # extract_google.py, in stage 1
+DECISION_FILES = {
+    OVERRIDES: 1,
+    "nearby_exclusions.json": 2,              # clean_osm_nearby.py
+    "removed_restaurant_decisions.json": 7,   # load_data.py
+}
 
 
 def _now():
@@ -160,45 +201,98 @@ def _ai_failed_text(restaurants, reviews):
 
 
 def _stages_text(first):
+    if first == 1:
+        return "python run_1_extraction.py --skip-osm (the decision step), then stages 2-8"
     return "stage 8 only" if first == 8 else f"stages {first}-8"
 
 
+def decision_fingerprint(name):
+    """A hash of what the pipeline reads from a decision file: the place ID of
+    each override and its pin choice (stage 3 reads "pin": "google"), the
+    excluded places, each decision. A note, who decided, when, or the layout
+    are left out, so editing a note never starts a run. An override without a
+    pin choice hashes as before the pin choice existed.
+    None when the file does not exist; "unreadable" when it is not valid JSON
+    (it then counts as changed, and the stage that reads it reports the error)."""
+    try:
+        doc = _read(os.path.join(REFERENCE_DIR, name), None)
+    except (OSError, ValueError):
+        return "unreadable"
+    if doc is None:
+        return None
+    if name == OVERRIDES:
+        used = {str(k): ([(v or {}).get("place_id"), v["pin"]] if (v or {}).get("pin") else (v or {}).get("place_id"))
+                for k, v in (doc.get("overrides") or {}).items()}
+    elif name == "nearby_exclusions.json":
+        used = sorted(doc.get("exclusions") or {})
+    else:
+        used = {str(k): str((v or {}).get("decision") or "").strip().lower()
+                for k, v in (doc.get("decisions") or {}).items()}
+    return hashlib.sha256(json.dumps(used, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def decisions_waiting(state):
+    """{file: first stage that reads it} for the decision files that changed
+    since the run that last applied them."""
+    applied = state.get("decisions_applied") or {}
+    return {name: stage for name, stage in DECISION_FILES.items()
+            if decision_fingerprint(name) != applied.get(name)}
+
+
+def _mark_applied(state, name, fingerprint):
+    state.setdefault("decisions_applied", {})[name] = fingerprint
+
+
 def catch_up(state):
-    """When no extraction runs: what is left from earlier runs, as
-    {"case", "from_stage", "why"}, or None. In this order: an unfinished run,
-    restaurants or reviews with no AI answer, a waiting graph to-do list."""
-    failed = ai_failed_waiting()
+    """When no extraction runs: what is left to do, as {"case", "from_stage",
+    "why"}, or None. Cases 2 to 5 (see the text at the top): new decisions, an
+    unfinished run, restaurants or reviews with no AI answer, a waiting graph
+    to-do list. Everything that applies is done tonight, so the run starts at
+    the earliest stage any of them needs; "case" is the first that applies."""
+    needs = []   # (case, first stage, why)
+    waiting = decisions_waiting(state)
+    if waiting:
+        needs.append((2, min(waiting.values()), f"new decisions in {', '.join(waiting)}"))
     unfinished = state.get("unfinished")
     if unfinished:
-        stage = unfinished["stage"]
-        why = f"the last run stopped at stage {stage} ({unfinished['error']})"
-        if any(failed) and stage > 4:
-            stage = 4
-            why += f"; {_ai_failed_text(*failed)} with no AI answer yet, so from stage 4"
-        return {"case": 2, "from_stage": stage, "why": why}
+        needs.append((3, unfinished["stage"],
+                      f"the last run stopped at stage {unfinished['stage']} ({unfinished['error']})"))
+    failed = ai_failed_waiting()
     if any(failed):
-        return {"case": 3, "from_stage": 4,
-                "why": f"{_ai_failed_text(*failed)} with no AI answer yet ({AI_FAILED_FILE})"}
+        needs.append((4, 4, f"{_ai_failed_text(*failed)} with no AI answer yet ({AI_FAILED_FILE})"))
     if graph_waiting():
-        return {"case": 4, "from_stage": 8, "why": "the graph to-do list is not empty"}
-    return None
+        needs.append((5, 8, "the graph to-do list is not empty"))
+    if not needs:
+        return None
+    first = min(stage for _, stage, _ in needs)
+    why = "; ".join(text for _, _, text in needs)
+    if len(needs) > 1:
+        why += f"; so from stage {first}"
+    return {"case": needs[0][0], "from_stage": first, "why": why}
 
 
 def plan(today, force=None):
-    """What this run will do: {"case", "sources", "from_stage", "why"}."""
+    """What this run will do: {"case", "sources", "from_stage", "why",
+    "decision_step"}. decision_step: run python run_1_extraction.py --skip-osm
+    before a Google refresh, as Google match decisions are waiting (case 1)."""
     schedule = update_schedule.load_schedule()
     state = _read(STATE_FILE, {})
     if force:
         sources = ["osm", "google"] if force == "both" else [force]
-        return {"case": 1, "sources": sources, "from_stage": 1, "why": f"--force {force}"}
-    due = due_sources(today, schedule)
-    if due:
-        return {"case": 1, "sources": due, "from_stage": 1, "why": ", ".join(s.upper() if s == "osm" else "Google" for s in due) + " due"}
-    later = catch_up(state)
-    if later:
-        return {"sources": [], **later}
-    nxt = ", ".join(f"{'OSM' if s == 'osm' else 'Google'} {e['next_due']}" for s, e in schedule.items())
-    return {"case": 5, "sources": [], "from_stage": None, "why": f"nothing to do (next: {nxt})"}
+        todo = {"case": 1, "sources": sources, "from_stage": 1, "why": f"--force {force}"}
+    elif due := due_sources(today, schedule):
+        todo = {"case": 1, "sources": due, "from_stage": 1,
+                "why": ", ".join(s.upper() if s == "osm" else "Google" for s in due) + " due"}
+    elif later := catch_up(state):
+        return {"sources": [], "decision_step": False, **later}
+    else:
+        nxt = ", ".join(f"{'OSM' if s == 'osm' else 'Google'} {e['next_due']}" for s, e in schedule.items())
+        return {"case": 6, "sources": [], "from_stage": None, "why": f"nothing to do (next: {nxt})",
+                "decision_step": False}
+    todo["decision_step"] = "google" in todo["sources"] and OVERRIDES in decisions_waiting(state)
+    if todo["decision_step"]:
+        todo["why"] += "; new Google match decisions are taken in first, so the refresh counts only real changes"
+    return todo
 
 
 def extraction_args(sources):
@@ -207,6 +301,28 @@ def extraction_args(sources):
     if sources == ["google"]:
         return ["--skip-osm", "--refresh-google"]
     return ["--refresh-google"]
+
+
+def decision_step(state, runner, warn):
+    """Take in new Google match decisions: stage 1 for Google only, with no
+    refresh (python run_1_extraction.py --skip-osm). Saved Google answers are
+    reused, so it makes no paid Place Details calls (only the photos of newly
+    approved restaurants, 3 billed requests each), and no schedule moves (only a full
+    refresh moves Google's date). Returns True when google_raw.csv was
+    rewritten, which marks the overrides as applied."""
+    fingerprint = decision_fingerprint(OVERRIDES)
+    before = _written_at(RAW_FILES["google"])
+    code = runner("run_1_extraction.py", ["--skip-osm"])
+    after = _written_at(RAW_FILES["google"])
+    if after is not None and after != before:
+        _mark_applied(state, OVERRIDES, fingerprint)
+        save_json(STATE_FILE, state)
+        print("\nDecision step: the Google match decisions are taken in")
+        return True
+    warn(f"The Google match decisions ({REFERENCE_DIR}{os.sep}{OVERRIDES}) could not be taken in "
+         f"(stage 1 --skip-osm exit code {code}; see the error above): they stay waiting, and "
+         "the next run tries again")
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +363,7 @@ def daily(today=None, force=None, runner=run_stage):
     todo = plan(today, force)
     state = _read(STATE_FILE, {})
     print(f"FoodSight daily update {today}: {todo['why']}")
-    if todo["case"] == 5:
+    if todo["case"] == 6:
         return todo["why"]
 
     started = _now()
@@ -259,15 +375,21 @@ def daily(today=None, force=None, runner=run_stage):
         print(f"WARNING: {text}", flush=True)
 
     first = todo["from_stage"]
-    if first == 1:
+    if first == 1 and todo["sources"]:
+        if todo["decision_step"]:
+            decision_step(state, runner, warn)
+        # Taken after the decision step, which rewrites google_raw.csv itself
         schedule_before = update_schedule.load_schedule()
         files_before = {s: _written_at(p) for s, p in RAW_FILES.items()}
+        overrides_before = decision_fingerprint(OVERRIDES)
         code = runner("run_1_extraction.py", extraction_args(todo["sources"]))
         schedule_after = update_schedule.load_schedule()
         # Rewritten by this stage 1. On an OSM day google_raw.csv is rewritten
         # too (Google lookups for new restaurants), without Google being due
         written = {s: t for s, p in RAW_FILES.items()
                    if (t := _written_at(p)) is not None and t != files_before[s]}
+        if "google" in written:   # its Google part ran, and obeyed the overrides
+            _mark_applied(state, OVERRIDES, overrides_before)
         print(f"\nStage 1 (exit code {code}): "
               + (", ".join(TITLES[s] for s in written) + " extracted" if written else "nothing extracted"))
         for source in todo["sources"]:
@@ -292,6 +414,13 @@ def daily(today=None, force=None, runner=run_stage):
         else:
             result = "nothing extracted, and nothing else to do"
 
+    if result is None and first == 1:
+        # Case 2 (or a night whose extraction failed): new Google match
+        # decisions need stage 1 for Google. Stages 2-8 run even when it fails:
+        # they are cheap (everything cached) and may have other decisions to apply
+        decision_step(state, runner, warn)
+        first = 2
+
     if result is None:
         for stage in range(first, 9):
             # Written before the stage starts: a run cut off from outside (a power
@@ -301,8 +430,13 @@ def daily(today=None, force=None, runner=run_stage):
                                    "error": "cut off while it was running (a power cut, the 20-hour "
                                             "limit, or ended by hand)"}
             save_json(STATE_FILE, state)
+            # The decision files this stage reads, as it reads them now: they count
+            # as applied once it succeeds
+            reads = {name: decision_fingerprint(name) for name, s in DECISION_FILES.items() if s == stage}
             code = runner(STAGES[stage], ())
             if code == 0:
+                for name, fingerprint in reads.items():
+                    _mark_applied(state, name, fingerprint)
                 if stage == 4:
                     left = ai_failed_waiting()
                     if any(left):
@@ -343,12 +477,17 @@ def status(today=None):
     for line in update_schedule.status_lines():
         print(f"  {line}")
     if todo["case"] == 1:
-        what = f"python run_1_extraction.py {' '.join(extraction_args(todo['sources']))}".rstrip() + ", then stages 2-8"
-    elif todo["case"] == 5:
+        what = (("python run_1_extraction.py --skip-osm (the decision step), then " if todo["decision_step"] else "")
+                + f"python run_1_extraction.py {' '.join(extraction_args(todo['sources']))}".rstrip()
+                + ", then stages 2-8")
+    elif todo["case"] == 6:
         what = "nothing"
     else:
         what = _stages_text(todo["from_stage"])
     print(f"\nThe next run would do: {what}  ({todo['why']})")
+    waiting = decisions_waiting(state)
+    print("New decisions waiting: " + (", ".join(f"{name} (from stage {stage})" for name, stage in waiting.items())
+                                       if waiting else "none"))
     unfinished = state.get("unfinished")
     print(f"Unfinished run: " + (f"stage {unfinished['stage']} since {unfinished['since']} ({unfinished['error']})"
                                  if unfinished else "none"))

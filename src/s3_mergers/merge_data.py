@@ -75,6 +75,10 @@ NEARBY_COUNTED = {
     if "radius_m" in detail
 }
 
+# Hand-checked Google matches (written by hand or by the admin review page). The merger
+# reads only "pin": "google", the restaurant whose Google pin a person chose over OSM's.
+OVERRIDES_FILE = os.path.join("src", "reference", "google_match_overrides.json")
+
 OUTPUT_FILE = os.path.join("data", "3_merged", "pj_merged.json")
 # Review file, rewritten on every run: the restaurants with no address from
 # either source whose Nominatim lookup failed. A later run asks Nominatim again
@@ -456,11 +460,30 @@ def resolve_hours(osm, google, resolved, merge_log):
     )
 
 
-def resolve_coordinates(osm, google, resolved, merge_log):
-    """OSM's pin is used; Google's only when OSM has none. No AI.
+def load_pin_choices(path=OVERRIDES_FILE):
+    """{osm_id: "google"} for the restaurants whose override asks for Google's pin
+    ("pin": "google", chosen on the admin review page for a Google match whose pins
+    are far apart). Every other restaurant keeps the pin rule in resolve_coordinates()."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        overrides = json.load(f).get("overrides") or {}
+    return {str(osm_id): "google" for osm_id, entry in overrides.items()
+            if (entry or {}).get("pin") == "google" and (entry or {}).get("place_id")}
+
+
+def resolve_coordinates(osm, google, resolved, merge_log, pin_choice=None):
+    """OSM's pin is used; Google's only when OSM has none, or when a person chose
+    Google's pin (pin_choice "google", from the override file). No AI.
     Latitude and longitude always come from the same source."""
     osm_pin = (_s(osm.get("latitude")), _s(osm.get("longitude")))
     google_pin = (_s(google.get("latitude")), _s(google.get("longitude")))
+    if pin_choice == "google" and all(google_pin):
+        pin, source, reason = google_pin, "google", "Google's pin, chosen by a person (google_match_overrides.json)"
+        for field, osm_v, google_v, value in zip(("latitude", "longitude"), osm_pin, google_pin, pin):
+            resolved[field] = value
+            merge_log[field] = _log_entry(osm_v, google_v, value, source, "override", reason)
+        return
     if all(osm_pin):
         pin, source, reason = osm_pin, "osm", "OSM's pin is used whenever it has one"
     elif all(google_pin):
@@ -611,7 +634,7 @@ def fields_waiting_for_address(merge_log):
             if (merge_log.get(field) or {}).get("resolution") == WAITING_FOR_ADDRESS}
 
 
-def resolve_restaurant(osm, google, nominatim_cache, stats):
+def resolve_restaurant(osm, google, nominatim_cache, stats, pin_choice=None):
     """Decide every field the rules can decide. Returns (resolved, merge_log,
     conflicts, lookup_error):
 
@@ -643,7 +666,7 @@ def resolve_restaurant(osm, google, nominatim_cache, stats):
                 f"Only {source.upper()} had a value",
             )
 
-    resolve_coordinates(osm, google, resolved, merge_log)
+    resolve_coordinates(osm, google, resolved, merge_log, pin_choice)
     resolve_hours(osm, google, resolved, merge_log)
     missing = compare_location(osm, google, resolved, merge_log, conflicts)
 
@@ -761,6 +784,7 @@ def main():
         print(f"WARNING: {NEARBY_CSV} not found, so no restaurant gets a nearby context. "
               "Run run_1_extraction.py (with OSM) and run_2_preprocessing.py first.")
     nominatim_cache = load_cache(NOMINATIM_CACHE_FILE)
+    pin_choices = load_pin_choices()
 
     total = len(osm_rows)
     stats = {
@@ -793,7 +817,7 @@ def main():
 
             try:
                 resolved, merge_log, conflicts, lookup_error = resolve_restaurant(
-                    osm, google, nominatim_cache, stats
+                    osm, google, nominatim_cache, stats, pin_choices.get(osm_id)
                 )
                 facilities = facilities_by_id.get(osm_id, [])
                 record, has_area, n_reviews = build_record(
@@ -902,6 +926,7 @@ def main():
           f"{m['conflict_fields']} fields (the AI chooses in run_4_profiling.py)")
     print(f"  Nominatim lookups made:   {m['nominatim_calls_made']} "
           f"(from cache: {m['nominatim_calls_cached']})")
+    print(f"  Google pins chosen:       {len(pin_choices)} (by a person, in {OVERRIDES_FILE})")
     print(f"  Areas assigned:           {m['restaurants_with_area']}")
     print(f"  Nearby context:           {m['restaurants_with_nearby_context']} "
           f"(from {m['nearby_places_loaded']} nearby places; "

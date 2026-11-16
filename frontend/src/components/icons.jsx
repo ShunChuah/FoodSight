@@ -33,6 +33,19 @@ export function EyeOffIcon(props) {
   )
 }
 
+// A closed eye with lashes: the password is shown (Change Password dialog).
+export function EyeClosedIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" width="1.375rem" height="1.375rem" aria-hidden="true" {...stroke} {...props}>
+      <path d="M2 8a10.6 10.6 0 0 0 20 0" />
+      <path d="m15 18-.7-3.2" />
+      <path d="m20 15-1.7-2" />
+      <path d="m4 15 1.7-2" />
+      <path d="m9 18 .7-3.2" />
+    </svg>
+  )
+}
+
 export function GoogleIcon(props) {
   return (
     <svg viewBox="0 0 48 48" width="1.375rem" height="1.375rem" aria-hidden="true" {...props}>

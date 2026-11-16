@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi_users import exceptions
 
 from app import config
-from app.auth.backend import auth_backend, current_user, fastapi_users, oauth_backend
+from app.auth.backend import auth_backend, fastapi_users, oauth_backend
 from app.auth.manager import GoogleClient, get_user_manager
+from app.auth.profile import router as profile_router
 from app.auth.schemas import ForgotPasswordRequest, ResetPasswordRequest, UserCreate, UserRead
 
 router = APIRouter()
@@ -19,8 +20,7 @@ router.include_router(
 router.include_router(fastapi_users.get_verify_router(UserRead), prefix="/auth", tags=["auth"])
 
 
-# Written by hand instead of get_reset_password_router: the use case requires telling the
-# user when no account matches the email, which the library deliberately hides.
+# Written by hand: the use case must say when no account matches the email, which fastapi-users hides.
 @router.post("/auth/forgot-password", status_code=status.HTTP_202_ACCEPTED, tags=["auth"])
 async def forgot_password(
     body: ForgotPasswordRequest, request: Request, user_manager=Depends(get_user_manager)
@@ -75,6 +75,5 @@ else:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GOOGLE_NOT_CONFIGURED")
 
 
-@router.get("/users/me", response_model=UserRead, tags=["users"])
-async def read_current_user(user=Depends(current_user)):
-    return user
+# /users/me: view the profile, change the username and password, upload a picture.
+router.include_router(profile_router)
