@@ -404,4 +404,87 @@ function LocationPicker({ id, value, onChange, darkMode = false, error }) {
   );
 }
 
+// Read-only: panning is blocked so the centre pin stays on the saved spot.
+export function LocationPreview({ location, darkMode = false, className = "" }) {
+  const container = useRef(null);
+  const viewRef = useRef(null);
+  const [satellite, setSatellite] = useState(false);
+  const [credits, setCredits] = useState("");
+  const [failed, setFailed] = useState(false);
+  const { latitude, longitude } = location;
+
+  useEffect(() => {
+    const view = new MapView({
+      container: container.current,
+      map: new ArcGISMap({ basemap: createBasemap(false, darkMode) }),
+      center: [longitude, latitude],
+      zoom: PIN_ZOOM - 1,
+      spatialReference: { wkid: 3857 },
+      constraints: { snapToZoom: false, minZoom: 11, rotationEnabled: false },
+      popupEnabled: false,
+      ui: { components: [] },
+    });
+    viewRef.current = view;
+    const attribution = new AttributionViewModel({ view });
+    const stop = (event) => event.stopPropagation();
+    const handles = [
+      view.on(["drag", "mouse-wheel", "double-click", "key-down", "hold"], stop),
+      reactiveUtils.watch(
+        () => attribution.items.toArray().map((item) => item.text).filter(Boolean).join(", "),
+        (text) => setCredits([...new Set(text.split(/\s*,\s*/).filter(Boolean))].join(", ")),
+        { initial: true },
+      ),
+    ];
+    view.when(null, (loadError) => {
+      console.error("Failed to load the location map", loadError);
+      setFailed(true);
+    });
+    return () => {
+      handles.forEach((handle) => handle.remove());
+      attribution.destroy();
+      viewRef.current = null;
+      view.destroy();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- built once per location; basemap updates in the effect below
+  }, [latitude, longitude]);
+
+  useEffect(() => {
+    if (viewRef.current) viewRef.current.map.basemap = createBasemap(satellite, darkMode);
+  }, [satellite, darkMode]);
+
+  const zoom = (step) => viewRef.current?.goTo({ zoom: viewRef.current.zoom + step }).catch(() => {});
+
+  return (
+    <div className={`business-map ${className}`}>
+      <div ref={container} className="business-map-view" role="img" aria-label={`Map pin at ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`} />
+      {failed ? (
+        <p className="business-map-failed">The map couldn't load. Check your connection and refresh.</p>
+      ) : (
+        <>
+          <span className="business-map-pin" aria-hidden="true">
+            <svg viewBox="0 0 28 36" width="34" height="44">
+              <path d="M14 35s12-11.3 12-21A12 12 0 0 0 2 14c0 9.7 12 21 12 21Z" fill="#ff6129" stroke="#ffffff" strokeWidth="2" />
+              <circle cx="14" cy="14" r="5" fill="#ffffff" />
+            </svg>
+          </span>
+          <span className="business-map-pin-shadow" aria-hidden="true" />
+          <div className="map-controls is-left business-map-controls">
+            <div className="map-control-group">
+              <ControlButton label="Zoom in" onClick={() => zoom(1)}><Plus aria-hidden="true" /></ControlButton>
+              <ControlButton label="Zoom out" onClick={() => zoom(-1)}><Minus aria-hidden="true" /></ControlButton>
+            </div>
+          </div>
+          <div className="map-controls is-right business-map-controls">
+            <ControlButton label={satellite ? "Show map" : "Show satellite"} pressed={satellite} onClick={() => setSatellite((previous) => !previous)}>
+              {satellite ? <MapIcon aria-hidden="true" /> : <Satellite aria-hidden="true" />}
+            </ControlButton>
+          </div>
+          <span className="business-map-coords">{latitude.toFixed(4)}, {longitude.toFixed(4)}</span>
+          <MapCredits credits={credits} />
+        </>
+      )}
+    </div>
+  );
+}
+
 export default LocationPicker;

@@ -2,6 +2,10 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { GuestRoute, ProtectedRoute } from "./components/RouteGuards.jsx";
 import { AuthProvider } from "./context/AuthContext.jsx";
 import { ThemeProvider } from "./context/ThemeContext.jsx";
+import AdminOverview from "./components/admin/AdminOverview.jsx";
+import AdminReview from "./components/admin/AdminReview.jsx";
+import AdminSubmissions from "./components/admin/AdminSubmissions.jsx";
+import AdminPage from "./pages/AdminPage.jsx";
 import DashboardPage from "./pages/DashboardPage";
 import ForgotPassword from "./pages/ForgotPassword.jsx";
 import Login from "./pages/Login.jsx";
@@ -24,6 +28,11 @@ function App() {
             <Route path="/verify" element={<VerifyEmail />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/chat" element={<DashboardPage />} />
+              <Route path="/admin" element={<AdminPage />}>
+                <Route index element={<AdminOverview />} />
+                <Route path="submissions" element={<AdminSubmissions />} />
+                <Route path="submissions/:id" element={<AdminReview />} />
+              </Route>
             </Route>
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>

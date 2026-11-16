@@ -15,6 +15,7 @@ backend/.env
 
 # Data files (raw/cleaned CSVs are generated, not source)
 data/
+!frontend/data/
 
 # Local graph imports and recovery archives
 neo4j/imports/
