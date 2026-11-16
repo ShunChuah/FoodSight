@@ -1,9 +1,11 @@
-import { Settings, Moon, Store } from "lucide-react";
+import { FileCheck2, Settings, Moon, Store } from "lucide-react";
 import { mockUser } from "../../../data/mockUser";
 import defaultProfile from "../../assets/defaultProfile.jpg";
 import "../../styles/sidebar.css";
 
-function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen, onRegisterBusiness, registerBusinessActive = false }) {
+function SidebarFooter({
+  darkMode, setDarkMode, onSettingsOpen, onRegisterBusiness, registerBusinessActive = false, onSubmissions, submissionsActive = false,
+}) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
   return (
@@ -18,6 +20,16 @@ function SidebarFooter({ darkMode, setDarkMode, onSettingsOpen, onRegisterBusine
       >
         <Store />
         <span>Register Business</span>
+      </button>
+
+      <button
+        className={`footer-action-btn setting-footer-action register-business-action${submissionsActive ? " is-active" : ""}`}
+        type="button"
+        aria-current={submissionsActive ? "page" : undefined}
+        onClick={onSubmissions}
+      >
+        <FileCheck2 />
+        <span>Submissions</span>
       </button>
 
       <button

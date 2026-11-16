@@ -3,7 +3,8 @@ import {
   DAYS, TIME_OPTIONS, addPeriod, canAddPeriod, copyMondayToAll, dayId, hoursConflicts, timeAllowed, isOpenAllWeek, removePeriod, setDayOpen, setPeriod,
   toggleOpenAllWeek,
 } from "../../services/businessHours";
-import { Dropdown, Switch } from "./BusinessFields";
+import { sectionId } from "../../services/businessForm";
+import { Dropdown, FlagNotes, Switch } from "./BusinessFields";
 
 function TimeSelect({ id, value, onChange, label, error, describedBy, allowed }) {
   const options = TIME_OPTIONS.map((time) => ({ value: time, label: time, disabled: !allowed(time) }));
@@ -15,13 +16,13 @@ function TimeSelect({ id, value, onChange, label, error, describedBy, allowed })
   );
 }
 
-function OpeningHours({ hours, onChange, errors = {} }) {
+function OpeningHours({ hours, onChange, errors = {}, flags = [] }) {
   const allWeek = isOpenAllWeek(hours);
   // Clashes show straight away; missing times wait for Next.
   const conflicts = hoursConflicts(hours);
 
   return (
-    <section className="business-section business-hours" aria-labelledby="hours-title">
+    <section id={sectionId("Opening hours")} className={`business-section business-hours${flags.length ? " is-flagged" : ""}`} aria-labelledby="hours-title">
       <div className="business-hours-head">
         <h2 id="hours-title">Opening hours</h2>
         <div className="business-hours-actions">
@@ -36,6 +37,7 @@ function OpeningHours({ hours, onChange, errors = {} }) {
         </div>
       </div>
 
+      <FlagNotes issues={flags} />
       {errors.hours && <p id="hours-error" className="business-error business-hours-error" role="alert">{errors.hours}</p>}
 
       <div className="business-hours-days">

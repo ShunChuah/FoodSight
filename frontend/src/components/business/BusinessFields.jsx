@@ -1,13 +1,27 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Info, Upload, X } from "lucide-react";
-import { fileError, formatFileSize } from "../../services/businessForm";
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Flag, Info, Upload, X } from "lucide-react";
+import { fileError, formatFileSize, sectionId } from "../../services/businessForm";
 
 const errorId = (id) => `${id}-error`;
 
-export function FormSection({ title, children }) {
+// Rejected-review flags that are about the whole section rather than one field.
+export function FlagNotes({ issues }) {
+  if (!issues.length) return null;
   return (
-    <section className="business-section">
+    <div className="business-flag-notes" role="note">
+      <p className="business-flag-title"><Flag aria-hidden="true" /> Needs fixing</p>
+      {issues.map((issue) => (
+        <p key={issue.label}><strong>{issue.label}:</strong> {issue.note}</p>
+      ))}
+    </div>
+  );
+}
+
+export function FormSection({ title, flags = [], children }) {
+  return (
+    <section id={sectionId(title)} className={`business-section${flags.length ? " is-flagged" : ""}`}>
       <h2>{title}</h2>
+      <FlagNotes issues={flags} />
       <div className="business-grid">{children}</div>
     </section>
   );

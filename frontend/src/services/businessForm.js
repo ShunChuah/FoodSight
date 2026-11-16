@@ -256,6 +256,24 @@ export function emptyBusinessForm() {
 
 export const isChain = (style) => style === "local_chain" || style === "international_chain";
 
+// Form sections in page order; the last three are on step 2.
+export const FORM_SECTIONS = [
+  "Store manager information", "General information", "Business location", "Business verification", "Halal status",
+  "Opening hours", "Food & dining experience", "Facilities & services",
+];
+export const sectionStep = (title) => (FORM_SECTIONS.indexOf(title) >= 5 ? 1 : 0);
+export const sectionId = (title) => `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+// Closed or 24-hour days still need a period in case they're reopened.
+export function formForEditing(saved) {
+  const base = emptyBusinessForm();
+  return {
+    ...base,
+    ...saved,
+    hours: saved.hours.map((day, index) => ({ ...day, periods: day.periods.length ? day.periods : base.hours[index].periods })),
+  };
+}
+
 const digits = (value) => value.replace(/[\s-]/g, "");
 // After the fixed +60: mobile (12-345 6789) or landline (3-7955 1234), leading 0 allowed.
 const LOCAL_PHONE = /^0?[1-9]\d{7,9}$/;

@@ -1,4 +1,5 @@
 import {
+  FileCheck2,
   PanelLeft,
   SquarePen,
   Search,
@@ -16,6 +17,8 @@ function ClosedSidebar({
   onSettingsOpen,
   onRegisterBusiness,
   registerBusinessActive = false,
+  onSubmissions,
+  submissionsActive = false,
 }) {
   const profileImage = mockUser.profileImage || defaultProfile;
 
@@ -58,6 +61,17 @@ function ClosedSidebar({
           onClick={onRegisterBusiness}
         >
           <Store />
+        </button>
+
+        <button
+          className={`closed-sidebar-icon-btn${submissionsActive ? " is-active" : ""}`}
+          type="button"
+          title="Submissions"
+          aria-label="Submissions"
+          aria-current={submissionsActive ? "page" : undefined}
+          onClick={onSubmissions}
+        >
+          <FileCheck2 />
         </button>
 
         <button

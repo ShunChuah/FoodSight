@@ -205,7 +205,8 @@ function PlaceSearch({ id, onFound }) {
   );
 }
 
-function LocationPicker({ id, value, onChange, darkMode = false, error }) {
+// pinned: a saved location (e.g. resubmitting) is never replaced by the device's location.
+function LocationPicker({ id, value, onChange, darkMode = false, error, pinned = false }) {
   const container = useRef(null);
   const viewRef = useRef(null);
   const youRef = useRef(null);
@@ -261,7 +262,7 @@ function LocationPicker({ id, value, onChange, darkMode = false, error }) {
       movedByOwner.current = true;
     }));
     // No pin placed yet: start at the device's location.
-    const firstVisit = start.latitude === DEFAULT_LOCATION.latitude && start.longitude === DEFAULT_LOCATION.longitude;
+    const firstVisit = !pinned && start.latitude === DEFAULT_LOCATION.latitude && start.longitude === DEFAULT_LOCATION.longitude;
     view.when(() => {
       if (firstVisit) locateRef.current?.({ automatic: true });
     }, (loadError) => {

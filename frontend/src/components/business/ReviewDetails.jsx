@@ -1,13 +1,13 @@
 import { CircleCheck } from "lucide-react";
 import { reviewSections } from "../../services/businessReview";
 
-export function ReviewDetails({ form, onEdit }) {
+export function ReviewDetails({ form, onEdit, flags = [] }) {
   return (
     <section className="business-section business-review" aria-labelledby="review-title">
       <h2 id="review-title">Review your details</h2>
       <dl className="business-review-list">
         {reviewSections(form).map((section) => (
-          <div key={section.title} className="business-review-row">
+          <div key={section.title} className={`business-review-row${flags.some((flag) => flag.section === section.title) ? " is-flagged" : ""}`}>
             <dt>{section.title}</dt>
             <dd>
               {section.rows.map((row) => (

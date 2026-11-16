@@ -5,16 +5,18 @@ import DarkModeLogo from "../../assets/foodsightLogoDarkMode.png";
 import {
   AMBIANCES, AREAS, BUSINESS_STATUSES, BUSINESS_STEPS, BUSINESS_STYLES, CITY, CUISINES, DOCUMENT_TYPES, FACILITY_GROUPS,
   HALAL_STATUSES, MAX_AMBIANCES, MAX_CUISINES, MAX_DESCRIPTION, MAX_TARGET_SEGMENTS, PHOTO_TYPES, RESTAURANT_TYPES,
-  SERVICE_STYLES, TARGET_SEGMENTS, YES_NO, businessStepOneErrors, businessStepTwoErrors, isChain, todayIso,
+  FORM_SECTIONS, SERVICE_STYLES, TARGET_SEGMENTS, YES_NO, businessStepOneErrors, businessStepTwoErrors, isChain, sectionId, sectionStep,
+  todayIso,
 } from "../../services/businessForm";
 import {
-  CheckboxGroups, ChoiceGroup, DateInput, FieldNote, FileUpload, FormSection, MultiPicker, PhoneInput, SelectInput,
+  CheckboxGroups, ChoiceGroup, DateInput, FieldNote, FileUpload, FlagNotes, FormSection, MultiPicker, PhoneInput, SelectInput,
   TextArea, TextInput,
 } from "./BusinessFields";
 import LocationPicker from "./LocationPicker";
 import OpeningHours from "./OpeningHours";
 import { ReviewDetails, SubmittedNotice } from "./ReviewDetails";
 import "../../styles/business.css";
+import "../../styles/submissions.css";
 
 const AREA_OPTIONS = AREAS.map((area) => ({ value: area, label: area }));
 const CUISINE_OPTIONS = CUISINES.map((cuisine) => ({ value: cuisine, label: cuisine }));
@@ -45,7 +47,8 @@ function Stepper({ step, onStep }) {
   );
 }
 
-function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
+// flags: rejected-review issues. A flagged field shows its note as an error until its value changes.
+function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flags = [], onSubmitted }) {
   // Errors only show for steps whose Next has been pressed.
   const [checkedSteps, setCheckedSteps] = useState([]);
   const scrollRef = useRef(null);
@@ -53,9 +56,15 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
   const [emailLeft, setEmailLeft] = useState(false);
   const check = STEP_CHECKS[step];
   const allErrors = check ? check(form) : {};
-  const errors = checkedSteps.includes(step)
-    ? allErrors
-    : step === 0 && emailLeft && form.businessEmail.trim() && allErrors.businessEmail ? { businessEmail: allErrors.businessEmail } : {};
+  const [savedForm] = useState(form);
+  const unchanged = (field) => JSON.stringify(form[field]) === JSON.stringify(savedForm[field]);
+  const flagErrors = Object.fromEntries(flags.filter((flag) => flag.field && unchanged(flag.field)).map((flag) => [flag.field, flag.note]));
+  const errors = {
+    ...flagErrors,
+    ...(checkedSteps.includes(step)
+      ? allErrors
+      : step === 0 && emailLeft && form.businessEmail.trim() && allErrors.businessEmail ? { businessEmail: allErrors.businessEmail } : {}),
+  };
   const set = (field) => (value) => setForm((previous) => ({ ...previous, [field]: value }));
   const text = (field) => ({
     value: form[field],
@@ -64,11 +73,16 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
   });
 
   const [submitted, setSubmitted] = useState(false);
-  // Scrolled to after the target step renders (e.g. from an Edit link).
-  const pendingField = useRef(null);
+  const flagsIn = (title) => flags.filter((flag) => flag.section === title && !flag.field);
+  const firstFlagOn = (target) => flags
+    .filter((flag) => sectionStep(flag.section) === target)
+    .sort((a, b) => FORM_SECTIONS.indexOf(a.section) - FORM_SECTIONS.indexOf(b.section))[0];
+  const flagTarget = (flag) => (flag ? flag.field ?? sectionId(flag.section) : null);
+  // Scrolled to after the target step renders (e.g. from an Edit link, or the first flag).
+  const pendingField = useRef(flagTarget(firstFlagOn(step)));
 
   const goTo = (next, field = null) => {
-    pendingField.current = field;
+    pendingField.current = field ?? (next < 2 ? flagTarget(firstFlagOn(next)) : null);
     setStep(next);
     scrollRef.current?.scrollTo({ top: 0 });
   };
@@ -78,7 +92,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
     if (!id) return;
     pendingField.current = null;
     const field = document.getElementById(id) ?? document.getElementById(`${id}-error`);
-    field?.scrollIntoView({ block: "center" });
+    field?.scrollIntoView({ block: id.startsWith("section-") ? "start" : "center" });
     field?.focus({ preventScroll: true });
   }, [step]);
 
@@ -93,6 +107,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
     }
     // TODO: send the registration once the backend has an endpoint for it; nothing leaves the browser yet.
     setSubmitted(true);
+    onSubmitted?.(form);
     scrollRef.current?.scrollTo({ top: 0 });
   };
 
@@ -123,14 +138,14 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
 
         {step === 0 ? (
           <form className="business-form" noValidate onSubmit={(event) => { event.preventDefault(); handleNext(); }}>
-            <FormSection title="Store manager information">
+            <FormSection title="Store manager information" flags={flagsIn("Store manager information")}>
               <TextInput id="managerName" label="Full name (as on IC)" required placeholder="e.g. Aisyah binti Rahman" autoComplete="name" {...text("managerName")} />
               <PhoneInput id="managerPhone" label="Contact phone" required placeholder="e.g. 12-345 6789" autoComplete="tel-national" value={form.managerPhone} onChange={set("managerPhone")} error={errors.managerPhone} />
             </FormSection>
 
-            <FormSection title="General information">
+            <FormSection title="General information" flags={flagsIn("General information")}>
               <TextInput id="businessName" label="Business name" required placeholder="e.g. Cafe Foodsight" autoComplete="organization" {...text("businessName")} />
-              <SelectInput id="businessStyle" label="Business style" required options={BUSINESS_STYLES} value={form.businessStyle} onChange={set("businessStyle")} />
+              <SelectInput id="businessStyle" label="Business style" required options={BUSINESS_STYLES} value={form.businessStyle} onChange={set("businessStyle")} error={errors.businessStyle} />
               {isChain(form.businessStyle) && (
                 <>
                   <TextInput id="brandName" label="Brand name" required placeholder="Enter brand name" {...text("brandName")} />
@@ -144,7 +159,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
               <TextInput id="website" label="Website or social page" type="url" placeholder="https://" autoComplete="url" {...text("website")} />
             </FormSection>
 
-            <FormSection title="Business location">
+            <FormSection title="Business location" flags={flagsIn("Business location")}>
               <TextInput id="address" label="Address" required wide placeholder="e.g. 123, Jalan Tun Razak, Taman Melawati" autoComplete="street-address" {...text("address")} />
               <TextInput
                 id="postcode" label="Postcode" required inputMode="numeric" maxLength={5} placeholder="e.g. 12345" autoComplete="postal-code"
@@ -157,12 +172,12 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
                 <span className="business-label">
                   Location<span className="business-required" aria-hidden="true">*</span>
                 </span>
-                <LocationPicker id="location" value={form.location} onChange={set("location")} darkMode={darkMode} error={errors.location} />
+                <LocationPicker id="location" value={form.location} onChange={set("location")} darkMode={darkMode} error={errors.location} pinned={flags.length > 0} />
                 {errors.location && <p id="location-error" className="business-error" role="alert">{errors.location}</p>}
               </div>
             </FormSection>
 
-            <FormSection title="Business verification">
+            <FormSection title="Business verification" flags={flagsIn("Business verification")}>
               <TextInput id="ssmNumber" label="SSM registration number" required wide inputMode="numeric" placeholder="e.g. 123456789123" {...text("ssmNumber")} />
               <FileUpload
                 id="ssmCertificate" label="SSM certificate" title="SSM Certificate" required
@@ -172,7 +187,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
               <FileUpload
                 id="premisesLicence" label="MBPJ food-premises licence" title="MBPJ Food-Premises Licence" optional
                 hint="PDF, JPG or PNG, up to 10 MB" types={DOCUMENT_TYPES}
-                file={form.premisesLicence} onChange={set("premisesLicence")}
+                file={form.premisesLicence} onChange={set("premisesLicence")} error={errors.premisesLicence}
               />
               <FileUpload
                 id="storefrontPhoto" label="Storefront photo" title="Storefront photo" required
@@ -181,7 +196,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
               />
             </FormSection>
 
-            <FormSection title="Halal status">
+            <FormSection title="Halal status" flags={flagsIn("Halal status")}>
               <ChoiceGroup
                 id="halalStatus" label="Halal status" required options={HALAL_STATUSES}
                 value={form.halalStatus} onChange={set("halalStatus")} error={errors.halalStatus}
@@ -218,9 +233,9 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
           </form>
         ) : step === 1 ? (
           <form className="business-form" noValidate onSubmit={(event) => { event.preventDefault(); handleNext(); }}>
-            <OpeningHours hours={form.hours} onChange={set("hours")} errors={errors} />
+            <OpeningHours hours={form.hours} onChange={set("hours")} errors={errors} flags={flagsIn("Opening hours")} />
 
-            <FormSection title="Food & dining experience">
+            <FormSection title="Food & dining experience" flags={flagsIn("Food & dining experience")}>
               <MultiPicker
                 id="cuisines" label="Cuisines served" required hint={`Pick up to ${MAX_CUISINES}`} placeholder="Select cuisines"
                 options={CUISINE_OPTIONS} value={form.cuisines} onChange={set("cuisines")} max={MAX_CUISINES} error={errors.cuisines}
@@ -249,15 +264,19 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false }) {
               />
             </FormSection>
 
-            <section className="business-section" aria-labelledby="facilities-title">
+            <section
+              id={sectionId("Facilities & services")} aria-labelledby="facilities-title"
+              className={`business-section${flagsIn("Facilities & services").length ? " is-flagged" : ""}`}
+            >
               <h2 id="facilities-title">Facilities &amp; services</h2>
+              <FlagNotes issues={flagsIn("Facilities & services")} />
               <CheckboxGroups groups={FACILITY_GROUPS} value={form.facilities} onChange={set("facilities")} />
             </section>
           </form>
         ) : submitted ? (
           <SubmittedNotice email={form.businessEmail} />
         ) : (
-          <ReviewDetails form={form} onEdit={goTo} />
+          <ReviewDetails form={form} onEdit={goTo} flags={flags} />
         )}
 
         {check && (
