@@ -49,6 +49,11 @@ export function removePeriod(hours, index, period) {
   return withDay(hours, index, (day) => ({ ...day, periods: day.periods.filter((_, at) => at !== period) }));
 }
 
+// One day open around the clock (saved as 00:00-24:00), or back to its own times, which stay underneath.
+export function setDayAllDay(hours, index, allDay) {
+  return withDay(hours, index, (day) => ({ ...day, open: true, allDay }));
+}
+
 export const isOpenAllWeek = (hours) => hours.every((day) => day.open && day.allDay);
 
 // Toggling off restores each day's own times.

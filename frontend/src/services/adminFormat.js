@@ -30,6 +30,30 @@ export function formatDateTime(value) {
   return date.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+// A start and end time: "17 Nov, 13:19–13:31" on one day, "17 Nov, 23:50 – 18 Nov, 00:10" across midnight.
+export function formatTimeRange(start, end) {
+  const from = new Date(start);
+  const to = end ? new Date(end) : new Date(NaN);
+  if (!start || Number.isNaN(from.getTime())) return formatDateTime(start);
+  const day = (date) => date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const time = (date) => date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(to.getTime())) return `${day(from)}, ${time(from)}`;
+  if (from.toDateString() === to.toDateString()) return `${day(from)}, ${time(from)}–${time(to)}`;
+  return `${day(from)}, ${time(from)} – ${day(to)}, ${time(to)}`;
+}
+
+// The scheduler's reason without its consequence, which the card already shows as "Every N days":
+// "The change share of 0.7% is below the 3% threshold, so the interval should be increased ..."
+// -> "The change share of 0.7% is below the 3% threshold." A reason with no such clause stays whole.
+const CONSEQUENCE = /,\s+(?:so|requiring|therefore|thus|hence|which|meaning|indicating|warranting|suggesting|justifying)\b/i;
+
+export function shortReason(text) {
+  if (!text) return "";
+  const cut = text.search(CONSEQUENCE);
+  const short = (cut > 0 ? text.slice(0, cut) : text).trim().replace(/[.;:,]+$/, "");
+  return `${short.charAt(0).toUpperCase()}${short.slice(1)}.`;
+}
+
 // A plain date such as "2026-11-26", shown as that day wherever the browser is.
 export function formatDay(value) {
   if (!value) return "—";

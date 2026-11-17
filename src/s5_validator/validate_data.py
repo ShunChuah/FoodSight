@@ -13,8 +13,10 @@ AI to choose between OSM and Google (check_conflicts_decided).
 
 The checks also cover the database rules a schema cannot express, so a load
 never stops halfway: a rating score always comes with total_reviews
-(check_rating), no two restaurants share an osm_id or a google_place_id
-(check_unique_ids), a restaurant's cuisines repeat no name and no rank
+(check_rating), no two restaurants share an osm_id, a google_place_id or a
+submission_id (check_unique_ids), an extracted restaurant has its
+OpenStreetMap IDs and a submitted one its submission instead
+(check_source_ids), a restaurant's cuisines repeat no name and no rank
 (check_cuisines), and every "date-time" can be read and has a time zone
 (DATE_CHECKER).
 
@@ -54,8 +56,15 @@ NEARBY_COUNTED = {
     if "radius_m" in detail
 }
 
-# Restaurant fields that are UNIQUE in the database (checked by check_unique_ids)
-UNIQUE_IDS = ("osm_id", "google_place_id")
+# Restaurant fields that are UNIQUE in the database (checked by check_unique_ids);
+# submission_id is the loader's key for a submitted restaurant
+UNIQUE_IDS = ("osm_id", "google_place_id", "submission_id")
+
+# restaurant.source and business_profile.evidence_level of a restaurant
+# registered by its business (checked by check_source_ids)
+SUBMITTED = "submitted"
+assert SUBMITTED in allowed_values("restaurant.source")
+assert SUBMITTED in allowed_values("business_profile.evidence_level")
 
 # "format": "date-time" in the schema is checked only when a validator is given
 # a format checker. The library's own date-time check needs an extra package
@@ -175,6 +184,42 @@ def check_cuisines(restaurant: dict) -> list:
     return errors
 
 
+def check_source_ids(restaurant: dict) -> list:
+    """The IDs that go with each source. An extracted restaurant has its
+    OpenStreetMap object (osm_id and osm_type) and no submission; a submitted
+    one has its submission_id and no OpenStreetMap or Google IDs (the database
+    allows osm_id and osm_type empty only together). evidence_level
+    "submitted" belongs to submitted restaurants only. Returns error messages."""
+    errors = []
+    submitted = restaurant.get("source") == SUBMITTED
+    if submitted:
+        if not restaurant.get("submission_id"):
+            errors.append("submission_id: a submitted restaurant needs its business submission")
+        for field in ("osm_id", "osm_type", "google_place_id"):
+            if restaurant.get(field):
+                errors.append(f"{field}: a submitted restaurant has none")
+    else:
+        for field in ("osm_id", "osm_type"):
+            if not restaurant.get(field):
+                errors.append(f"{field}: required for an extracted restaurant")
+        if restaurant.get("submission_id"):
+            errors.append("submission_id: only a submitted restaurant has one")
+    evidence = (restaurant.get("business_profile") or {}).get("evidence_level")
+    if evidence and (evidence == SUBMITTED) != submitted:
+        errors.append(f"business_profile -> evidence_level: {evidence!r} does not fit source "
+                      f"{restaurant.get('source')!r}")
+    return errors
+
+
+def restaurant_label(restaurant: dict) -> str:
+    """How a restaurant is named in the invalid file: its osm_id, or its submission."""
+    if restaurant.get("osm_id"):
+        return restaurant["osm_id"]
+    if restaurant.get("submission_id"):
+        return f"submission {restaurant['submission_id']}"
+    return "unknown"
+
+
 def count_ids(restaurants: list) -> dict:
     """{field: Counter of its values} for each field in UNIQUE_IDS."""
     return {field: Counter(r.get(field) for r in restaurants if r.get(field))
@@ -292,11 +337,12 @@ def main():
                   + check_rating(r)
                   + check_cuisines(r)
                   + check_conflicts_decided(r)
+                  + check_source_ids(r)
                   + check_unique_ids(r, id_counts)
                   + check_nearby_links(r, known_places))
         if errors:
             invalid_restaurants.append({
-                "osm_id": r.get("osm_id", "unknown"),
+                "osm_id": restaurant_label(r),
                 "name":   r.get("name", "unknown"),
                 "errors": errors
             })

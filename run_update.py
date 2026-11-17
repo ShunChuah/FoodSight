@@ -34,6 +34,9 @@ Each run does the first of these that applies:
         removed_restaurant_decisions.json  stages 7-8
      The fingerprint of each file as last applied is kept in decisions_applied
      in data/state/run_state.json.
+     An admin approving a business submission (business_submission.status
+     approved, in PostgreSQL) counts here too: stages 3-8. Stage 7 adds the
+     restaurant and sets the submission live, so it is not run again for it.
   3. Nothing else, but the last run stopped halfway: the stages from the one
      that failed to stage 8.
   4. Nothing else, but stage 4 left restaurants or reviews without an AI
@@ -82,10 +85,22 @@ are printed there as "WARNING: ...", kept in last_run.warnings in
 data/state/run_state.json and shown by --status. A lock file stops two
 updates from running at once.
 
+Catch-up after a shutdown: the midnight task runs only while someone is
+signed in, so a laptop that is off at midnight misses that night (Windows
+looks for the missed run at start-up, before anyone signs in). A second
+task, "FoodSight catch-up", starts python run_update.py --catch-up 5 minutes
+after the user signs in. It does nothing when an update has finished since
+midnight (last_finished in data/state/run_state.json, written at the end of
+every run, a night with nothing to do too), and otherwise does the night's
+update as usual. A run cut off halfway never finished, so the catch-up
+continues it; a run that stopped on the AI quota did finish, so it waits
+for the next midnight instead of hitting the same quota again.
+
 Usage:
   python run_update.py                          # the daily job
   python run_update.py --status                 # what is due, unfinished, waiting; changes nothing
   python run_update.py --force osm|google|both  # extract now even if not due
+  python run_update.py --catch-up               # the daily job, only if none has finished since midnight
 """
 
 import argparse
@@ -132,6 +147,10 @@ DECISION_FILES = {
     "nearby_exclusions.json": 2,              # clean_osm_nearby.py
     "removed_restaurant_decisions.json": 7,   # load_data.py
 }
+# Business submissions an admin approved (business_submission.status, in
+# PostgreSQL): stage 3 reads them (src/s3_mergers/submissions.py), stage 7 sets live
+APPROVED = "approved"
+SUBMISSIONS_STAGE = 3
 
 
 def _now():
@@ -194,6 +213,33 @@ def ai_failed_waiting():
     return restaurants, len(items) - restaurants
 
 
+def submissions_waiting():
+    """How many business submissions an admin approved that no load has added
+    yet (business_submission.status approved; stage 7 sets live). 0 when the
+    table does not exist (migration 028 not run) or PostgreSQL cannot be
+    reached (then stage 7 could not load them anyway)."""
+    try:
+        from src.s7_loader.load_data import get_connection
+        conn = get_connection()
+    except Exception:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.business_submission')")
+            if cur.fetchone()[0] is None:
+                return 0
+            cur.execute("SELECT count(*) FROM public.business_submission WHERE status = %s", (APPROVED,))
+            return cur.fetchone()[0]
+    except Exception:
+        return 0
+    finally:
+        conn.close()
+
+
+def _submissions_text(n):
+    return f"{n} approved business submission{'' if n == 1 else 's'} to add"
+
+
 def _ai_failed_text(restaurants, reviews):
     parts = [f"{n} {word}{'' if n == 1 else 's'}"
              for n, word in ((restaurants, "restaurant"), (reviews, "review")) if n]
@@ -253,6 +299,9 @@ def catch_up(state):
     waiting = decisions_waiting(state)
     if waiting:
         needs.append((2, min(waiting.values()), f"new decisions in {', '.join(waiting)}"))
+    approved = submissions_waiting()
+    if approved:
+        needs.append((2, SUBMISSIONS_STAGE, _submissions_text(approved)))
     unfinished = state.get("unfinished")
     if unfinished:
         needs.append((3, unfinished["stage"],
@@ -352,6 +401,24 @@ def running_lock():
     return lock if age < LOCK_STALE_HOURS and _alive(lock["pid"]) else None
 
 
+def finished_today(state, now=None):
+    """When the last update finished, if that was since midnight (local time),
+    or None. Any run of this script counts, whatever it did; --catch-up runs
+    only when this is None. last_finished is written by every run (a night
+    with nothing to do too); before it existed only last_run had a time."""
+    text = state.get("last_finished") or (state.get("last_run") or {}).get("finished")
+    try:
+        when = datetime.fromisoformat(text) if text else None
+    except ValueError:
+        return None
+    if when is None:
+        return None
+    when = when if when.tzinfo else when.astimezone()
+    now = now or datetime.now().astimezone()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return when if when >= midnight else None
+
+
 # ---------------------------------------------------------------------------
 # The daily job
 # ---------------------------------------------------------------------------
@@ -364,6 +431,10 @@ def daily(today=None, force=None, runner=run_stage):
     state = _read(STATE_FILE, {})
     print(f"FoodSight daily update {today}: {todo['why']}")
     if todo["case"] == 6:
+        # Nothing to do is a finished update too, so a sign-in later today
+        # does not run it again (--catch-up)
+        state["last_finished"] = _now()
+        save_json(STATE_FILE, state)
         return todo["why"]
 
     started = _now()
@@ -443,6 +514,9 @@ def daily(today=None, force=None, runner=run_stage):
                         warn(f"Stage 4 still has no AI answer for {_ai_failed_text(*left)} (see "
                              f"{AI_FAILED_FILE}): they are left out of the database for now, and "
                              "the next run asks them again")
+                if stage == 7 and (left := submissions_waiting()):
+                    warn(f"{_submissions_text(left)} were not loaded (the validator rejected them: see "
+                         "data/review/validation_invalid.json); the next run tries again")
                 continue
             if stage == 8:
                 result = (f"stage 8 failed (exit code {code}): the graph is not updated yet, and the "
@@ -458,7 +532,9 @@ def daily(today=None, force=None, runner=run_stage):
             state.pop("unfinished", None)
             result = "all stages done"
 
-    state["last_run"] = {"started": started, "finished": _now(), "did": todo["why"], "result": result}
+    finished = _now()
+    state["last_run"] = {"started": started, "finished": finished, "did": todo["why"], "result": result}
+    state["last_finished"] = finished
     if warnings:
         state["last_run"]["warnings"] = warnings
     save_json(STATE_FILE, state)
@@ -488,6 +564,9 @@ def status(today=None):
     waiting = decisions_waiting(state)
     print("New decisions waiting: " + (", ".join(f"{name} (from stage {stage})" for name, stage in waiting.items())
                                        if waiting else "none"))
+    approved = submissions_waiting()
+    print("Business submissions: " + (f"{_submissions_text(approved)} (from stage {SUBMISSIONS_STAGE})"
+                                      if approved else "none approved and waiting"))
     unfinished = state.get("unfinished")
     print(f"Unfinished run: " + (f"stage {unfinished['stage']} since {unfinished['since']} ({unfinished['error']})"
                                  if unfinished else "none"))
@@ -499,6 +578,9 @@ def status(today=None):
     print(f"Graph to-do list: {waiting or ('only the clusters' if graph_waiting() else 'empty')}")
     lock = running_lock()
     print(f"Running now: " + (f"yes, since {lock['started']} (process {lock['pid']})" if lock else "no"))
+    done = finished_today(state)
+    print("Catch-up at sign-in: " + (f"nothing to do (today's update finished at {done.strftime('%H:%M')})" if done
+                                     else "would run the update (none has finished since midnight)"))
     last = state.get("last_run")
     print(f"Last run: " + (f"{last['started']} to {last['finished']}: {last['did']}; {last['result']}" if last else "none yet"))
     for text in (last or {}).get("warnings", []):
@@ -509,10 +591,25 @@ def main():
     parser = argparse.ArgumentParser(description="FoodSight daily update: extract what is due, then stages 2-8.")
     parser.add_argument("--status", action="store_true", help="Show what is due, unfinished and waiting; change nothing.")
     parser.add_argument("--force", choices=["osm", "google", "both"], help="Extract now even if not due.")
+    parser.add_argument("--catch-up", action="store_true",
+                        help="The daily job, only if no update has finished since midnight "
+                             "(the sign-in task 'FoodSight catch-up', for a laptop that was off at midnight).")
     args = parser.parse_args()
+    if args.catch_up and (args.status or args.force):
+        parser.error("--catch-up cannot be used with --status or --force")
     if args.status:
         status()
         return
+
+    if args.catch_up:
+        done = finished_today(_read(STATE_FILE, {}))
+        if done:
+            # The same first line as an update, so the admin page's Logs tab shows it as one
+            print(f"FoodSight daily update {date.today()}: catch-up after sign-in: today's update already "
+                  f"finished at {done.strftime('%H:%M')}, so nothing to do")
+            return
+        print("Catch-up after sign-in: no update has finished since midnight (the laptop was probably off "
+              "at midnight), so it runs now")
 
     lock = running_lock()
     if lock:

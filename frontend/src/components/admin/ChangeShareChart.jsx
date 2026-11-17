@@ -3,12 +3,14 @@ import { formatDateTime, formatNumber, formatShare } from "../../services/adminF
 
 // One series, so no legend: the share of records that changed in each compared extraction,
 // one column per extraction, with the scheduler's threshold as a dashed line (dashed means
-// a threshold; the grid is solid). The column colour #ee5320 passes the palette checks on
-// white and on the dark surface #181818. Only the newest column carries its value; the
+// a threshold; the grid is solid). Drawn like the submissions overview's weekly chart (grid,
+// labels, column width, tooltip; hover darkens), except the column colour: #ee5320 passes
+// the palette checks on white and on the dark surface #181818, the submissions' #ff6129 does
+// not (2.92:1 on white, too light on dark). Only the newest column carries its value; the
 // others are in the tooltip and in the list under the chart (its table view).
 
 const BAR = "#ee5320";
-const BAR_HOVER = "#ff6129";
+const BAR_HOVER = "#d4461a";
 const STEPS = [0.005, 0.01, 0.02, 0.025, 0.05, 0.1, 0.2, 0.25, 0.5, 1];
 
 function niceTop(points, threshold) {
@@ -51,18 +53,18 @@ export default function ChangeShareChart({ points, threshold }) {
   }, []);
 
   const unit = size.rem / 16;
-  const pad = { top: 20 * unit, right: 64 * unit, bottom: 28 * unit, left: 40 * unit };
+  const pad = { top: 22 * unit, right: 64 * unit, bottom: 30 * unit, left: 40 * unit };
   const height = 13 * size.rem;
   const plotWidth = Math.max(0, size.width - pad.left - pad.right);
   const plotHeight = height - pad.top - pad.bottom;
   const { step, max } = niceTop(points, threshold);
   const y = (share) => pad.top + plotHeight * (1 - share / max);
   const band = plotWidth / Math.max(points.length, 1);
-  const barWidth = Math.min(24 * unit, band * 0.5);
+  const barWidth = Math.min(46 * unit, band * 0.5);
   const every = Math.max(1, Math.ceil(points.length / Math.max(1, Math.floor(plotWidth / (56 * unit)))));
   const ticks = [];
   for (let value = 0; value <= max + 1e-9; value += step) ticks.push(value);
-  const text = { fontSize: "0.6875rem" };
+  const text = { fontSize: "0.75rem" };
   const shown = hover != null ? points[hover] : null;
 
   return (
@@ -71,7 +73,8 @@ export default function ChangeShareChart({ points, threshold }) {
         <svg width={size.width} height={height} role="img" aria-label={`Share of records changed per extraction; the ${formatShare(threshold)} line is the scheduler's rule`}>
           {ticks.map((value) => (
             <g key={value}>
-              <line x1={pad.left} x2={pad.left + plotWidth} y1={y(value)} y2={y(value)} className="stroke-gray-200 dark:stroke-line-dark" strokeWidth={1} />
+              <line x1={pad.left} x2={pad.left + plotWidth} y1={y(value)} y2={y(value)} strokeWidth={1}
+                className={value === 0 ? "stroke-[#d4d4d8] dark:stroke-[#52525b]" : "stroke-[#f0f0f1] dark:stroke-line-dark"} />
               <text x={pad.left - 6 * unit} y={y(value)} dy="0.32em" textAnchor="end" style={text} className="fill-gray-500 tabular-nums dark:fill-muted-dark">
                 {formatShare(value).replace(".0%", "%")}
               </text>
@@ -87,12 +90,12 @@ export default function ChangeShareChart({ points, threshold }) {
                   <path d={columnPath(center - barWidth / 2, top, barWidth, pad.top + plotHeight - top, 4 * unit)} fill={active ? BAR_HOVER : BAR} />
                 )}
                 {index === points.length - 1 && (
-                  <text x={center} y={top - 6 * unit} textAnchor="middle" style={text} className="fill-ink font-semibold dark:fill-white">
+                  <text x={center} y={top - 6 * unit} textAnchor="middle" style={text} className="fill-ink font-bold dark:fill-white">
                     {formatShare(point.share)}
                   </text>
                 )}
                 {index % every === 0 && (
-                  <text x={center} y={pad.top + plotHeight + 16 * unit} textAnchor="middle" style={text} className="fill-gray-500 dark:fill-muted-dark">
+                  <text x={center} y={pad.top + plotHeight + 20 * unit} textAnchor="middle" style={text} className="fill-gray-500 dark:fill-muted-dark">
                     {shortDay(point.when)}
                   </text>
                 )}
@@ -123,18 +126,19 @@ export default function ChangeShareChart({ points, threshold }) {
           ))}
         </svg>
       )}
+      {/* The submissions chart's tooltip (admin-chart-tip), above the hovered column and its value */}
       {shown && (
-        <div
-          className="pointer-events-none absolute z-10 min-w-[11rem] -translate-x-1/2 -translate-y-full rounded-[0.5rem] border border-gray-200 bg-white px-3 py-2 text-[0.75rem] shadow-md dark:border-line-dark dark:bg-[#232323]"
-          style={{ left: pad.left + band * (hover + 0.5), top: y(shown.share) - 10 * unit }}
+        <span
+          className="admin-chart-tip" role="tooltip"
+          style={{ left: pad.left + band * (hover + 0.5), top: y(shown.share) - 28 * unit, bottom: "auto", transform: "translate(-50%, -100%)" }}
         >
-          <p className="text-[0.875rem] font-bold">{formatShare(shown.share)} changed</p>
-          <p className="text-gray-500 dark:text-muted-dark">{formatNumber(shown.changes)} of {formatNumber(shown.records)} records</p>
-          <p className="text-gray-500 dark:text-muted-dark">{formatDateTime(shown.when)}</p>
+          <strong>{formatShare(shown.share)} changed</strong>
+          <span>{formatNumber(shown.changes)} of {formatNumber(shown.records)} records</span>
+          <span>{formatDateTime(shown.when)}</span>
           {shown.decision?.interval_after != null && (
-            <p className="mt-1">Next interval: {shown.decision.interval_before ?? "—"} → {shown.decision.interval_after} days</p>
+            <span>Next interval: {shown.decision.interval_before ?? "—"} → {shown.decision.interval_after} days</span>
           )}
-        </div>
+        </span>
       )}
     </div>
   );

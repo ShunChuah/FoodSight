@@ -4,7 +4,7 @@ import { decideRemoved, getRemovedRestaurants, undoRemoved } from "../../api/adm
 import { REMOVED_DECISIONS, capitalise, formatDateTime, formatDay, plural } from "../../services/adminFormat.js";
 import AdminMap from "./AdminMap.jsx";
 import {
-  ActionButton, Badge, Card, EmptyState, ErrorBox, ExternalLinkText, Field, ListButton, Loading, Notice, SplitView, TextInput,
+  ActionButton, Badge, EmptyState, ErrorBox, ExternalLinkText, Field, ListButton, ListScroll, Loading, Notice, Section, SplitView, TextInput,
 } from "./AdminUi.jsx";
 
 // Restaurants in the database that are no longer in OpenStreetMap (data/review/removed_from_osm.json).
@@ -29,7 +29,7 @@ function RemovedDetail({ item, note, onNote, busy, error, notice, onDecide, onUn
   };
 
   return (
-    <div className="mx-auto flex max-w-[56rem] flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 p-6">
       <div>
         <h2 className="text-[1.375rem] font-bold">{item.name}</h2>
         <p className="mt-1 text-[0.875rem] text-gray-600 dark:text-muted-dark">
@@ -38,7 +38,7 @@ function RemovedDetail({ item, note, onNote, busy, error, notice, onDecide, onUn
       </div>
       <Notice>{notice}</Notice>
       <ErrorBox error={error} />
-      <Card>
+      <Section title={decision ? null : "What should happen to it?"}>
         {decision ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -55,7 +55,6 @@ function RemovedDetail({ item, note, onNote, busy, error, notice, onDecide, onUn
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <p className="text-[0.875rem] font-semibold">What should happen to it?</p>
             <TextInput value={note} maxLength={300} onChange={(event) => onNote(event.target.value)}
               placeholder="Note (optional): why, e.g. shut, Google says permanently closed" />
             <ul className="flex flex-col gap-2">
@@ -77,8 +76,8 @@ function RemovedDetail({ item, note, onNote, busy, error, notice, onDecide, onUn
             )}
           </div>
         )}
-      </Card>
-      <Card>
+      </Section>
+      <Section>
         <dl className="grid grid-cols-2 gap-4">
           <Field label="Address">{item.address}</Field>
           <Field label="Status now">{item.business_status && capitalise(item.business_status.toLowerCase())}</Field>
@@ -91,7 +90,7 @@ function RemovedDetail({ item, note, onNote, busy, error, notice, onDecide, onUn
             </span>
           </Field>
         </dl>
-      </Card>
+      </Section>
       {map.points.length > 0 && <AdminMap {...map} fitLabel="Show the pin" className="h-[18rem]" />}
     </div>
   );
@@ -116,7 +115,7 @@ export default function RemovedTab({ onChanged }) {
     return () => { alive = false; };
   }, [version]);
 
-  if (listError) return <div className="p-8"><ErrorBox error={listError} onRetry={() => setVersion((v) => v + 1)} /></div>;
+  if (listError) return <ErrorBox error={listError} onRetry={() => setVersion((v) => v + 1)} />;
   if (!list) return <Loading />;
   const items = list.items;
   if (!items.length) {
@@ -146,21 +145,23 @@ export default function RemovedTab({ onChanged }) {
     <SplitView
       list={(
         <>
-          <p className="border-b border-gray-200 p-4 text-[0.8125rem] text-gray-500 dark:border-line-dark dark:text-muted-dark">
-            {plural(items.length, "restaurant")} no longer in OpenStreetMap · list written on {formatDateTime(list.file_written)}
-          </p>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="admin-split-tools">
+            <p className="admin-split-note">
+              {plural(items.length, "restaurant")} no longer in OpenStreetMap · list written on {formatDateTime(list.file_written)}
+            </p>
+          </div>
+          <ListScroll>
             {items.map((item) => (
               <ListButton key={item.osm_id} selected={item.osm_id === current.osm_id}
                 onClick={() => { setSelectedId(item.osm_id); setActionError(null); setNotice(null); }}>
-                <p className="truncate text-[0.875rem] font-semibold">{item.name}</p>
-                <p className="truncate text-[0.75rem] text-gray-500 dark:text-muted-dark">{item.address || "No address"}</p>
+                <p className="admin-row-title truncate">{item.name}</p>
+                <p className="admin-row-sub truncate">{item.address || "No address"}</p>
                 {item.decision && (
                   <Badge tone={TONES[item.decision.decision]} className="mt-1.5">{REMOVED_DECISIONS[item.decision.decision]?.label}</Badge>
                 )}
               </ListButton>
             ))}
-          </div>
+          </ListScroll>
         </>
       )}
     >

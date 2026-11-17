@@ -1,5 +1,4 @@
 import {
-  ClipboardCheck,
   FileCheck2,
   PanelLeft,
   SquarePen,
@@ -7,8 +6,6 @@ import {
   Settings,
   Store,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext.jsx";
 import "../../styles/sidebar.css";
 import ProfilePicture from "./ProfilePicture";
 
@@ -23,9 +20,6 @@ function ClosedSidebar({
   onSubmissions,
   submissionsActive = false,
 }) {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-
   return (
     <aside className="closed-sidebar">
       <div className="closed-sidebar-top">
@@ -55,18 +49,6 @@ function ClosedSidebar({
         >
           <Search />
         </button>
-
-        {user?.is_superuser && (
-          <button
-            className="closed-sidebar-icon-btn"
-            type="button"
-            title="Review"
-            aria-label="Review"
-            onClick={() => navigate("/admin/pipeline")}
-          >
-            <ClipboardCheck />
-          </button>
-        )}
 
         <button
           className={`closed-sidebar-icon-btn${registerBusinessActive ? " is-active" : ""}`}

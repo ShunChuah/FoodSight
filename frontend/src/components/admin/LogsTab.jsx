@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { CircleAlert, FileText, TriangleAlert } from "lucide-react";
 import { getLogDay, getLogDays, getLogText } from "../../api/adminApi.js";
 import { STAGE_LABELS, capitalise, formatDay, formatSize, plural, runLabel } from "../../services/adminFormat.js";
-import { Badge, Card, EmptyState, ErrorBox, ListButton, Loading, SplitView } from "./AdminUi.jsx";
+import { Badge, Card, EmptyState, ErrorBox, ListButton, ListScroll, Loading, SplitView } from "./AdminUi.jsx";
 
 // Read only: data/logs, one file per day, split by the backend into runs (an update with its
 // stages, or a stage run by hand) with their problem lines. Each run or stage can show its
@@ -86,7 +86,7 @@ function FullText({ day, start, end }) {
 
 function Stage({ day, stage }) {
   return (
-    <li className="border-t border-gray-100 py-2 first:border-t-0 dark:border-line-dark">
+    <li className="border-t border-[#f0f0f1] py-2 first:border-t-0 dark:border-line-dark">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[0.8125rem] font-semibold">{STAGE_LABELS[stage.script] || stage.command}</span>
         {stage.args && <span className="text-[0.75rem] text-gray-500 dark:text-muted-dark">{stage.args}</span>}
@@ -122,7 +122,7 @@ function Run({ day, run }) {
       )}
       <Problems problems={run.problems} />
       {run.stages.length > 0 && (
-        <ul className="mt-2 rounded-[0.625rem] border border-gray-100 px-3 dark:border-line-dark">
+        <ul className="mt-2 rounded-[0.625rem] border border-[#f0f0f1] px-3 dark:border-line-dark">
           {run.stages.map((stage) => <Stage key={stage.first_line} day={day} stage={stage} />)}
         </ul>
       )}
@@ -157,7 +157,7 @@ export default function LogsTab({ day: chosenDay, onDay }) {
     return () => { alive = false; };
   }, [current, version]);
 
-  if (daysError) return <div className="p-8"><ErrorBox error={daysError} onRetry={() => setVersion((v) => v + 1)} /></div>;
+  if (daysError) return <ErrorBox error={daysError} onRetry={() => setVersion((v) => v + 1)} />;
   if (!days) return <Loading />;
   if (!days.length) return <EmptyState title="No logs yet" text="Every pipeline run writes its output to data/logs, one file per day." />;
 
@@ -169,30 +169,30 @@ export default function LogsTab({ day: chosenDay, onDay }) {
     <SplitView
       list={(
         <>
-          <p className="border-b border-gray-200 p-4 text-[0.8125rem] text-gray-500 dark:border-line-dark dark:text-muted-dark">
-            {plural(days.length, "day")} of logs, newest first
-          </p>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="admin-split-tools">
+            <p className="admin-split-note">{plural(days.length, "day")} of logs, newest first</p>
+          </div>
+          <ListScroll>
             {days.map((d) => (
               <ListButton key={d.day} selected={d.day === current} onClick={() => onDay(d.day)}>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-[0.875rem] font-semibold">{formatDay(d.day)}</p>
-                  <span className="text-[0.75rem] text-gray-500 dark:text-muted-dark">{formatSize(d.size)}</span>
+                  <p className="admin-row-title">{formatDay(d.day)}</p>
+                  <span className="text-[0.8125rem] text-gray-500 dark:text-muted-dark">{formatSize(d.size)}</span>
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[0.75rem] text-gray-500 dark:text-muted-dark">{plural(d.runs, "run")}</span>
+                  <span className="text-[0.8125rem] text-gray-500 dark:text-muted-dark">{plural(d.runs, "run")}</span>
                   <ProblemBadges item={d} />
                 </div>
               </ListButton>
             ))}
-          </div>
+          </ListScroll>
         </>
       )}
     >
       {!shown && <Loading />}
-      {shown?.error && <div className="p-8"><ErrorBox error={shown.error} /></div>}
+      {shown?.error && <div className="p-6"><ErrorBox error={shown.error} /></div>}
       {shown?.data && (
-        <div key={current} className="mx-auto flex max-w-[64rem] flex-col gap-4 p-8">
+        <div key={current} className="flex flex-col gap-4 p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-[1.25rem] font-bold">{formatDay(current)}</h2>

@@ -17,7 +17,7 @@ BACKEND_URL = os.getenv("BACKEND_URL") or "http://localhost:8000"
 CORS_ORIGINS = (os.getenv("CORS_ORIGINS") or FRONTEND_URL).split(",")
 
 AUTH_SECRET = os.environ["AUTH_SECRET"]
-SESSION_LIFETIME_SECONDS = 60 * 60
+SESSION_LIFETIME_SECONDS = 60 * 60 * 4
 EMAIL_LINK_LIFETIME_SECONDS = 15 * 60
 COOKIE_NAME = "foodsight_session"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"

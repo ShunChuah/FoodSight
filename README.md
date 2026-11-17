@@ -28,13 +28,16 @@ docker compose logs -f backend  # view backend logs
 | Login | http://localhost:5173/login |
 | Register | http://localhost:5173/register |
 | Forgot password | http://localhost:5173/forgot-password |
-| Chat (placeholder, login required) | http://localhost:5173/chat |
+| Chat (normal users) | http://localhost:5173/chat |
+| Admin pages (admins only) | http://localhost:5173/admin |
+
+After login, a normal user goes to the chat and an admin to the admin pages. Each one is kept to their own side: an admin who opens `/chat` is sent to `/admin`, and a normal user who opens `/admin` is sent to `/chat`.
 
 **Accounts and login**
 
 - Register with a username, email and password, then open the verification link sent by email. Login is blocked until the email is verified.
 - Passwords need at least 8 characters with an uppercase letter, a lowercase letter, a number and a special character.
-- A login session lasts 1 hour. Verification and reset links last 15 minutes.
+- A login session lasts 4 hours. Verification and reset links last 15 minutes.
 - On the dashboard, Settings → Edit Profile (or your name at the bottom of the sidebar) shows your email and name, lets you change the name, and lets you upload a profile picture (JPG, PNG or WebP, up to 2 MB) by clicking the picture. Settings → Change Password needs your current password and logs out your other browsers. Picture upload needs `db/migrations/025_user_picture.sql` to have been run.
 - Without `SMTP_USER` and `SMTP_PASSWORD` in `.env`, no email is sent. The link is printed in the backend log instead: run `docker compose logs backend` and copy it.
 - Without `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`, "Continue with Google" shows a "not set up" message. See `.env.example` for how to get both.
@@ -75,7 +78,7 @@ The data comes from OpenStreetMap (every food business in Petaling Jaya, and wha
 
 **The daily update:** `python run_update.py` does all of this by itself: it extracts what is due (OpenStreetMap and Google each have their own schedule, which an AI adjusts from how much changed), runs the stages, and continues the next day if something stopped halfway. Windows Task Scheduler runs it every night at midnight. `python run_update.py --status` shows what is due; `--force osm|google|both` extracts now. A new decision in `src/reference/` (from the admin review page or by hand) is applied that night too.
 
-**The admin review page:** `http://localhost:5173/admin`, or **Review** in the chat sidebar, for admins only. It shows what the pipeline needs a person for (Google matches to check, restaurants gone from OpenStreetMap, nearby places counted wrongly) and writes your decisions into the files in `src/reference/` for the next nightly update. To make an account an admin, run this in pgAdmin: `UPDATE auth.users SET is_superuser = true WHERE email = 'you@example.com';`
+**The admin review page:** the **Pipeline** items in the admin sidebar (`http://localhost:5173/admin/pipeline`), for admins only. It shows what the pipeline needs a person for (Google matches to check, restaurants gone from OpenStreetMap, nearby places counted wrongly) and writes your decisions into the files in `src/reference/` for the next nightly update. To make an account an admin, run this in pgAdmin: `UPDATE auth.users SET is_superuser = true WHERE email = 'you@example.com';`
 
 **Where things are:**
 

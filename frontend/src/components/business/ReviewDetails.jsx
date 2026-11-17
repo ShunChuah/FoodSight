@@ -37,8 +37,9 @@ export function SubmittedNotice({ email }) {
       <CircleCheck aria-hidden="true" />
       <h2>Submitted for review</h2>
       <p>
-        Thanks! We'll check your business details and documents, and let you know at{" "}
-        <strong>{email.trim() || "your business email"}</strong> once your account is verified.
+        Thanks! An admin will check your business details and documents and email you at{" "}
+        <strong>{email.trim() || "your business email"}</strong> with the decision. Once approved, your
+        restaurant appears on FoodSight after that night's update. You can follow it under Submissions.
       </p>
     </section>
   );

@@ -1,6 +1,6 @@
 import {
   AMBIANCES, BUSINESS_STATUSES, BUSINESS_STYLES, FACILITY_GROUPS, HALAL_STATUSES, RESTAURANT_TYPES, SERVICE_STYLES,
-  TARGET_SEGMENTS, YES_NO, formatFileSize, isChain,
+  TARGET_SEGMENTS, YES_NO, formatFileSize, isChain, shortArea,
 } from "./businessForm.js";
 import { formatDate, formatPhone, formatSpend, summariseHours } from "./businessReview.js";
 
@@ -15,13 +15,22 @@ export const REVIEW_STATUS = {
   in_progress: { label: "In progress", tone: "info" },
 };
 
+// business_submission.status -> the admin's review state: waiting (no admin has started) or
+// under_review (an admin saved a mark); a decided one keeps its status.
 export function reviewStatus(submission) {
-  if (submission.status !== "waiting") return submission.status;
-  return Object.keys(submission.review).length ? "in_progress" : "not_started";
+  if (submission.status === "waiting") return "not_started";
+  if (submission.status === "under_review") return "in_progress";
+  return submission.status;
 }
 
-// "SS 21 (Damansara Uptown, Damansara Utama)" -> "SS 21"
-export const shortArea = (area) => area.replace(/\s*\(.*\)$/, "");
+// The list's tabs: Waiting (waiting, under review), Approved (approved, live), Rejected.
+export function tabOf(status) {
+  if (status === "approved" || status === "live") return "approved";
+  if (status === "rejected") return "rejected";
+  return "waiting";
+}
+
+export { shortArea };
 
 export function formatDay(iso) {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -48,7 +57,8 @@ const file = (key, label, value) => ({
   key, label, kind: "file", value: value ? `${value.name} · ${formatFileSize(value.size)}` : NOT_PROVIDED, file: value,
 });
 
-// Item keys match the form field ids, so a flag can point the owner back at the field.
+// Item keys match the form field ids, so a flag can point the owner back at the field. They are the
+// same list as review_fields() in backend/app/business/submissions.py (the API sends it as reviewFields).
 export function reviewSections(form) {
   const halal = [{ key: "halalStatus", label: "Halal status", value: labelIn(HALAL_STATUSES, form.halalStatus) }];
   if (form.halalStatus === "halal_certified") {
@@ -60,9 +70,10 @@ export function reviewSections(form) {
     halal.push({ key: "servesAlcohol", label: "Items containing alcohol", value: labelIn(YES_NO, form.servesAlcohol) });
   }
 
+  // One mark per facility group with something picked (facilities-<category>), as the backend's review_fields()
   const facilities = FACILITY_GROUPS
     .map((group) => ({
-      key: `facilities-${group.title}`,
+      key: `facilities-${group.key}`,
       label: group.title,
       value: group.items.filter((item) => form.facilities.includes(item.value)).map((item) => item.label).join(", "),
     }))
@@ -88,8 +99,7 @@ export function reviewSections(form) {
     { title: "Business location", items: [
       { key: "address", label: "Address", value: filled(form.address) },
       { key: "postcode", label: "Postcode", value: filled(form.postcode) },
-      { key: "area", label: "Area · City", value: `${shortArea(form.area)} · Petaling Jaya` },
-      { key: "location", label: "Map pin", kind: "map", value: `${form.location.latitude.toFixed(4)}, ${form.location.longitude.toFixed(4)}`, location: form.location },
+      { key: "location", label: `Map pin · ${shortArea(form.area) || "outside Petaling Jaya"}`, kind: "map", value: `${form.location.latitude.toFixed(4)}, ${form.location.longitude.toFixed(4)}`, location: form.location },
     ] },
     { title: "Business verification", items: [
       { key: "ssmNumber", label: "SSM registration number", value: filled(form.ssmNumber) },
@@ -137,7 +147,7 @@ export function visibleSubmissions(submissions, tab, filters, search) {
   const query = search.trim().toLowerCase();
   const rows = submissions.filter((submission) => {
     const { form } = submission;
-    if (submission.status !== tab) return false;
+    if (tabOf(submission.status) !== tab) return false;
     if (filters.date && !sameDay(submission.submittedAt, filters.date)) return false;
     if (filters.reviewStatus && reviewStatus(submission) !== filters.reviewStatus) return false;
     if (filters.area && form.area !== filters.area) return false;
@@ -149,8 +159,21 @@ export function visibleSubmissions(submissions, tab, filters, search) {
   return rows.sort((a, b) => direction * (new Date(a.submittedAt) - new Date(b.submittedAt)));
 }
 
-export function decidedWithin(submissions, status, days, now = Date.now()) {
-  return submissions.filter((submission) => submission.status === status && now - new Date(submission.decidedAt) <= days * DAY).length;
+export function decidedWithin(submissions, tab, days, now = Date.now()) {
+  return submissions.filter((submission) => tabOf(submission.status) === tab && submission.decidedAt
+    && now - new Date(submission.decidedAt) <= days * DAY).length;
+}
+
+// How many submissions arrived in each of the last `count` weeks (Monday to Sunday), oldest first.
+export function weeklyCounts(submissions, count, now = new Date()) {
+  const starts = weekStarts(count, now);
+  return starts.map((start, index) => {
+    const end = index + 1 < starts.length ? starts[index + 1] : new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+    return submissions.filter((submission) => {
+      const created = new Date(submission.createdAt);
+      return created >= start && created < end;
+    }).length;
+  });
 }
 
 // Monday of each of the last `count` weeks, oldest first.

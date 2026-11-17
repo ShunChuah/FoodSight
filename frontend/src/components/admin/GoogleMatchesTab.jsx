@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Clock, Search, Undo2, X } from "lucide-react";
+import { Check, Clock, Undo2, X } from "lucide-react";
 import {
   decideGoogleMatch, decideShared, getGoogleMatch, getGoogleMatches, undoGoogleMatch, undoShared,
 } from "../../api/adminApi.js";
 import { GOOGLE_COLOR, OSM_COLOR, REASON_LABELS, capitalise, formatDateTime, plural } from "../../services/adminFormat.js";
+import { Dropdown } from "../business/BusinessFields";
 import AdminMap from "./AdminMap.jsx";
 import {
-  ActionButton, Badge, Card, EmptyState, ErrorBox, FilterChip, ListButton, Loading, Notice, SplitView, TextInput,
+  ActionButton, Badge, EmptyState, ErrorBox, ListButton, ListScroll, Loading, Notice, SearchBox, Section, SplitView, Tabs, TextInput,
 } from "./AdminUi.jsx";
 import { Comparison, DecisionBadge, PinChoice } from "./MatchParts.jsx";
 import SharedPlaceDetail from "./SharedPlaceDetail.jsx";
@@ -61,7 +62,7 @@ function reasonSentence(item) {
 function DecisionPanel({ item, others, note, onNote, pin, onPin, busy, onDecide, onUndo, onSelect }) {
   const decision = item.decision;
   return (
-    <Card>
+    <Section title={decision ? null : "Is this the same restaurant?"}>
       {decision ? (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -81,8 +82,7 @@ function DecisionPanel({ item, others, note, onNote, pin, onPin, busy, onDecide,
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
-          <p className="text-[0.875rem] font-semibold">Is this the same restaurant?</p>
+        <div className="flex flex-col gap-3">
           <div className="flex gap-2">
             <TextInput className="min-w-0 flex-1" value={note} maxLength={300} onChange={(event) => onNote(event.target.value)}
               placeholder="Note (optional): why you decided, e.g. same shop, checked on Google Maps" />
@@ -99,7 +99,7 @@ function DecisionPanel({ item, others, note, onNote, pin, onPin, busy, onDecide,
         </div>
       )}
       {others.length > 0 && (
-        <div className="mt-4 border-t border-gray-100 pt-3 text-[0.8125rem] dark:border-line-dark">
+        <div className="mt-4 border-t border-[#f0f0f1] pt-3 text-[0.8125rem] dark:border-line-dark">
           <p className="font-semibold">The removed restaurant that had this Google place:</p>
           <ul className="mt-1 flex flex-col gap-1">
             {others.map((other) => (
@@ -115,7 +115,7 @@ function DecisionPanel({ item, others, note, onNote, pin, onPin, busy, onDecide,
           <p className="mt-2 text-gray-500 dark:text-muted-dark">Same place moves that restaurant's database row, with its reviews, to this new OpenStreetMap ID.</p>
         </div>
       )}
-    </Card>
+    </Section>
   );
 }
 
@@ -138,7 +138,7 @@ function MatchDetail({ item, others, note, onNote, pin, onPin, busy, error, noti
 
   // The title's colours are the legend; the sentence gives the reason, the distance and the limit
   return (
-    <div className="mx-auto flex max-w-[64rem] flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 p-6">
       <div>
         <h2 className="text-[1.375rem] font-bold">
           <span style={{ color: OSM_COLOR }}>{item.osm_name}</span>
@@ -171,10 +171,10 @@ function EntryButton({ entry, selected, onClick }) {
       <ListButton selected={selected} onClick={onClick}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-[0.875rem] font-semibold">{entry.members.map((m) => m.osm_name).join(" · ")}</p>
-            <p className="truncate text-[0.75rem] text-gray-500 dark:text-muted-dark">Google: {entry.google_name}</p>
+            <p className="admin-row-title truncate">{entry.members.map((m) => m.osm_name).join(" · ")}</p>
+            <p className="admin-row-sub truncate">Google: {entry.google_name}</p>
           </div>
-          <span className="shrink-0 text-[0.75rem] text-gray-500 dark:text-muted-dark">{plural(entry.members.length, "restaurant")}</span>
+          <span className="shrink-0 text-[0.8125rem] text-gray-500 dark:text-muted-dark">{plural(entry.members.length, "restaurant")}</span>
         </div>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <Badge tone="brand">{REASON_LABELS.shared_google_place}</Badge>
@@ -190,10 +190,10 @@ function EntryButton({ entry, selected, onClick }) {
     <ListButton selected={selected} onClick={onClick}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-[0.875rem] font-semibold">{entry.osm_name}</p>
-          <p className="truncate text-[0.75rem] text-gray-500 dark:text-muted-dark">Google: {entry.google_name}</p>
+          <p className="admin-row-title truncate">{entry.osm_name}</p>
+          <p className="admin-row-sub truncate">Google: {entry.google_name}</p>
         </div>
-        <span className="shrink-0 text-[0.75rem] text-gray-500 dark:text-muted-dark">{entry.distance_m} m</span>
+        <span className="shrink-0 text-[0.8125rem] text-gray-500 dark:text-muted-dark">{entry.distance_m} m</span>
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         <Badge tone="brand">{REASON_LABELS[entry.reason] || entry.reason}</Badge>
@@ -318,7 +318,7 @@ export default function GoogleMatchesTab({ onChanged }) {
     setNotice("Undone: these restaurants are waiting for a decision again.");
   });
 
-  if (listError) return <div className="p-8"><ErrorBox error={listError} onRetry={() => setListVersion((v) => v + 1)} /></div>;
+  if (listError) return <ErrorBox error={listError} onRetry={() => setListVersion((v) => v + 1)} />;
   if (!list) return <Loading />;
   if (!items.length) {
     return <EmptyState title="No Google matches to check" text="Restaurants whose Google match needs a person appear here after a Google extraction." />;
@@ -338,54 +338,47 @@ export default function GoogleMatchesTab({ onChanged }) {
     notice,
   };
 
+  // The counts count restaurants, like the Overview; a shared place is one entry for its restaurants
+  const showTabs = Object.entries(SHOW).map(([key, label]) => ({
+    id: key, label,
+    count: items.filter((item) => key === "all" || (key === "waiting" ? !item.decision : Boolean(item.decision))).length,
+  }));
+  const reasonOptions = [
+    { value: "all", label: "Every reason" },
+    ...reasonsPresent.map((key) => ({ value: key, label: `${REASON_LABELS[key]} (${items.filter((item) => hasReason(item, key)).length})` })),
+  ];
+
   return (
-    <SplitView
-      list={(
-        <>
-          <div className="flex flex-col gap-3 border-b border-gray-200 p-4 dark:border-line-dark">
-            <div className="relative">
-              <Search className="absolute top-1/2 left-3 size-[1rem] -translate-y-1/2 text-gray-400" />
-              <TextInput className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search OSM or Google names" />
+    <>
+      <Tabs label="Decision" tabs={showTabs} active={show} onChange={setShow} />
+      <SplitView
+        list={(
+          <>
+            <div className="admin-split-tools">
+              <SearchBox value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search OSM or Google names" />
+              <Dropdown id="google-reason" ariaLabel="Reason" value={reason} options={reasonOptions} onChange={setReason} />
             </div>
-            {/* The counts count restaurants, like the Overview; a shared place is one entry for its restaurants */}
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(SHOW).map(([key, label]) => (
-                <FilterChip key={key} active={show === key} onClick={() => setShow(key)}>
-                  {label} ({items.filter((item) => key === "all" || (key === "waiting" ? !item.decision : Boolean(item.decision))).length})
-                </FilterChip>
+            <ListScroll>
+              {filtered.map((entry) => (
+                <EntryButton key={entry.key} entry={entry} selected={entry.key === currentKey} onClick={() => select(entry.key)} />
               ))}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <FilterChip active={reason === "all"} onClick={() => setReason("all")}>Every reason</FilterChip>
-              {reasonsPresent.map((key) => (
-                <FilterChip key={key} active={reason === key} onClick={() => setReason(key)}>
-                  {REASON_LABELS[key]} ({items.filter((item) => hasReason(item, key)).length})
-                </FilterChip>
-              ))}
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {filtered.map((entry) => (
-              <EntryButton key={entry.key} entry={entry} selected={entry.key === currentKey} onClick={() => select(entry.key)} />
-            ))}
-            {!filtered.length && <p className="p-4 text-[0.8125rem] text-gray-500 dark:text-muted-dark">Nothing matches these filters.</p>}
-          </div>
-          <p className="border-t border-gray-200 px-4 py-2 text-[0.75rem] text-gray-500 dark:border-line-dark dark:text-muted-dark">
-            List written by the Google extraction on {formatDateTime(list.file_written)}
-          </p>
-        </>
-      )}
-    >
-      {!current && <EmptyState title="Nothing selected" text="Choose a restaurant on the left." />}
-      {current && !shown && <Loading />}
-      {current && shown?.loadError && <div className="p-8"><ErrorBox error={shown.loadError} /></div>}
-      {current && shown?.data && current.group && (
-        <SharedPlaceDetail group={current} details={shown.data} {...shared} onDecide={decideGroup} onUndo={undoGroup} />
-      )}
-      {current && shown?.data && !current.group && (
-        <MatchDetail item={{ ...shown.data[0], decision: current.decision }} others={others} {...shared}
-          onDecide={decide} onUndo={undo} onSelect={select} />
-      )}
-    </SplitView>
+              {!filtered.length && <p className="admin-split-note p-4">Nothing matches these filters.</p>}
+            </ListScroll>
+            <p className="admin-split-foot">List written by the Google extraction on {formatDateTime(list.file_written)}</p>
+          </>
+        )}
+      >
+        {!current && <EmptyState title="Nothing selected" text="Choose a restaurant on the left." />}
+        {current && !shown && <Loading />}
+        {current && shown?.loadError && <div className="p-6"><ErrorBox error={shown.loadError} /></div>}
+        {current && shown?.data && current.group && (
+          <SharedPlaceDetail group={current} details={shown.data} {...shared} onDecide={decideGroup} onUndo={undoGroup} />
+        )}
+        {current && shown?.data && !current.group && (
+          <MatchDetail item={{ ...shown.data[0], decision: current.decision }} others={others} {...shared}
+            onDecide={decide} onUndo={undo} onSelect={select} />
+        )}
+      </SplitView>
+    </>
   );
 }

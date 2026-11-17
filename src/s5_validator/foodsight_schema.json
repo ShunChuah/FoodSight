@@ -152,8 +152,6 @@
       "items": {
         "type": "object",
         "required": [
-          "osm_id",
-          "osm_type",
           "name",
           "amenity_type",
           "business_status",
@@ -162,16 +160,26 @@
         ],
         "additionalProperties": true,
         "properties": {
-          "osm_id": {
+          "source": {
             "type": "string",
+            "values_from": "restaurant.source",
+            "description": "restaurant.source (NOT NULL): extracted (OpenStreetMap + Google) or submitted (a business submission). Missing means extracted (a pj_merged.json written before sources existed). check_source_ids() checks the IDs that go with each"
+          },
+          "submission_id": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "description": "A submitted restaurant's business_submission.submission_id (the loader finds it by this); empty for an extracted one"
+          },
+          "osm_id": {
+            "type": ["string", "null"],
             "maxLength": 50,
             "minLength": 1,
-            "description": "OSM unique ID — maps to restaurant.osm_id (UNIQUE)"
+            "description": "OSM unique ID — maps to restaurant.osm_id (UNIQUE). Required for an extracted restaurant, empty for a submitted one (check_source_ids)"
           },
           "osm_type": {
-            "type": "string",
-            "enum": ["node", "way", "relation"],
-            "description": "The kind of OSM object, as for nearby places — maps to restaurant.osm_type. OSM numbers each kind separately, so osm_id needs it to name one object"
+            "type": ["string", "null"],
+            "enum": ["node", "way", "relation", null],
+            "description": "The kind of OSM object, as for nearby places — maps to restaurant.osm_type. OSM numbers each kind separately, so osm_id needs it to name one object. Empty together with osm_id"
           },
           "google_place_id": {
             "type": [

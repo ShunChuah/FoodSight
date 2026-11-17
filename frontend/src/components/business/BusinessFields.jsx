@@ -517,7 +517,8 @@ export function DateInput({ id, label, required, error, value, onChange, min }) 
   );
 }
 
-export function FileUpload({ id, label, title, required, optional, hint, types, file, onChange, error, wide = true }) {
+// hint: inside the box, before a file is picked; note: under the label, always shown
+export function FileUpload({ id, label, title, required, optional, hint, note, types, file, onChange, error, wide = true }) {
   const inputRef = useRef(null);
   const [pickError, setPickError] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -531,7 +532,7 @@ export function FileUpload({ id, label, title, required, optional, hint, types, 
   };
 
   return (
-    <FieldShell id={id} label={label} required={required} error={shownError} wide={wide} labelFor={false}>
+    <FieldShell id={id} label={label} required={required} hint={note} error={shownError} wide={wide} labelFor={false}>
       <div
         className={`business-upload${file ? " has-file" : ""}${dragging ? " is-dragging" : ""}${shownError ? " has-error" : ""}`}
         onDragOver={(event) => {

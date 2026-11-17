@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
-import { Search } from "lucide-react";
 import { DateInput, SelectInput } from "../business/BusinessFields";
-import { AREAS, HALAL_STATUSES, RESTAURANT_TYPES } from "../../services/businessForm";
+import { HALAL_STATUSES, RESTAURANT_TYPES } from "../../services/businessForm";
 import { formatPhone } from "../../services/businessReview";
 import {
-  EMPTY_FILTERS, REVIEW_STATUS, formatDay, reviewStatus, shortArea, visibleSubmissions, waitingTime,
+  EMPTY_FILTERS, REVIEW_STATUS, formatDay, reviewStatus, shortArea, tabOf, visibleSubmissions, waitingTime,
 } from "../../services/adminSubmissions";
+import { SearchBox } from "./AdminUi.jsx";
 
 const TABS = [
   { id: "waiting", label: "Waiting" },
@@ -16,7 +16,12 @@ const TABS = [
 
 const ALL = (label) => ({ value: "", label });
 const REVIEW_OPTIONS = [ALL("All status"), ...["not_started", "in_progress"].map((value) => ({ value, label: REVIEW_STATUS[value].label }))];
-const AREA_OPTIONS = [ALL("All areas"), ...AREAS.map((area) => ({ value: area, label: area }))];
+// The areas the submissions are in (each found from its pin), A to Z
+const areaOptions = (submissions) => [
+  ALL("All areas"),
+  ...[...new Set(submissions.map((submission) => submission.form.area).filter(Boolean))].sort()
+    .map((area) => ({ value: area, label: shortArea(area) })),
+];
 const HALAL_OPTIONS = [ALL("All status"), ...HALAL_STATUSES];
 const SORT_OPTIONS = [{ value: "oldest", label: "Oldest first" }, { value: "newest", label: "Newest first" }];
 
@@ -28,7 +33,7 @@ function StatusPill({ status }) {
 }
 
 export default function AdminSubmissions() {
-  const { submissions } = useOutletContext();
+  const { submissions, submissionsInfo } = useOutletContext();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const tab = TABS.some((item) => item.id === params.get("tab")) ? params.get("tab") : "waiting";
@@ -39,7 +44,7 @@ export default function AdminSubmissions() {
 
   const isWaiting = tab === "waiting";
   const rows = visibleSubmissions(submissions, tab, filters, search);
-  const waitingCount = submissions.filter((submission) => submission.status === "waiting").length;
+  const waitingCount = submissions.filter((submission) => tabOf(submission.status) === "waiting").length;
   const set = (field) => (value) => setDraft((previous) => ({ ...previous, [field]: value }));
   const reset = () => {
     setDraft(EMPTY_FILTERS);
@@ -78,7 +83,7 @@ export default function AdminSubmissions() {
         {isWaiting && (
           <SelectInput id="filter-review" label="Review status" value={draft.reviewStatus} onChange={set("reviewStatus")} options={REVIEW_OPTIONS} />
         )}
-        <SelectInput id="filter-area" label="Area" value={draft.area} onChange={set("area")} options={AREA_OPTIONS} />
+        <SelectInput id="filter-area" label="Area" value={draft.area} onChange={set("area")} options={areaOptions(submissions)} />
         <SelectInput id="filter-halal" label="Halal status" value={draft.halalStatus} onChange={set("halalStatus")} options={HALAL_OPTIONS} />
         <SelectInput id="filter-sort" label="Sort by" value={draft.sort} onChange={set("sort")} options={SORT_OPTIONS} />
         <div className="admin-filter-actions">
@@ -87,13 +92,11 @@ export default function AdminSubmissions() {
         </div>
       </form>
 
-      <label className="admin-search">
-        <Search aria-hidden="true" />
-        <input
-          type="search" placeholder="Search business, manager or SSM no." aria-label="Search submissions"
-          value={search} onChange={(event) => setSearch(event.target.value)}
-        />
-      </label>
+      {/* The admin pages' one search box (the same as on the pipeline pages) */}
+      <SearchBox
+        className="my-6" placeholder="Search business, manager or SSM no." aria-label="Search submissions"
+        value={search} onChange={(event) => setSearch(event.target.value)}
+      />
 
       <div className="admin-table-wrap">
         <table className="admin-table">
@@ -136,7 +139,9 @@ export default function AdminSubmissions() {
             })}
           </tbody>
         </table>
-        {rows.length === 0 && <p className="admin-empty">No submissions match these filters.</p>}
+        {submissionsInfo?.state === "loading" && <p className="admin-empty">Loading submissions…</p>}
+        {submissionsInfo?.state === "error" && <p className="admin-empty">We could not load the submissions. Reload the page to try again.</p>}
+        {submissionsInfo?.state === "ready" && rows.length === 0 && <p className="admin-empty">No submissions match these filters.</p>}
       </div>
     </div>
   );

@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Send } from "lucide-react";
 import Logo from "../../assets/logo.svg";
 import DarkModeLogo from "../../assets/logo-dark.svg";
+import { getAreaForPin, submissionFieldErrors } from "../../api/businessApi";
 import {
-  AMBIANCES, AREAS, BUSINESS_STATUSES, BUSINESS_STEPS, BUSINESS_STYLES, CITY, CUISINES, DOCUMENT_TYPES, FACILITY_GROUPS,
+  AMBIANCES, BUSINESS_STATUSES, BUSINESS_STEPS, BUSINESS_STYLES, CITY, CUISINES, DOCUMENT_TYPES, FACILITY_GROUPS,
   HALAL_STATUSES, MAX_AMBIANCES, MAX_CUISINES, MAX_DESCRIPTION, MAX_TARGET_SEGMENTS, PHOTO_TYPES, RESTAURANT_TYPES,
-  FORM_SECTIONS, SERVICE_STYLES, TARGET_SEGMENTS, YES_NO, businessStepOneErrors, businessStepTwoErrors, isChain, sectionId, sectionStep,
-  todayIso,
+  FORM_SECTIONS, SERVICE_STYLES, TARGET_SEGMENTS, YES_NO, businessStepOneErrors, businessStepTwoErrors, groupFacilities,
+  isChain, sectionId, sectionStep, shortArea, stepOf, todayIso, useBusinessOptions,
 } from "../../services/businessForm";
 import {
   CheckboxGroups, ChoiceGroup, DateInput, FieldNote, FileUpload, FlagNotes, FormSection, MultiPicker, PhoneInput, SelectInput,
@@ -18,9 +19,8 @@ import { ReviewDetails, SubmittedNotice } from "./ReviewDetails";
 import "../../styles/business.css";
 import "../../styles/submissions.css";
 
-const AREA_OPTIONS = AREAS.map((area) => ({ value: area, label: area }));
-const CUISINE_OPTIONS = CUISINES.map((cuisine) => ({ value: cuisine, label: cuisine }));
 const STEP_CHECKS = [businessStepOneErrors, businessStepTwoErrors];
+const AREA_LOOKUP_DELAY_MS = 300;
 
 function Stepper({ step, onStep }) {
   return (
@@ -47,20 +47,37 @@ function Stepper({ step, onStep }) {
   );
 }
 
-// flags: rejected-review issues. A flagged field shows its note as an error until its value changes.
-function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flags = [], onSubmitted }) {
+// flags: the admin's flags on a rejected submission (asFlags()). A flagged field shows its note as an
+// error until its value changes, and Submit waits until every flagged field has changed (the backend
+// checks the same). onSubmit(form) sends it and returns a promise; onSubmitted() runs after it worked.
+function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flags = [], onSubmit, onSubmitted }) {
+  const options = useBusinessOptions();
   // Errors only show for steps whose Next has been pressed.
   const [checkedSteps, setCheckedSteps] = useState([]);
   const scrollRef = useRef(null);
   // The email is also checked on blur, before Next.
   const [emailLeft, setEmailLeft] = useState(false);
+  const [serverErrors, setServerErrors] = useState({});
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [submittedEmail, setSubmittedEmail] = useState(null);
   const check = STEP_CHECKS[step];
   const allErrors = check ? check(form) : {};
   const [savedForm] = useState(form);
-  const unchanged = (field) => JSON.stringify(form[field]) === JSON.stringify(savedForm[field]);
-  const flagErrors = Object.fromEntries(flags.filter((flag) => flag.field && unchanged(flag.field)).map((flag) => [flag.field, flag.note]));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const unchanged = (flag) => {
+    if (flag.group === "all") return same([...form.facilities].sort(), [...savedForm.facilities].sort());
+    if (flag.group) return same(groupFacilities(form.facilities, flag.group), groupFacilities(savedForm.facilities, flag.group));
+    return Boolean(flag.field) && same(form[flag.field], savedForm[flag.field]);
+  };
+  const openFlags = flags.filter(unchanged);
+  const flagErrors = Object.fromEntries(openFlags.filter((flag) => flag.field).map((flag) => [flag.field, flag.note]));
+  // A server message stays until its field changes
+  const liveServerErrors = Object.fromEntries(Object.entries(serverErrors).filter(([field, entry]) => (
+    JSON.stringify(form[field]) === entry.value)).map(([field, entry]) => [field, entry.message]));
   const errors = {
     ...flagErrors,
+    ...liveServerErrors,
     ...(checkedSteps.includes(step)
       ? allErrors
       : step === 0 && emailLeft && form.businessEmail.trim() && allErrors.businessEmail ? { businessEmail: allErrors.businessEmail } : {}),
@@ -72,9 +89,25 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
     onChange: (event) => set(field)(event.target.value),
   });
 
-  const [submitted, setSubmitted] = useState(false);
-  const flagsIn = (title) => flags.filter((flag) => flag.section === title && !flag.field);
-  const firstFlagOn = (target) => flags
+  // The area is worked out from the pin by the backend (the section outlines); the user never picks it
+  const { latitude, longitude } = form.location ?? {};
+  useEffect(() => {
+    if (latitude == null || longitude == null) return undefined;
+    let alive = true;
+    const timer = setTimeout(() => {
+      getAreaForPin({ latitude, longitude })
+        .then((found) => alive && setForm((previous) => ({ ...previous, area: found.area ?? "" })))
+        .catch(() => alive && setForm((previous) => ({ ...previous, area: "" })));
+    }, AREA_LOOKUP_DELAY_MS);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [latitude, longitude, setForm]);
+
+  // A section's own flags (a facility group's, or one with no field): shown until changed
+  const flagsIn = (title) => openFlags.filter((flag) => flag.section === title && !flag.field);
+  const firstFlagOn = (target) => openFlags
     .filter((flag) => sectionStep(flag.section) === target)
     .sort((a, b) => FORM_SECTIONS.indexOf(a.section) - FORM_SECTIONS.indexOf(b.section))[0];
   const flagTarget = (flag) => (flag ? flag.field ?? sectionId(flag.section) : null);
@@ -96,7 +129,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
     field?.focus({ preventScroll: true });
   }, [step]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     for (const [index, stepCheck] of STEP_CHECKS.entries()) {
       const first = Object.keys(stepCheck(form))[0];
       if (first) {
@@ -105,10 +138,33 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
         return;
       }
     }
-    // TODO: send the registration once the backend has an endpoint for it; nothing leaves the browser yet.
-    setSubmitted(true);
-    onSubmitted?.(form);
-    scrollRef.current?.scrollTo({ top: 0 });
+    const waiting = openFlags[0];
+    if (waiting) {
+      setSendError(`Change everything the admin flagged before you resubmit: ${waiting.label}.`);
+      goTo(sectionStep(waiting.section), flagTarget(waiting));
+      return;
+    }
+    setSending(true);
+    setSendError("");
+    try {
+      await onSubmit(form);
+      setSubmittedEmail(form.businessEmail);
+      onSubmitted?.();
+      scrollRef.current?.scrollTo({ top: 0 });
+    } catch (error) {
+      const fields = submissionFieldErrors(error);
+      if (fields && Object.keys(fields).length) {
+        setServerErrors(Object.fromEntries(Object.entries(fields).map(([field, message]) => (
+          [field, { message, value: JSON.stringify(form[field]) }]))));
+        const first = Object.keys(fields)[0];
+        setSendError("Some details need fixing. They are marked in red.");
+        goTo(stepOf(first), first);
+      } else {
+        setSendError("We could not send your registration. Check your connection and try again.");
+      }
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleNext = () => {
@@ -126,6 +182,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
     field?.focus({ preventScroll: true });
   };
 
+  const submitted = submittedEmail !== null;
 
   return (
     <main className="business-area">
@@ -133,10 +190,21 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
         <header className="business-header">
           <img src={darkMode ? DarkModeLogo : Logo} alt="FoodSight" className="business-logo" />
           <h1>Register a Business Account</h1>
-          <Stepper step={step} onStep={goTo} />
+          {options.state === "ready" && <Stepper step={step} onStep={goTo} />}
         </header>
 
-        {step === 0 ? (
+        {options.state !== "ready" ? (
+          <section className="business-section my-sub-empty" role="status">
+            {options.state === "loading" ? (
+              <p>Loading the form…</p>
+            ) : (
+              <>
+                <p>We could not load the form. Check your connection and try again.</p>
+                <button type="button" className="business-next-btn" onClick={options.retry}>Try again</button>
+              </>
+            )}
+          </section>
+        ) : step === 0 ? (
           <form className="business-form" noValidate onSubmit={(event) => { event.preventDefault(); handleNext(); }}>
             <FormSection title="Store manager information" flags={flagsIn("Store manager information")}>
               <TextInput id="managerName" label="Full name (as on IC)" required placeholder="e.g. Aisyah binti Rahman" autoComplete="name" {...text("managerName")} />
@@ -160,13 +228,13 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
             </FormSection>
 
             <FormSection title="Business location" flags={flagsIn("Business location")}>
-              <TextInput id="address" label="Address" required wide placeholder="e.g. 123, Jalan Tun Razak, Taman Melawati" autoComplete="street-address" {...text("address")} />
+              <TextInput id="address" label="Address" required wide placeholder="e.g. 123, Jalan SS 2/24" autoComplete="street-address" {...text("address")} />
               <TextInput
-                id="postcode" label="Postcode" required inputMode="numeric" maxLength={5} placeholder="e.g. 12345" autoComplete="postal-code"
+                id="postcode" label="Postcode" required inputMode="numeric" maxLength={5} placeholder="e.g. 47300" autoComplete="postal-code"
                 value={form.postcode} error={errors.postcode}
                 onChange={(event) => set("postcode")(event.target.value.replace(/\D/g, ""))}
               />
-              <SelectInput id="area" label="Area" required placeholder="Select area" options={AREA_OPTIONS} value={form.area} onChange={set("area")} error={errors.area} />
+              <TextInput id="area" label="Area" value={shortArea(form.area) || "Found from your pin"} readOnly tabIndex={-1} />
               <TextInput id="city" label="City" value={CITY} readOnly tabIndex={-1} />
               <div className="business-field is-wide">
                 <span className="business-label">
@@ -192,6 +260,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
               <FileUpload
                 id="storefrontPhoto" label="Storefront photo" title="Storefront photo" required
                 hint="JPG or PNG, up to 10 MB" types={PHOTO_TYPES}
+                note="Once approved, this photo may also be shown with your restaurant on FoodSight."
                 file={form.storefrontPhoto} onChange={set("storefrontPhoto")} error={errors.storefrontPhoto}
               />
             </FormSection>
@@ -209,7 +278,7 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
                       hint="PDF, JPG or PNG, up to 10 MB" types={DOCUMENT_TYPES}
                       file={form.halalCertificate} onChange={set("halalCertificate")} error={errors.halalCertificate}
                     />
-                    <FieldNote>A valid certificate issued by JAKIM (Jabatan Kemajuan Islam Malaysia).</FieldNote>
+                    <FieldNote>A valid Malaysian halal certificate, issued by JAKIM or JAIS (Selangor).</FieldNote>
                   </div>
                   <DateInput
                     id="halalExpiry" label="Certificate expiration date" required min={todayIso()}
@@ -237,8 +306,8 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
 
             <FormSection title="Food & dining experience" flags={flagsIn("Food & dining experience")}>
               <MultiPicker
-                id="cuisines" label="Cuisines served" required hint={`Pick up to ${MAX_CUISINES}`} placeholder="Select cuisines"
-                options={CUISINE_OPTIONS} value={form.cuisines} onChange={set("cuisines")} max={MAX_CUISINES} error={errors.cuisines}
+                id="cuisines" label="Cuisines served" required hint={`Pick up to ${MAX_CUISINES}, the main one first`} placeholder="Select cuisines"
+                options={CUISINES} value={form.cuisines} onChange={set("cuisines")} max={MAX_CUISINES} error={errors.cuisines}
               />
               <SelectInput id="serviceStyle" label="Service style" required placeholder="Select service style" options={SERVICE_STYLES} value={form.serviceStyle} onChange={set("serviceStyle")} error={errors.serviceStyle} />
               <TextInput
@@ -274,12 +343,16 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
             </section>
           </form>
         ) : submitted ? (
-          <SubmittedNotice email={form.businessEmail} />
+          <SubmittedNotice email={submittedEmail} />
         ) : (
-          <ReviewDetails form={form} onEdit={goTo} flags={flags} />
+          <ReviewDetails form={form} onEdit={goTo} flags={openFlags} />
         )}
 
-        {check && (
+        {options.state === "ready" && sendError && !submitted && (
+          <p className="business-error business-send-error" role="alert">{sendError}</p>
+        )}
+
+        {options.state === "ready" && check && (
           <footer className={`business-actions${step > 0 ? " has-back" : ""}`}>
             {step > 0 && (
               <button type="button" className="business-back-btn" onClick={() => goTo(step - 1)}>
@@ -293,15 +366,15 @@ function RegisterBusiness({ form, setForm, step, setStep, darkMode = false, flag
             </button>
           </footer>
         )}
-        {!check && !submitted && (
+        {options.state === "ready" && !check && !submitted && (
           <footer className="business-actions has-back">
-            <button type="button" className="business-back-btn" onClick={() => goTo(step - 1)}>
+            <button type="button" className="business-back-btn" onClick={() => goTo(step - 1)} disabled={sending}>
               <ArrowLeft aria-hidden="true" />
               Back
             </button>
-            <button type="button" className="business-next-btn" onClick={handleSubmit}>
+            <button type="button" className="business-next-btn" onClick={handleSubmit} disabled={sending}>
               <Send aria-hidden="true" />
-              Submit for review
+              {sending ? "Sending…" : flags.length ? "Resubmit for review" : "Submit for review"}
             </button>
           </footer>
         )}

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Clock, Search, Undo2 } from "lucide-react";
+import { Ban, Clock, Undo2 } from "lucide-react";
 import { excludePlace, getExclusions, getNearbyPlace, getNearbyPlaces, removeExclusion } from "../../api/adminApi.js";
 import { capitalise, formatDateTime, plural } from "../../services/adminFormat.js";
+import { Dropdown } from "../business/BusinessFields";
 import AdminMap from "./AdminMap.jsx";
 import {
-  ActionButton, Badge, Card, EmptyState, ErrorBox, ExternalLinkText, FilterChip, ListButton, Loading, Notice, SplitView, TextInput,
+  ActionButton, Badge, EmptyState, ErrorBox, ExternalLinkText, ListButton, ListScroll, Loading, Notice, SearchBox, Section, SplitView, Tabs,
+  TextInput,
 } from "./AdminUi.jsx";
 
 // The OpenStreetMap places counted around restaurants (public.nearby_place) and the
@@ -27,7 +29,7 @@ function ExclusionPanel({ exclusion, busy, onExclude, onRemove, waiting }) {
   const [reason, setReason] = useState("");
   if (exclusion) {
     return (
-      <Card>
+      <Section>
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="red"><Ban className="size-[0.75rem]" /> Excluded</Badge>
@@ -45,13 +47,12 @@ function ExclusionPanel({ exclusion, busy, onExclude, onRemove, waiting }) {
             <ActionButton tone="undo" disabled={busy} onClick={onRemove}><Undo2 /> Remove the exclusion (count it again)</ActionButton>
           </div>
         </div>
-      </Card>
+      </Section>
     );
   }
   return (
-    <Card>
+    <Section title="Should this place not be counted?">
       <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); onExclude(reason.trim()); }}>
-        <p className="text-[0.875rem] font-semibold">Should this place not be counted?</p>
         <TextInput value={reason} maxLength={300} onChange={(event) => setReason(event.target.value)}
           placeholder="Reason, e.g. a clinic, not a hospital" />
         <div>
@@ -61,7 +62,7 @@ function ExclusionPanel({ exclusion, busy, onExclude, onRemove, waiting }) {
           The place stays in OpenStreetMap, but the pipeline no longer counts it around any restaurant.
         </p>
       </form>
-    </Card>
+    </Section>
   );
 }
 
@@ -78,7 +79,7 @@ function PlaceDetail({ place, entry, busy, error, notice, onExclude, onRemove })
   const exclusion = place.exclusion || entry;
 
   return (
-    <div className="mx-auto flex max-w-[56rem] flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 p-6">
       <div>
         <Badge tone="brand">{capitalise(place.kind)}{place.station_type && ` · ${place.station_type}`}</Badge>
         <h2 className="mt-3 text-[1.375rem] font-bold">{place.name}</h2>
@@ -92,7 +93,7 @@ function PlaceDetail({ place, entry, busy, error, notice, onExclude, onRemove })
         <span style={{ color: RESTAURANT_COLOR }}>●</span> {place.kind === "station" ? "restaurants with this as their nearest station" : "restaurants that count it"}
         {place.radius_m ? ` · dashed circle: the ${place.radius_m.toLocaleString("en-GB")} m radius` : ""}
       </p>
-      <Card title={countText({ ...place, restaurants: restaurants.length })}>
+      <Section title={countText({ ...place, restaurants: restaurants.length })}>
         {!restaurants.length && <p className="text-[0.8125rem] text-gray-500 dark:text-muted-dark">No restaurant counts it.</p>}
         {restaurants.length > 0 && (
           <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-[0.8125rem]">
@@ -109,14 +110,14 @@ function PlaceDetail({ place, entry, busy, error, notice, onExclude, onRemove })
             {showAll ? "Show fewer" : `Show all ${restaurants.length}`}
           </button>
         )}
-      </Card>
+      </Section>
     </div>
   );
 }
 
 function GoneDetail({ entry, busy, error, notice, onRemove }) {
   return (
-    <div className="mx-auto flex max-w-[56rem] flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 p-6">
       <div>
         <Badge tone="brand">{capitalise(entry.kind)}</Badge>
         <h2 className="mt-3 text-[1.375rem] font-bold">{entry.name}</h2>
@@ -227,75 +228,70 @@ export default function NearbyTab({ onChanged }) {
   const onRemove = () => run(removeExclusion, `"${name}" is counted again from tonight's update.`,
     mode === "excluded" ? () => setSelected(null) : undefined);
 
-  if (placesError && !places) return <div className="p-8"><ErrorBox error={placesError} onRetry={() => setPlacesVersion((v) => v + 1)} /></div>;
+  if (placesError && !places) return <ErrorBox error={placesError} onRetry={() => setPlacesVersion((v) => v + 1)} />;
   if (!places) return <Loading />;
 
+  const modeTabs = [
+    { id: "places", label: "All places" },
+    { id: "excluded", label: "Excluded", count: exclusions ? exclusions.length : "…" },
+  ];
+  const kindOptions = [
+    { value: "", label: "Every kind" },
+    ...places.kinds.map((k) => ({ value: k.kind, label: `${capitalise(k.kind)} (${k.places})` })),
+  ];
+
   return (
-    <SplitView
-      list={(
-        <>
-          <div className="flex flex-col gap-3 border-b border-gray-200 p-4 dark:border-line-dark">
-            <div className="flex gap-1.5">
-              <FilterChip active={mode === "places"} onClick={() => { setMode("places"); setSelected(null); }}>All places</FilterChip>
-              <FilterChip active={mode === "excluded"} onClick={() => { setMode("excluded"); setSelected(null); }}>
-                Excluded ({exclusions ? exclusions.length : "…"})
-              </FilterChip>
-            </div>
+    <>
+      <Tabs label="Places" tabs={modeTabs} active={mode} onChange={(id) => { setMode(id); setSelected(null); }} />
+      <SplitView
+        list={(
+          <>
             {mode === "places" && (
-              <>
-                <div className="relative">
-                  <Search className="absolute top-1/2 left-3 size-[1rem] -translate-y-1/2 text-gray-400" />
-                  <TextInput className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search names, e.g. clinic, tuition" />
-                </div>
-                <select
-                  value={kind}
-                  onChange={(event) => { setKind(event.target.value); setSelected(null); }}
-                  className="h-[2.375rem] rounded-[0.625rem] border border-gray-300 bg-white px-3 text-[0.8125rem] dark:border-line-dark dark:bg-[#232323] dark:text-white"
-                >
-                  <option value="">Every kind</option>
-                  {places.kinds.map((k) => <option key={k.kind} value={k.kind}>{capitalise(k.kind)} ({k.places})</option>)}
-                </select>
-                <p className="text-[0.75rem] text-gray-500 dark:text-muted-dark">{plural(places.total, "place")}, the most counted first</p>
-              </>
-            )}
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {listed.map((item) => {
-              const key = keyOf(item);
-              const excluded = mode === "excluded" ? item : item.exclusion;
-              return (
-                <ListButton key={key} selected={key === current} onClick={() => select(key)}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="truncate text-[0.875rem] font-semibold">{item.name}</p>
-                    {mode === "places" && <span className="shrink-0 text-[0.75rem] text-gray-500 dark:text-muted-dark">{item.restaurants}</span>}
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge>{capitalise(item.kind)}</Badge>
-                    {excluded && <Badge tone="red">Excluded</Badge>}
-                    {mode === "excluded" && item.waiting_update && <Badge tone="amber">Until tonight</Badge>}
-                  </div>
-                  {mode === "excluded" && <p className="mt-1 truncate text-[0.75rem] text-gray-500 dark:text-muted-dark">{item.reason}</p>}
-                </ListButton>
-              );
-            })}
-            {!listed.length && <p className="p-4 text-[0.8125rem] text-gray-500 dark:text-muted-dark">Nothing found.</p>}
-            {mode === "places" && places.items.length < places.total && (
-              <div className="p-4">
-                <ActionButton className="w-full" onClick={loadMore}>Show more</ActionButton>
+              <div className="admin-split-tools">
+                <SearchBox value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search names, e.g. clinic, tuition" />
+                <Dropdown id="nearby-kind" ariaLabel="Kind" value={kind} options={kindOptions}
+                  onChange={(value) => { setKind(value); setSelected(null); }} />
+                <p className="admin-split-note">{plural(places.total, "place")}, the most counted first</p>
               </div>
             )}
-          </div>
-        </>
-      )}
-    >
-      {!current && <EmptyState title="Nothing selected" text="Choose a place on the left." />}
-      {current && !shown && <Loading />}
-      {shown?.data && (
-        <PlaceDetail key={current} place={shown.data} entry={entry} busy={busy} error={actionError} notice={notice}
-          onExclude={onExclude} onRemove={onRemove} />
-      )}
-      {shown?.error && entry && <GoneDetail entry={entry} busy={busy} error={actionError} notice={notice} onRemove={onRemove} />}
-      {shown?.error && !entry && <div className="p-8"><ErrorBox error={shown.error} /></div>}
-    </SplitView>
+            <ListScroll>
+              {listed.map((item) => {
+                const key = keyOf(item);
+                const excluded = mode === "excluded" ? item : item.exclusion;
+                return (
+                  <ListButton key={key} selected={key === current} onClick={() => select(key)}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="admin-row-title truncate">{item.name}</p>
+                      {mode === "places" && <span className="shrink-0 text-[0.8125rem] text-gray-500 dark:text-muted-dark">{item.restaurants}</span>}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge>{capitalise(item.kind)}</Badge>
+                      {excluded && <Badge tone="red">Excluded</Badge>}
+                      {mode === "excluded" && item.waiting_update && <Badge tone="amber">Until tonight</Badge>}
+                    </div>
+                    {mode === "excluded" && <p className="admin-row-sub truncate">{item.reason}</p>}
+                  </ListButton>
+                );
+              })}
+              {!listed.length && <p className="admin-split-note p-4">Nothing found.</p>}
+              {mode === "places" && places.items.length < places.total && (
+                <div className="p-4">
+                  <ActionButton className="w-full" onClick={loadMore}>Show more</ActionButton>
+                </div>
+              )}
+            </ListScroll>
+          </>
+        )}
+      >
+        {!current && <EmptyState title="Nothing selected" text="Choose a place on the left." />}
+        {current && !shown && <Loading />}
+        {shown?.data && (
+          <PlaceDetail key={current} place={shown.data} entry={entry} busy={busy} error={actionError} notice={notice}
+            onExclude={onExclude} onRemove={onRemove} />
+        )}
+        {shown?.error && entry && <GoneDetail entry={entry} busy={busy} error={actionError} notice={notice} onRemove={onRemove} />}
+        {shown?.error && !entry && <div className="p-6"><ErrorBox error={shown.error} /></div>}
+      </SplitView>
+    </>
   );
 }

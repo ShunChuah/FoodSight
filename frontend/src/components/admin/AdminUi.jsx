@@ -1,18 +1,35 @@
-import { ExternalLink, RefreshCw, TriangleAlert } from "lucide-react";
+import { ExternalLink, RefreshCw, Search, TriangleAlert } from "lucide-react";
 import { adminErrorMessage } from "../../services/adminFormat.js";
 
-// Small building blocks of the admin review page (Tailwind, sizes in rem).
+// Small building blocks of the pipeline review pages. They wear the business-submissions pages'
+// look (the admin-* classes in styles/admin.css, sizes in rem); the rest is Tailwind (rem).
 
+// A box like the submissions overview's cards (the weekly chart): its title inside
 export function Card({ title, action, children, className = "" }) {
   return (
-    <section className={`rounded-[0.875rem] border border-gray-200 bg-white p-5 dark:border-line-dark dark:bg-surface-dark ${className}`}>
+    <section className={`admin-box ${className}`}>
       {(title || action) && (
-        <div className="mb-3 flex items-center justify-between gap-3">
-          {title && <h3 className="text-[0.9375rem] font-bold">{title}</h3>}
+        <div className="admin-box-title">
+          {title && <h2>{title}</h2>}
           {action}
         </div>
       )}
       {children}
+    </section>
+  );
+}
+
+// A box like a submission's sections: its title in a bar across the top
+export function Section({ title, action, children, className = "" }) {
+  return (
+    <section className={`admin-box is-section ${className}`}>
+      {(title || action) && (
+        <div className="admin-box-head">
+          {title && <h2>{title}</h2>}
+          {action}
+        </div>
+      )}
+      <div className="admin-box-body">{children}</div>
     </section>
   );
 }
@@ -34,25 +51,19 @@ export function Badge({ tone = "gray", children, className = "" }) {
   );
 }
 
+// The submissions pages' buttons: orange like Apply / Next, white like Review, grey like Reset,
+// red like Reject, and solid red for a confirmed delete
 const BUTTON_TONES = {
-  primary: "bg-brand text-white hover:bg-brand-hover",
-  secondary: "border border-gray-300 bg-white text-ink hover:bg-zinc-50 dark:border-line-dark dark:bg-[#232323] dark:text-white dark:hover:bg-[#2b2b2b]",
-  danger: "bg-red-600 text-white hover:bg-red-700",
-  // A destructive choice before it is confirmed: red, but lighter than the solid "danger"
-  dangerOutline: "border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20",
-  // Undo: a light grey fill with a border, so it does not look like the white "Change to ..."
-  // buttons beside it
-  undo: "border border-gray-300 bg-zinc-100 text-gray-600 hover:bg-zinc-200 hover:text-ink dark:border-line-dark dark:bg-[#2a2a2a] dark:text-zinc-300 dark:hover:bg-[#333] dark:hover:text-white",
-  ghost: "text-gray-500 hover:bg-zinc-100 hover:text-ink dark:text-muted-dark dark:hover:bg-[#2b2b2b] dark:hover:text-white",
+  primary: "admin-btn-primary",
+  secondary: "admin-btn-outline",
+  undo: "admin-btn-muted",
+  dangerOutline: "admin-btn-reject",
+  danger: "admin-btn-danger",
 };
 
 export function ActionButton({ tone = "secondary", className = "", children, ...props }) {
   return (
-    <button
-      type="button"
-      className={`inline-flex h-[2.375rem] cursor-pointer items-center justify-center gap-2 rounded-[0.625rem] px-4 text-[0.8125rem] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:size-[1rem] ${BUTTON_TONES[tone]} ${className}`}
-      {...props}
-    >
+    <button type="button" className={`admin-btn ${BUTTON_TONES[tone]} ${className}`} {...props}>
       {children}
     </button>
   );
@@ -61,9 +72,36 @@ export function ActionButton({ tone = "secondary", className = "", children, ...
 export function TextInput({ className = "", ...props }) {
   return (
     <input
-      className={`h-[2.375rem] w-full rounded-[0.625rem] border border-gray-300 bg-white px-3 text-[0.8125rem] outline-none focus:border-brand dark:border-line-dark dark:bg-[#232323] dark:text-white ${className}`}
+      className={`h-[2.5rem] w-full rounded-[0.625rem] border border-gray-300 bg-white px-3 text-[0.8125rem] outline-none focus:border-brand dark:border-line-dark dark:bg-[#232323] dark:text-white ${className}`}
       {...props}
     />
+  );
+}
+
+// The one search box of the admin pages (pipeline and submissions): a white box with a magnifier
+export function SearchBox({ className = "", ...props }) {
+  return (
+    <div className={`relative ${className}`}>
+      <Search className="pointer-events-none absolute top-1/2 left-3 size-[1rem] -translate-y-1/2 text-gray-400" aria-hidden="true" />
+      <TextInput className="pl-9" {...props} />
+    </div>
+  );
+}
+
+// Tabs like the submissions' Waiting / Approved / Rejected. tabs: [{ id, label, count? }]
+export function Tabs({ label, tabs, active, onChange }) {
+  return (
+    <div className="admin-tabs" role="tablist" aria-label={label}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.id} type="button" role="tab" aria-selected={active === tab.id}
+          className={`admin-tab${active === tab.id ? " is-active" : ""}`} onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
+          {tab.count != null && <span className="admin-tab-count">{tab.count}</span>}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -78,12 +116,13 @@ export function ExternalLinkText({ href, children }) {
 }
 
 export function Loading({ text = "Loading…" }) {
-  return <p className="p-8 text-[0.875rem] text-gray-500 dark:text-muted-dark">{text}</p>;
+  return <p className="p-6 text-[0.875rem] text-gray-500 dark:text-muted-dark">{text}</p>;
 }
 
-export function EmptyState({ title, text }) {
+// fill: take the whole height (an empty page or an empty right side), centred
+export function EmptyState({ title, text, fill = true }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-10 text-center">
+    <div className={`admin-fill flex flex-col items-center justify-center gap-2 p-10 text-center ${fill ? "h-full" : ""}`}>
       <p className="text-[1rem] font-semibold">{title}</p>
       {text && <p className="max-w-[32rem] text-[0.875rem] text-gray-500 dark:text-muted-dark">{text}</p>}
     </div>
@@ -114,55 +153,35 @@ export function Notice({ children }) {
   );
 }
 
-// A list on the left, the selected item on the right: the layout of every decision tab.
+// A list on the left, the selected item on the right: the layout of every decision page, in one
+// bordered box like the submissions table. list: the left side's parts (SplitTools, a ListScroll ...)
 export function SplitView({ list, children }) {
   return (
-    <div className="flex h-full min-h-0">
-      <aside className="flex w-[26rem] shrink-0 flex-col border-r border-gray-200 bg-white dark:border-line-dark dark:bg-surface-dark">
-        {list}
-      </aside>
-      <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>
+    <div className="admin-split">
+      <aside className="admin-split-list">{list}</aside>
+      <div className="admin-split-detail">{children}</div>
     </div>
   );
+}
+
+export function ListScroll({ children }) {
+  return <div className="admin-split-scroll">{children}</div>;
 }
 
 export function ListButton({ selected, onClick, children }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`block w-full cursor-pointer border-b border-l-[0.1875rem] border-b-gray-100 px-4 py-3 text-left transition-colors dark:border-b-line-dark ${
-        selected
-          ? "border-l-brand bg-brand-soft/70 dark:bg-[#2a1b16]"
-          : "border-l-transparent hover:bg-zinc-50 dark:hover:bg-[#222]"
-      }`}
-    >
+    <button type="button" onClick={onClick} className={`admin-list-row${selected ? " is-selected" : ""}`}>
       {children}
     </button>
   );
 }
 
+// A label and its value, like the items of a submission
 export function Field({ label, children }) {
   return (
     <div>
-      <dt className="text-[0.75rem] font-semibold text-gray-500 dark:text-muted-dark">{label}</dt>
-      <dd className="mt-0.5 text-[0.875rem] break-words">{children ?? "—"}</dd>
+      <dt className="admin-item-label">{label}</dt>
+      <dd className="admin-item-value">{children ?? "—"}</dd>
     </div>
-  );
-}
-
-export function FilterChip({ active, onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`cursor-pointer whitespace-nowrap rounded-full border px-3 py-1 text-[0.75rem] font-semibold transition-colors ${
-        active
-          ? "border-brand bg-brand text-white"
-          : "border-gray-300 text-gray-600 hover:border-brand hover:text-brand dark:border-line-dark dark:text-muted-dark"
-      }`}
-    >
-      {children}
-    </button>
   );
 }

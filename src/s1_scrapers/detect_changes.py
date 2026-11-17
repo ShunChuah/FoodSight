@@ -19,7 +19,11 @@ copy of that source:
           from time to time; their copy is kept and the new ones are counted.
 
 change share = (new + changed + removed) ÷ the records of this extraction,
-over all of the source's files. The extraction scheduler (UC9) uses it.
+over all of the source's files. The extraction scheduler (UC9) uses it,
+with days_since: the days since the last copy, except for a Google refresh,
+whose days count from the last Google refresh (last_extraction in
+data/state/schedule.json). A copy in between (an OSM day's Google lookups,
+or a decision step's) still holds the answers that refresh fetched.
 
 Output:
   data/reports/changes_<source>_<date_time>.json, after every extraction:
@@ -41,6 +45,7 @@ from datetime import datetime, timezone
 
 from src.cache_saving import save_json
 from src.record_hash import LEFT_OUT, SORTED_LISTS, _rows, google_places, record_hash
+from src.s1_scrapers.update_schedule import load_schedule
 
 RAW_DIR = os.path.join("data", "1_raw")
 ARCHIVE_DIR = os.path.join("data", "archive")
@@ -147,10 +152,32 @@ def _save_copy(raw_dir, source, hashes, when, archive_dir):
     return folder
 
 
-def check_changes(source, refresh=False, raw_dir=RAW_DIR, archive_dir=ARCHIVE_DIR, reports_dir=REPORTS_DIR):
+def _days_counted_from(source, refresh, copy_when, when, schedule_file=None):
+    """The time days_since counts from. For a Google refresh: the last Google
+    refresh, its last_extraction in schedule.json (only a refresh moves it).
+    The copy in between may be an OSM day's or a decision step's, which reuse
+    the answers that refresh fetched, so counting from it would make the
+    changes look far faster than they are (16 Nov 2026: 3.9 days instead of
+    13.8). Otherwise, or with no earlier refresh in the schedule: the last copy."""
+    if source != "google" or not refresh:
+        return copy_when
+    last = (load_schedule(schedule_file).get("google") or {}).get("last_extraction")
+    try:
+        last_when = datetime.fromisoformat(last) if last else None
+    except ValueError:
+        return copy_when
+    if last_when is None:
+        return copy_when
+    last_when = last_when if last_when.tzinfo else last_when.astimezone()
+    return last_when if last_when < when else copy_when
+
+
+def check_changes(source, refresh=False, raw_dir=RAW_DIR, archive_dir=ARCHIVE_DIR, reports_dir=REPORTS_DIR,
+                  schedule_file=None):
     """Compare the source's raw files with its last archive copy, write the
     change report, save a copy when something changed (always the first
-    time), print the summary, and return the report."""
+    time), print the summary, and return the report. schedule_file (default
+    data/state/schedule.json) gives a Google refresh its last refresh."""
     when = _extracted_at(raw_dir, source)
     path = os.path.join(reports_dir, f"changes_{source}_{when.strftime('%Y-%m-%d_%H%M')}.json")
     copies = _copies(source, archive_dir)
@@ -173,7 +200,8 @@ def check_changes(source, refresh=False, raw_dir=RAW_DIR, archive_dir=ARCHIVE_DI
             "only its changed fields as [old, new]. Fetch times, the rating and the review "
             "count never count as a change; an outline is shown as 'outline changed' (both "
             "outlines are in the archive copies). change_share = (new + changed + removed) / "
-            "the records of this extraction."
+            "the records of this extraction. days_since counts from days_counted_from: for a "
+            "Google refresh the last Google refresh, otherwise the last saved copy (compared_with)."
         ),
         "source": source,
         "extracted_at": when.isoformat(timespec="minutes"),
@@ -218,12 +246,19 @@ def check_changes(source, refresh=False, raw_dir=RAW_DIR, archive_dir=ARCHIVE_DI
             total_changes += len(new) + len(changed) + len(removed)
             total_records += len(now)
         share = total_changes / total_records if total_records else 0.0
-        days = max((when - before_when).total_seconds() / 86400, 0)
+        counted_from = _days_counted_from(source, refresh, before_when, when, schedule_file)
+        days = max((when - counted_from).total_seconds() / 86400, 0)
         folder = _save_copy(raw_dir, source, hashes, when, archive_dir) if total_changes else None
         report.update(baseline=False, compared_with=saved["extracted_at"], days_since=round(days, 1),
+                      days_counted_from=counted_from.isoformat(timespec="minutes"),
                       changes=total_changes, records=total_records, change_share=round(share, 4),
                       copy=folder, files=files)
-        print(f"\n{title} changes since {before_when.strftime('%Y-%m-%d %H:%M')} ({days:.1f} days)"
+        if counted_from == before_when:
+            since = f"({days:.1f} days)"
+        else:
+            since = (f"(the last copy); {days:.1f} days since the last Google refresh "
+                     f"({counted_from.strftime('%Y-%m-%d %H:%M')})")
+        print(f"\n{title} changes since {before_when.strftime('%Y-%m-%d %H:%M')} {since}"
               + (f" — {report['kind']}" if source == "google" else ""))
         for file, info in files.items():
             c = info["counts"]

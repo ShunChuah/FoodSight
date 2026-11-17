@@ -1,18 +1,19 @@
 import { Check, X } from "lucide-react";
 import { GOOGLE_COLOR, OSM_COLOR, WEEKDAYS, capitalise } from "../../services/adminFormat.js";
-import { Badge, Card, ExternalLinkText } from "./AdminUi.jsx";
+import { Badge, ExternalLinkText } from "./AdminUi.jsx";
 
 // Parts shared by the two Google match pages: one restaurant (GoogleMatchesTab) and a shared
 // Google place with all its restaurants (SharedPlaceDetail).
 
 // A restaurant's letter in a shared Google place (A, B, ...): on its button (white circle on
-// orange), in its table heading and inside its pin (green, the OpenStreetMap colour)
-export function LetterChip({ letter, onOrange = false }) {
+// orange), in its table heading (green with a white ring on the orange heading) and inside its
+// pin (green, the OpenStreetMap colour)
+export function LetterChip({ letter, onOrange = false, className = "" }) {
   return (
     <span
       className={`inline-flex size-[1.125rem] shrink-0 items-center justify-center rounded-full text-[0.6875rem] font-bold leading-none ${
         onOrange ? "bg-white text-brand" : "text-white"
-      }`}
+      } ${className}`}
       style={onOrange ? undefined : { backgroundColor: OSM_COLOR }}
     >
       {letter}
@@ -69,46 +70,48 @@ const ROWS = [
   ["Rating", () => <Value />, (g) => <Value>{g.rating && `${g.rating} ★ (${g.userRatingCount} reviews)`}</Value>],
 ];
 
-// OpenStreetMap and Google side by side. osmSides: [{ key, title, subtitle?, letter?, osm }], one column each
-// (one for a single restaurant, two or more for a shared Google place); google: the
-// review item's google object (place ID, map link and Place Details).
+// OpenStreetMap and Google side by side, in the submissions table's look (orange heading). The
+// heading keeps each side's pin colour as a dot, so the table still reads with the map.
+// osmSides: [{ key, title, subtitle?, letter?, osm }], one column each (one for a single
+// restaurant, two or more for a shared Google place); google: the review item's google object
+// (place ID, map link and Place Details).
 export function Comparison({ osmSides, google }) {
   const details = google?.details || {};
   return (
-    <Card className="p-0">
-      <table className="w-full table-fixed text-left text-[0.8125rem]">
+    <div className="admin-table-wrap">
+      <table className="admin-table admin-compare">
         <thead>
-          <tr className="border-b border-gray-200 dark:border-line-dark">
-            <th className="w-[9rem] px-4 py-3" />
+          <tr>
+            <th scope="col" className="w-[9rem]" />
             {osmSides.map((side) => (
-              <th key={side.key} className="px-4 py-3">
+              <th key={side.key} scope="col">
                 {side.letter
-                  ? <span className="inline-flex items-center gap-1.5 font-bold" style={{ color: OSM_COLOR }}><LetterChip letter={side.letter} /> {side.title}</span>
-                  : <span className="font-bold" style={{ color: OSM_COLOR }}>● {side.title}</span>}
-                {side.subtitle && <span className="block text-[0.75rem] font-normal text-gray-500 dark:text-muted-dark">{side.subtitle}</span>}
+                  ? <span className="inline-flex items-center gap-1.5"><LetterChip letter={side.letter} className="ring-2 ring-white" /> {side.title}</span>
+                  : <span><span className="admin-legend-dot" style={{ backgroundColor: OSM_COLOR }} />{side.title}</span>}
+                {side.subtitle && <span className="admin-compare-sub">{side.subtitle}</span>}
               </th>
             ))}
-            <th className="px-4 py-3"><span className="font-bold" style={{ color: GOOGLE_COLOR }}>● Google</span></th>
+            <th scope="col"><span className="admin-legend-dot" style={{ backgroundColor: GOOGLE_COLOR }} />Google</th>
           </tr>
         </thead>
         <tbody>
           {ROWS.map(([label, osmCell, googleCell]) => (
-            <tr key={label} className="border-b border-gray-100 align-top last:border-b-0 dark:border-line-dark">
-              <th className="px-4 py-2.5 font-semibold text-gray-500 dark:text-muted-dark">{label}</th>
-              {osmSides.map((side) => <td key={side.key} className="px-4 py-2.5">{osmCell(side.osm || {})}</td>)}
-              <td className="px-4 py-2.5">{googleCell(details)}</td>
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              {osmSides.map((side) => <td key={side.key}>{osmCell(side.osm || {})}</td>)}
+              <td>{googleCell(details)}</td>
             </tr>
           ))}
           <tr>
-            <th className="px-4 py-2.5 font-semibold text-gray-500 dark:text-muted-dark">Open in</th>
+            <th scope="row">Open in</th>
             {osmSides.map((side) => (
-              <td key={side.key} className="px-4 py-2.5"><ExternalLinkText href={side.osm?.map}>OpenStreetMap</ExternalLinkText></td>
+              <td key={side.key}><ExternalLinkText href={side.osm?.map}>OpenStreetMap</ExternalLinkText></td>
             ))}
-            <td className="px-4 py-2.5"><ExternalLinkText href={google?.map}>Google Maps</ExternalLinkText></td>
+            <td><ExternalLinkText href={google?.map}>Google Maps</ExternalLinkText></td>
           </tr>
         </tbody>
       </table>
-    </Card>
+    </div>
   );
 }
 

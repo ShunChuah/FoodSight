@@ -1,7 +1,7 @@
 import { Copy, Plus, TimerReset, X } from "lucide-react";
 import {
-  DAYS, TIME_OPTIONS, addPeriod, canAddPeriod, copyMondayToAll, dayId, hoursConflicts, timeAllowed, isOpenAllWeek, removePeriod, setDayOpen, setPeriod,
-  toggleOpenAllWeek,
+  DAYS, TIME_OPTIONS, addPeriod, canAddPeriod, copyMondayToAll, dayId, hoursConflicts, timeAllowed, isOpenAllWeek, removePeriod, setDayAllDay,
+  setDayOpen, setPeriod, toggleOpenAllWeek,
 } from "../../services/businessHours";
 import { sectionId } from "../../services/businessForm";
 import { Dropdown, FlagNotes, Switch } from "./BusinessFields";
@@ -13,6 +13,19 @@ function TimeSelect({ id, value, onChange, label, error, describedBy, allowed })
       id={id} value={value} options={options} onChange={onChange} placeholder="--:--" error={error}
       ariaLabel={label} describedBy={describedBy} className="business-time"
     />
+  );
+}
+
+// "24 hours" on one day: open around the clock that day; pressed again, the day's own times come back.
+function AllDayToggle({ name, pressed, onToggle }) {
+  return (
+    <button
+      type="button" className="business-ghost-btn business-hours-24" aria-pressed={pressed}
+      aria-label={`Open 24 hours on ${name}`} onClick={onToggle}
+    >
+      <TimerReset aria-hidden="true" />
+      24 hours
+    </button>
   );
 }
 
@@ -51,7 +64,12 @@ function OpeningHours({ hours, onChange, errors = {}, flags = [] }) {
               <Switch id={id} checked={day.open} onChange={(open) => onChange(setDayOpen(hours, index, open))} label={`Open on ${name}`} />
               <div className="business-hours-periods">
                 {!day.open && <span className="business-hours-closed">closed</span>}
-                {day.open && day.allDay && <span className="business-hours-closed is-open">Open 24 hours</span>}
+                {day.open && day.allDay && (
+                  <div className="business-hours-period">
+                    <span className="business-hours-closed is-open">Open 24 hours</span>
+                    <AllDayToggle name={name} pressed onToggle={() => onChange(setDayAllDay(hours, index, false))} />
+                  </div>
+                )}
                 {day.open && !day.allDay && day.periods.map((period, at) => (
                   <div key={at} className="business-hours-period">
                     <TimeSelect
@@ -83,6 +101,9 @@ function OpeningHours({ hours, onChange, errors = {}, flags = [] }) {
                       <button type="button" className="business-hours-icon-btn is-remove" onClick={() => onChange(removePeriod(hours, index, at))} aria-label={`Remove this opening period on ${name}`}>
                         <X aria-hidden="true" />
                       </button>
+                    )}
+                    {at === 0 && (
+                      <AllDayToggle name={name} pressed={false} onToggle={() => onChange(setDayAllDay(hours, index, true))} />
                     )}
                   </div>
                 ))}

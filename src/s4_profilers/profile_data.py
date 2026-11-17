@@ -5,6 +5,10 @@ where OpenStreetMap and Google disagree AND profiles the restaurant.
 Reads data/3_merged/pj_merged.json (stage 3 merges by rules only and leaves
 the fields where the sources disagree in each restaurant's "conflicts").
 
+A restaurant registered by its business (source "submitted") is not asked:
+apply_submitted() copies the business's own cuisines, price and profile
+(checked by an admin), with evidence_level "submitted".
+
 The prompt has three parts: the lists from src/reference/categories.json (the same in
 every call), the restaurant's facts, and the fields where the sources
 disagree (only when they do). The AI answers in JSON:
@@ -201,6 +205,9 @@ PROMPT_VERSION = 8
 # A Google-matched restaurant whose AI read at least this many review texts
 # has evidence_level high (business_profile.evidence_level in categories.json).
 HIGH_EVIDENCE_REVIEWS = 3
+# The evidence_level of a profile the business gave itself (no AI)
+SUBMITTED_EVIDENCE = "submitted"
+assert SUBMITTED_EVIDENCE in allowed_values("business_profile.evidence_level")
 
 # Counted nearby kinds as (kind, radius in metres, nearby_context column),
 # from nearby_place.kind in src/reference/categories.json, for the prompt's "Nearby" line.
@@ -964,6 +971,32 @@ def apply_profile(restaurant, answer):
     # 2026-11-10 still has "review_sentiments" by position: no longer read.
 
 
+def apply_submitted(restaurant):
+    """A restaurant registered by its business (source "submitted", from
+    submissions.py in stage 3): its cuisines, price and profile are the
+    business's own choices, checked by an admin, so the AI is not asked and
+    nothing is cached. Values not on a list are dropped, as for an AI answer;
+    the tier follows from the price as always."""
+    chosen = restaurant.pop("submitted_profile", None) or {}
+    restaurant.pop("conflicts", None)
+    restaurant["cuisines"] = pick_cuisines(chosen.get("cuisines"))
+    try:
+        price = float(chosen.get("avg_meal_price"))
+        price = price if price > 0 else None
+    except (TypeError, ValueError):
+        price = None
+    restaurant["price_range"] = {"tier": tier_for_price(price), "avg_meal_price": price}
+    halal = (_safe_str(chosen.get("halal_status")) or "").lower()
+    restaurant["business_profile"] = {
+        **{column: pick_values(chosen.get(column), column) for column in PROFILE_LISTS},
+        "halal_status": halal if halal in VALID_HALAL else "unknown",
+        # When the admin approved it
+        "generated_at": chosen.get("approved_at"),
+        "evidence_level": SUBMITTED_EVIDENCE,
+    }
+    restaurant["reviews"] = []
+
+
 # ---------------------------------------------------------------------------
 # Cache helpers
 # ---------------------------------------------------------------------------
@@ -1092,7 +1125,7 @@ def main():
     new_reviews = sum(add_fetched_reviews(r, review_cache, run_at) for r in restaurants)
     by_place = reviews_by_place(review_cache)
 
-    stats = {"called": 0, "cached": 0, "failed": 0, "skipped": 0, "retried": 0,
+    stats = {"called": 0, "cached": 0, "failed": 0, "skipped": 0, "retried": 0, "submitted": 0,
              "fields_decided": 0, "fields_left_empty": 0, "new_reviews": new_reviews,
              "sentiment_calls": 0, "reviews_scored": 0, "reviews_left_out": 0}
     answered = []   # restaurants with an answer -> OUTPUT_FILE
@@ -1116,6 +1149,12 @@ def main():
 
             osm_id = str(restaurant.get("osm_id", ""))
             name = display_name(restaurant)
+            if restaurant.get("source") == "submitted":
+                apply_submitted(restaurant)
+                stats["submitted"] += 1
+                answered.append(restaurant)
+                print(f"  [{idx}/{total}] {name[:30]:32} -> SUBMITTED (the business's own profile, no AI)")
+                continue
             conflicts = restaurant.get("conflicts") or {}
             hashes = all_hashes.get(osm_id)
             prompt, n_texts, facts = build_prompt(restaurant, review_cache, by_place)
@@ -1225,6 +1264,7 @@ def main():
             "restaurants_profiled":  len(answered),
             "ai_calls_made":         stats["called"],
             "ai_calls_cached":       stats["cached"],
+            "submitted_not_asked":   stats["submitted"],
             "ai_calls_retried":      stats["retried"],
             "ai_failed_left_out":    stats["failed"],
             "ai_not_asked_left_out": stats["skipped"],
@@ -1260,6 +1300,7 @@ def main():
     print(f"  Profiled          : {len(answered)} -> {OUTPUT_FILE}")
     print(f"  AI calls made     : {stats['called']} ({stats['retried']} needed more than one try)")
     print(f"  From cache        : {stats['cached']}")
+    print(f"  Submitted         : {stats['submitted']} (the business's own profile; the AI is not asked)")
     print(f"  Disagreements     : {stats['fields_decided']} fields chosen by the AI")
     print(f"  AI failed         : {stats['failed']:>4} -> {AI_FAILED_FILE} (left out; run again)")
     if stats["skipped"]:

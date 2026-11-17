@@ -15,6 +15,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - [auth.users](#authusers)
 - [public.area](#publicarea)
 - [public.business_profile](#publicbusiness_profile)
+- [public.business_submission](#publicbusiness_submission)
 - [public.chat_histories](#publicchat_histories)
 - [public.chat_message_failures](#publicchat_message_failures)
 - [public.chat_message_graph_jobs](#publicchat_message_graph_jobs)
@@ -48,6 +49,9 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - [public.restaurant_photo](#publicrestaurant_photo)
 - [public.review](#publicreview)
 - [public.spatial_analysis_result](#publicspatial_analysis_result)
+- [public.submission_document](#publicsubmission_document)
+- [public.submission_field_check](#publicsubmission_field_check)
+- [public.submission_round](#publicsubmission_round)
 - [public.user_preferences](#publicuser_preferences)
 
 ## auth.access_token
@@ -145,6 +149,63 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - PRIMARY KEY (profile_id)
 - UNIQUE (restaurant_id)
 - FOREIGN KEY (restaurant_id) REFERENCES restaurant(restaurant_id) ON DELETE CASCADE
+
+## public.business_submission
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `submission_id` | integer | yes | nextval('business_submission_submission_id_seq'::regclass) |
+| `user_id` | integer | yes |  |
+| `status` | character varying(20) | yes | 'waiting'::character varying |
+| `round_no` | smallint | yes | 1 |
+| `restaurant_id` | integer | no |  |
+| `manager_name` | character varying(150) | yes |  |
+| `manager_phone` | character varying(50) | yes |  |
+| `business_email` | character varying(254) | yes |  |
+| `ssm_number` | character varying(12) | yes |  |
+| `halal_status` | character varying(20) | yes |  |
+| `halal_certified` | boolean | yes | false |
+| `halal_cert_expiry` | date | no |  |
+| `sells_pork` | boolean | no |  |
+| `serves_alcohol` | boolean | no |  |
+| `name` | character varying(255) | yes |  |
+| `brand` | character varying(150) | no |  |
+| `business_style` | character varying(100) | yes |  |
+| `restaurant_type` | character varying(100) | yes |  |
+| `business_status` | character varying(50) | yes |  |
+| `phone` | character varying(50) | yes |  |
+| `website` | character varying(500) | no |  |
+| `description` | character varying(1000) | yes |  |
+| `address` | character varying(450) | yes |  |
+| `postcode` | character varying(10) | yes |  |
+| `latitude` | double precision | yes |  |
+| `longitude` | double precision | yes |  |
+| `monday` | character varying(50) | yes |  |
+| `tuesday` | character varying(50) | yes |  |
+| `wednesday` | character varying(50) | yes |  |
+| `thursday` | character varying(50) | yes |  |
+| `friday` | character varying(50) | yes |  |
+| `saturday` | character varying(50) | yes |  |
+| `sunday` | character varying(50) | yes |  |
+| `cuisines` | text | yes |  |
+| `avg_meal_price` | double precision | yes |  |
+| `service_style` | character varying(100) | yes |  |
+| `target_segment` | text | yes |  |
+| `ambiance` | character varying(100) | yes |  |
+| `facilities` | text | no |  |
+| `created_at` | timestamp with time zone | yes | now() |
+| `updated_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (submission_id)
+- UNIQUE (restaurant_id)
+- FOREIGN KEY (restaurant_id) REFERENCES restaurant(restaurant_id) ON DELETE SET NULL
+- FOREIGN KEY (user_id) REFERENCES auth.users(user_id) ON DELETE CASCADE
+- CHECK (((NOT halal_certified) OR (halal_cert_expiry IS NOT NULL)))
+- CHECK ((avg_meal_price > (0)::double precision))
+- CHECK ((round_no >= 1))
+- CREATE INDEX idx_business_submission_status ON public.business_submission USING btree (status)
+- CREATE INDEX idx_business_submission_user ON public.business_submission USING btree (user_id)
+- CREATE TRIGGER trg_business_submission_updated_at BEFORE UPDATE ON public.business_submission FOR EACH ROW EXECUTE FUNCTION update_updated_at()
 
 ## public.chat_histories
 
@@ -509,7 +570,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 |---|---|---|---|
 | `restaurant_id` | integer | yes | nextval('restaurant_restaurant_id_seq'::regclass) |
 | `location_id` | integer | yes |  |
-| `osm_id` | character varying(50) | yes |  |
+| `osm_id` | character varying(50) | no |  |
 | `name` | character varying(255) | yes |  |
 | `amenity_type` | character varying(50) | yes |  |
 | `brand` | character varying(150) | no |  |
@@ -523,7 +584,8 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 | `google_maps_uri` | character varying(500) | no |  |
 | `google_fetched_at` | timestamp with time zone | no |  |
 | `editorial_summary` | character varying(1000) | no |  |
-| `osm_type` | character varying(10) | yes |  |
+| `osm_type` | character varying(10) | no |  |
+| `source` | character varying(20) | yes | 'extracted'::character varying |
 
 - PRIMARY KEY (restaurant_id)
 - UNIQUE (google_place_id)
@@ -531,6 +593,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 - UNIQUE (osm_id)
 - FOREIGN KEY (cluster_id) REFERENCES cluster(cluster_id) ON DELETE SET NULL
 - FOREIGN KEY (location_id) REFERENCES location(location_id)
+- CHECK (((osm_id IS NULL) = (osm_type IS NULL)))
 - CHECK (((osm_type)::text = ANY ((ARRAY['node'::character varying, 'way'::character varying, 'relation'::character varying])::text[])))
 - CREATE INDEX idx_restaurant_amenity ON public.restaurant USING btree (amenity_type)
 - CREATE TRIGGER trg_restaurant_updated_at BEFORE UPDATE ON public.restaurant FOR EACH ROW EXECUTE FUNCTION restaurant_updated_at()
@@ -580,7 +643,7 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 |---|---|---|---|
 | `restaurant_id` | integer | yes |  |
 | `position` | smallint | yes |  |
-| `google_place_id` | character varying(255) | yes |  |
+| `google_place_id` | character varying(255) | no |  |
 | `image` | bytea | yes |  |
 | `content_type` | character varying(20) | yes |  |
 | `width_px` | integer | no |  |
@@ -588,9 +651,12 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 | `author_name` | character varying(255) | no |  |
 | `author_uri` | character varying(500) | no |  |
 | `fetched_at` | timestamp with time zone | yes |  |
+| `submission_id` | integer | no |  |
 
 - PRIMARY KEY (restaurant_id, "position")
 - FOREIGN KEY (restaurant_id) REFERENCES restaurant(restaurant_id) ON DELETE CASCADE
+- FOREIGN KEY (submission_id) REFERENCES business_submission(submission_id) ON DELETE CASCADE
+- CHECK (((google_place_id IS NULL) <> (submission_id IS NULL)))
 
 ## public.review
 
@@ -624,6 +690,58 @@ change the database with a file in `db/migrations/`, then regenerate this file.
 
 - PRIMARY KEY (analysis_id)
 - FOREIGN KEY (map_result_id) REFERENCES map_result(map_result_id) ON DELETE CASCADE
+
+## public.submission_document
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `document_id` | integer | yes | nextval('submission_document_document_id_seq'::regclass) |
+| `submission_id` | integer | yes |  |
+| `kind` | character varying(30) | yes |  |
+| `file_name` | character varying(255) | yes |  |
+| `content_type` | character varying(100) | yes |  |
+| `size_bytes` | integer | yes |  |
+| `content` | bytea | yes |  |
+| `uploaded_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (document_id)
+- UNIQUE (submission_id, kind)
+- FOREIGN KEY (submission_id) REFERENCES business_submission(submission_id) ON DELETE CASCADE
+- CHECK ((size_bytes > 0))
+
+## public.submission_field_check
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `round_id` | integer | yes |  |
+| `field` | character varying(50) | yes |  |
+| `state` | character varying(10) | yes |  |
+| `note` | character varying(500) | no |  |
+| `checked_at` | timestamp with time zone | yes | now() |
+
+- PRIMARY KEY (round_id, field)
+- FOREIGN KEY (round_id) REFERENCES submission_round(round_id) ON DELETE CASCADE
+
+## public.submission_round
+
+| Column | Type | Required | Default |
+|---|---|---|---|
+| `round_id` | integer | yes | nextval('submission_round_round_id_seq'::regclass) |
+| `submission_id` | integer | yes |  |
+| `round_no` | smallint | yes |  |
+| `submitted_at` | timestamp with time zone | yes | now() |
+| `changed_fields` | text | no |  |
+| `reviewer_id` | integer | no |  |
+| `review_started_at` | timestamp with time zone | no |  |
+| `decision` | character varying(20) | no |  |
+| `decided_at` | timestamp with time zone | no |  |
+
+- PRIMARY KEY (round_id)
+- UNIQUE (submission_id, round_no)
+- FOREIGN KEY (reviewer_id) REFERENCES auth.users(user_id) ON DELETE SET NULL
+- FOREIGN KEY (submission_id) REFERENCES business_submission(submission_id) ON DELETE CASCADE
+- CHECK (((decision IS NULL) = (decided_at IS NULL)))
+- CHECK ((round_no >= 1))
 
 ## public.user_preferences
 

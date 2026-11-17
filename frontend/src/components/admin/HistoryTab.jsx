@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { getHistory, getReport } from "../../api/adminApi.js";
 import { formatDateTime, formatDay, formatNumber, formatShare, plural } from "../../services/adminFormat.js";
 import ChangeShareChart from "./ChangeShareChart.jsx";
-import { Badge, Card, EmptyState, ErrorBox, ExternalLinkText, FilterChip, Loading } from "./AdminUi.jsx";
+import { Badge, Card, EmptyState, ErrorBox, ExternalLinkText, Loading, Tabs } from "./AdminUi.jsx";
 
 // Read only: every extraction's change report (data/reports), the scheduling decision made
 // from it (data/state/schedule.json), and the dropped duplicate pins.
@@ -112,7 +112,7 @@ function ExtractionItem({ item, source }) {
 
   return (
     <li className="relative border-l-2 border-gray-200 pb-6 pl-6 last:pb-0 dark:border-line-dark">
-      <span className="absolute top-1 -left-[0.4375rem] size-[0.75rem] rounded-full border-2 border-white bg-brand dark:border-page-dark" />
+      <span className="absolute top-1 -left-[0.4375rem] size-[0.75rem] rounded-full border-2 border-white bg-brand dark:border-surface-dark" />
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-[0.9375rem] font-bold">{formatDateTime(item.extracted_at)}</p>
         <Badge tone={kind.tone}>{kind.label}</Badge>
@@ -182,40 +182,44 @@ function SourceView({ source, data, threshold }) {
 
 function Duplicates({ duplicates }) {
   if (!duplicates.dropped.length) {
-    return <EmptyState title="No dropped duplicates" text="No two OpenStreetMap pins with the same name matched one Google place." />;
+    return <EmptyState fill={false} title="No dropped duplicates" text="No two OpenStreetMap pins with the same name matched one Google place." />;
   }
+  // The submissions table's look
   return (
-    <Card title={`Dropped duplicate pins (${duplicates.dropped.length})`}>
-      <p className="-mt-2 mb-3 text-[0.8125rem] text-gray-500 dark:text-muted-dark">
+    <div className="flex flex-col gap-3">
+      <h2 className="text-[1.125rem] font-bold">Dropped duplicate pins ({duplicates.dropped.length})</h2>
+      <p className="text-[0.8125rem] text-gray-500 dark:text-muted-dark">
         The same shop mapped twice in OpenStreetMap: both pins have the same name and matched the same Google place, so the pin nearer
         Google's is kept and the other is left out. To keep a dropped one anyway, give it its own entry in src/reference/google_match_overrides.json by hand.
         List written {formatDateTime(duplicates.file_written)}.
       </p>
-      <table className="w-full text-left text-[0.8125rem]">
-        <thead>
-          <tr className="border-b border-gray-200 text-[0.75rem] text-gray-500 dark:border-line-dark dark:text-muted-dark">
-            <th className="py-2 pr-3 font-semibold">Dropped pin</th>
-            <th className="py-2 pr-3 font-semibold">Kept pin</th>
-            <th className="py-2 font-semibold">Google place</th>
-          </tr>
-        </thead>
-        <tbody>
-          {duplicates.dropped.map((item) => (
-            <tr key={item.osm_id} className="border-b border-gray-100 align-top last:border-b-0 dark:border-line-dark">
-              <td className="py-2 pr-3">
-                <ExternalLinkText href={item.osm_map}>{item.osm_name}</ExternalLinkText>
-                <span className="block text-gray-500 tabular-nums dark:text-muted-dark">{item.distance_to_google_m} m from Google's pin</span>
-              </td>
-              <td className="py-2 pr-3">
-                {item.kept_osm_name}
-                <span className="block text-gray-500 tabular-nums dark:text-muted-dark">{item.kept_distance_to_google_m} m from Google's pin</span>
-              </td>
-              <td className="py-2"><ExternalLinkText href={item.google_map}>{item.google_name}</ExternalLinkText></td>
+      <div className="admin-table-wrap">
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th scope="col">Dropped pin</th>
+              <th scope="col">Kept pin</th>
+              <th scope="col">Google place</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+          </thead>
+          <tbody>
+            {duplicates.dropped.map((item) => (
+              <tr key={item.osm_id}>
+                <td>
+                  <ExternalLinkText href={item.osm_map}>{item.osm_name}</ExternalLinkText>
+                  <span className="admin-row-sub tabular-nums">{item.distance_to_google_m} m from Google's pin</span>
+                </td>
+                <td>
+                  <span className="admin-row-title">{item.kept_osm_name}</span>
+                  <span className="admin-row-sub tabular-nums">{item.kept_distance_to_google_m} m from Google's pin</span>
+                </td>
+                <td><ExternalLinkText href={item.google_map}>{item.google_name}</ExternalLinkText></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -231,22 +235,20 @@ export default function HistoryTab() {
     return () => { alive = false; };
   }, [version]);
 
-  if (error) return <div className="p-8"><ErrorBox error={error} onRetry={() => setVersion((v) => v + 1)} /></div>;
+  if (error) return <ErrorBox error={error} onRetry={() => setVersion((v) => v + 1)} />;
   if (!data) return <Loading />;
 
+  const tabs = [
+    ...Object.entries(SOURCES).map(([key, label]) => ({ id: key, label })),
+    { id: "duplicates", label: "Dropped duplicates", count: data.duplicates.dropped.length },
+  ];
+
   return (
-    <div className="mx-auto flex max-w-[64rem] flex-col gap-4 p-8">
-      <div className="flex flex-wrap gap-1.5">
-        {Object.entries(SOURCES).map(([key, label]) => (
-          <FilterChip key={key} active={view === key} onClick={() => setView(key)}>{label}</FilterChip>
-        ))}
-        <FilterChip active={view === "duplicates"} onClick={() => setView("duplicates")}>
-          Dropped duplicates ({data.duplicates.dropped.length})
-        </FilterChip>
-      </div>
+    <>
+      <Tabs label="History" tabs={tabs} active={view} onChange={setView} />
       {view === "duplicates"
         ? <Duplicates duplicates={data.duplicates} />
         : <SourceView source={view} data={data.sources[view]} threshold={data.change_threshold} />}
-    </div>
+    </>
   );
 }

@@ -1036,6 +1036,12 @@
 }
 
 /* ACTIONS */
+/* Above the Submit button: why the registration could not be sent */
+.business-send-error {
+  margin-top: 1rem;
+  text-align: right;
+}
+
 .business-actions {
   margin-top: 15px;
   display: flex;
@@ -1231,6 +1237,14 @@
 .business-hours-closed.is-open {
   color: #09090b;
   font-weight: 500;
+}
+
+/* "24 hours" at the end of a day's row */
+.business-ghost-btn.business-hours-24 {
+  height: 2.25rem;
+  margin-left: auto;
+  padding: 0 0.625rem;
+  font-size: 0.8125rem;
 }
 
 .business-dropdown.business-time {

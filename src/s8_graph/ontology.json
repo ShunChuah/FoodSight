@@ -104,6 +104,7 @@
       "table": "restaurant",
       "key": "restaurant_id",
       "properties": [
+        "source",
         "osm_id",
         "osm_type",
         "name",
@@ -120,8 +121,7 @@
         "updated_at"
       ],
       "required": [
-        "osm_id",
-        "osm_type",
+        "source",
         "name",
         "amenity_type",
         "business_status",
@@ -130,7 +130,8 @@
       ],
       "indexes": [
         "name",
-        "osm_id"
+        "osm_id",
+        "source"
       ],
       "derived": {
         "counted_as_open": "true when business_status is one of counted_as_open in src/reference/categories.json (OPERATIONAL and UNKNOWN): the restaurant may still be trading. Food clusters and COMPETES_WITH use the same list."

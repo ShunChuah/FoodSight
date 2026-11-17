@@ -24,6 +24,13 @@ What is left alone or kept:
 Found by their own keys: restaurants by osm_id, sections by osm_id
 (migration 021), nearby places by osm_type + osm_id, the city by name.
 
+SUBMITTED restaurants (source "submitted": registered by their business and
+approved by an admin; migration 028) have no osm_id. They are found by their
+business submission instead (business_submission.restaurant_id). A new one is
+added, its submission gets its restaurant_id and the status "live"; after
+that it is compared like any other. They never count as gone from OSM.
+Before migration 028 has been run, submitted restaurants are not loaded.
+
 Re-mapped restaurant: a new osm_id whose Google place already belongs to a
 restaurant in the database whose osm_id is no longer in the file. When
 src/reference/google_match_overrides.json gives the new osm_id that place
@@ -47,9 +54,12 @@ answer (data/review/ai_failed.json), so this is only a safety.
 PHOTOS (sync_photos()): public.restaurant_photo is brought up to date with the
 photos stage 1 downloaded (data/cache/photo_cache.json and data/cache/photos/,
 keyed by Google place): added, replaced (another download time) or deleted,
-for every restaurant in the database with a Google place. Without the table
-(migration 026 not run) photos are skipped and the summary says so; the rest
-of the load goes on. Photos are not in the graph.
+for every restaurant in the database with a Google place. A submitted
+restaurant gets its business's storefront photo as photo 1 (migration 029):
+turned upright, at most 800 px wide, saved again as a JPEG without its hidden
+data (GPS position, camera). Without the table (migration 026 not run) photos
+are skipped and the summary says so; the rest of the load goes on. Photos are
+not in the graph.
 
 STAGE 8 TO-DO LIST (data/state/graph_todo.json): every row this load added,
 updated or deleted, with the value before and after, so run_8_graph.py updates
@@ -65,6 +75,7 @@ TEMPORARILY NULL FIELDS (remove when data available):
 
 import csv
 import hashlib
+import io
 import json
 import os
 import sys
@@ -77,11 +88,13 @@ from types import SimpleNamespace
 import psycopg2
 from dotenv import load_dotenv
 from psycopg2 import sql
+from PIL import Image, ImageOps
 
 # Lets `src` be imported when this file is run directly, not through run_7_loading.py.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.cache_saving import save_json
 from src.categories import get_column
+from src.s1_scrapers.extract_photos import MAX_WIDTH_PX as MAX_PHOTO_WIDTH_PX
 
 load_dotenv()
 
@@ -100,6 +113,10 @@ EXAMPLES_SHOWN = 15  # changes listed by name in the summary
 # Google's photos, downloaded in stage 1 (src/s1_scrapers/extract_photos.py)
 PHOTO_CACHE_FILE = os.path.join("data", "cache", "photo_cache.json")
 PHOTO_MIGRATION = "db/migrations/026_restaurant_photo.sql"
+# A submitted restaurant's photo: its business's storefront photo (submission_document.kind),
+# shrunk to Google's photo width
+STOREFRONT_KIND = "storefront_photo"
+STOREFRONT_MIGRATION = "db/migrations/029_restaurant_photo_from_submission.sql"
 
 DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 # nearby_context count columns, from nearby_place.kind in categories.json
@@ -108,6 +125,11 @@ COUNT_COLUMNS = [v["column"] for v in get_column("nearby_place.kind")["values"].
 
 RESTAURANT_COMPARE = ["osm_type", "name", "amenity_type", "brand", "phone", "website",
                       "business_status", "google_place_id", "google_maps_uri", "editorial_summary"]
+# restaurant.source (migration 028): extracted or submitted. A record with no
+# source (written before sources existed) is extracted.
+EXTRACTED, SUBMITTED = "extracted", "submitted"
+LIVE = "live"   # business_submission.status once its restaurant is loaded
+SUBMISSION_MIGRATION = "db/migrations/028_business_submission.sql"
 LOCATION_COMPARE = ["area_id", "latitude", "longitude", "full_address", "postcode", "street"]
 # One row per restaurant: (columns that count as a change, fetch times written with the row)
 ONE_ROW = {
@@ -280,12 +302,45 @@ class Changes:
 # ---------------------------------------------------------------------------
 
 
+def restaurant_key(r):
+    """A restaurant's key in this load: its osm_id, or "submission/<id>" for
+    one registered by its business."""
+    if (r.get("source") or EXTRACTED) == SUBMITTED:
+        return f"submission/{r.get('submission_id')}"
+    return _str(r.get("osm_id"))
+
+
+def restaurant_label(r):
+    """How the summary names a restaurant's origin: "osm 123" or "submission 4"."""
+    if (r.get("source") or EXTRACTED) == SUBMITTED:
+        return f"submission {r.get('submission_id')}"
+    return f"osm {r.get('osm_id')}"
+
+
 def read_database(cur):
     """Every row the comparison needs, read once at the start."""
     db = SimpleNamespace()
-    db.restaurants = {r["osm_id"]: r for r in _rows(cur, (
-        "SELECT restaurant_id, location_id, osm_id, " + ", ".join(RESTAURANT_COMPARE)
-        + ", google_fetched_at FROM public.restaurant"))}
+    # Migration 028: restaurant.source and the business submissions
+    cur.execute("SELECT to_regclass('public.business_submission') IS NOT NULL")
+    db.has_submissions = cur.fetchone()[0]
+    db.restaurant_compare = RESTAURANT_COMPARE + (["source"] if db.has_submissions else [])
+    columns = ", ".join(f"r.{c}" for c in ["restaurant_id", "location_id", "osm_id", *db.restaurant_compare,
+                                            "google_fetched_at"])
+    if db.has_submissions:
+        rows = _rows(cur, f"SELECT {columns}, s.submission_id, s.status AS submission_status "
+                          "FROM public.restaurant r "
+                          "LEFT JOIN public.business_submission s ON s.restaurant_id = r.restaurant_id")
+    else:
+        rows = _rows(cur, f"SELECT {columns} FROM public.restaurant r")
+    db.restaurants = {}
+    for r in rows:
+        if r["osm_id"]:
+            key = r["osm_id"]
+        elif r.get("submission_id"):
+            key = f"submission/{r['submission_id']}"
+        else:
+            key = f"restaurant/{r['restaurant_id']}"   # submitted, its submission deleted: left as it is
+        db.restaurants[key] = r
     db.locations = {r["location_id"]: r for r in _rows(cur, (
         "SELECT location_id, " + ", ".join(LOCATION_COMPARE) + " FROM public.location"))}
     for table, (compare, times) in ONE_ROW.items():
@@ -583,9 +638,11 @@ def delete_gone_cuisines(cur, cuisine_ids, changes):
 # ---------------------------------------------------------------------------
 
 
-def restaurant_values(r):
-    return {**{c: _str(r.get(c)) for c in RESTAURANT_COMPARE},
-            "google_fetched_at": _str(r.get("google_fetched_at"))}
+def restaurant_values(r, db):
+    values = {c: _str(r.get(c)) for c in RESTAURANT_COMPARE}
+    if "source" in db.restaurant_compare:
+        values["source"] = _str(r.get("source")) or EXTRACTED
+    return {**values, "google_fetched_at": _str(r.get("google_fetched_at"))}
 
 
 def location_values(r, ctx):
@@ -794,9 +851,14 @@ def add_restaurant(cur, r, ctx, db, changes):
     rid = _insert(cur, "restaurant", {
         "location_id": location_id,
         "osm_id": _str(r.get("osm_id")),
-        **restaurant_values(r),
+        **restaurant_values(r, db),
         "cluster_id": ctx.cluster_ids.get(r.get("cluster_label")),
     }, returning="restaurant_id")
+    if (r.get("source") or EXTRACTED) == SUBMITTED:
+        # The submission now points to its restaurant, and is live
+        cur.execute("UPDATE public.business_submission SET restaurant_id = %s, status = %s "
+                    "WHERE submission_id = %s", (rid, LIVE, r.get("submission_id")))
+        changes.counts["submissions now live"] += 1
     for table in ONE_ROW:
         sync_one_row(cur, table, rid, one_row_values(table, r, None), None)
     sync_cuisine_links(cur, rid, r, ctx, [])
@@ -806,17 +868,22 @@ def add_restaurant(cur, r, ctx, db, changes):
     changes.counts["restaurant new"] += 1
     changes.counts["reviews added"] += added
     changes.note("restaurants", rid, "added")
-    changes.example(f"new restaurant: {_str(r.get('name'))} (osm {r.get('osm_id')})")
+    changes.example(f"new restaurant: {_str(r.get('name'))} ({restaurant_label(r)})")
 
 
 def update_restaurant(cur, r, ctx, db, changes):
     """A restaurant already in the database: only what differs is written."""
-    old_row = db.restaurants[_str(r.get("osm_id"))]
+    old_row = db.restaurants[restaurant_key(r)]
     rid = old_row["restaurant_id"]
     found = {}
+    if old_row.get("submission_status") and old_row["submission_status"] != LIVE:
+        # Linked but not marked live (a status changed by hand): it is loaded, so it is live
+        cur.execute("UPDATE public.business_submission SET status = %s WHERE submission_id = %s",
+                    (LIVE, old_row["submission_id"]))
+        changes.counts["submissions now live"] += 1
 
-    new_row = restaurant_values(r)
-    differ = _diff("restaurant", old_row, new_row, RESTAURANT_COMPARE)
+    new_row = restaurant_values(r, db)
+    differ = _diff("restaurant", old_row, new_row, db.restaurant_compare)
     if differ:
         _update(cur, "restaurant", new_row, "restaurant_id", rid)
     found.update(differ)
@@ -849,7 +916,7 @@ def update_restaurant(cur, r, ctx, db, changes):
         changes.fields.update(f.split(".")[0] if f.startswith(ONE_ROW_PREFIXES) else f for f in own)
         shown = "; ".join(f"{f} {_show(before)} -> {_show(now)}" for f, (before, now) in list(own.items())[:3])
         more = f" (+{len(own) - 3} more)" if len(own) > 3 else ""
-        changes.example(f"{_str(r.get('name'))} (osm {r.get('osm_id')}): {shown}{more}")
+        changes.example(f"{_str(r.get('name'))} ({restaurant_label(r)}): {shown}{more}")
     else:
         changes.counts["restaurant unchanged"] += 1
     if any(f.startswith("rating") for f in found):
@@ -892,13 +959,14 @@ def take_over_moved_rows(cur, restaurants, db, changes):
     match approved in the override file, the existing row moves to the new
     osm_id and is then updated like any other; without it, the new restaurant
     is not loaded. Returns the osm_ids not loaded, with the reason."""
-    in_file = {_str(r.get("osm_id")) for r in restaurants}
+    in_file = {restaurant_key(r) for r in restaurants}
     by_place = {row["google_place_id"]: row for row in db.restaurants.values() if row["google_place_id"]}
     overrides = None
     held = {}
     for r in restaurants:
         osm_id, place = _str(r.get("osm_id")), _str(r.get("google_place_id"))
-        if osm_id in db.restaurants or not place or place not in by_place:
+        # A submitted restaurant has no Google place, so it is never re-mapped
+        if restaurant_key(r) in db.restaurants or not place or place not in by_place:
             continue
         old = by_place[place]
         if old["osm_id"] in in_file:
@@ -950,7 +1018,8 @@ def apply_removed(cur, db, in_osm, decisions, changes):
     decisions no longer needed: their restaurant is back in OSM or gone)."""
     undecided, deleted_now = [], set()
     for osm_id, row in list(db.restaurants.items()):
-        if osm_id in in_osm:
+        # A submitted restaurant was never in OSM (its key is not an osm_id)
+        if osm_id in in_osm or not row["osm_id"]:
             continue
         decision = str((decisions.get(osm_id) or {}).get("decision") or "").strip().lower()
         rid = row["restaurant_id"]
@@ -1080,16 +1149,45 @@ def write_todo(changes):
 # ---------------------------------------------------------------------------
 
 
+def storefront_image(content):
+    """A business's storefront photo made ready to keep with its restaurant,
+    like Google's photos: turned upright (a phone often saves a photo sideways
+    with a note to turn it), at most MAX_PHOTO_WIDTH_PX wide, and saved again
+    as a JPEG without the file's hidden data (the GPS position, camera and
+    times a phone writes into it). Returns (bytes, content type, width, height)."""
+    with Image.open(io.BytesIO(content)) as original:
+        image = ImageOps.exif_transpose(original)  # a copy, upright
+        if image.width > MAX_PHOTO_WIDTH_PX:
+            height = max(1, round(image.height * MAX_PHOTO_WIDTH_PX / image.width))
+            image = image.resize((MAX_PHOTO_WIDTH_PX, height), Image.LANCZOS)
+        if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+            # A see-through PNG: JPEG has no transparency, so those parts become white
+            rgba = image.convert("RGBA")
+            image = Image.new("RGB", rgba.size, "white")
+            image.paste(rgba, mask=rgba.getchannel("A"))
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
+        colours = image.info.get("icc_profile")  # the colour profile, so colours stay right
+        image.info = {}  # nothing else of the original (EXIF, XMP) is written
+        out = io.BytesIO()
+        image.save(out, "JPEG", quality=85, optimize=True, icc_profile=colours)
+        return out.getvalue(), "image/jpeg", image.width, image.height
+
+
 def sync_photos(cur, changes):
-    """Bring public.restaurant_photo up to date with the photos stage 1
-    downloaded (PHOTO_CACHE_FILE, keyed by Google place). Every restaurant in
-    the database with a Google place gets that place's photos: a new one is
-    added, one with another download time is replaced, one no longer listed is
-    deleted, and photos of a place the restaurant no longer has (its Google
-    match changed or went) are deleted. A place stage 1 has not asked yet
-    leaves the restaurant's photos as they are. Photos are not in the graph, so
-    nothing goes on the stage 8 to-do list. Without the table (migration 026
-    not run yet) nothing is done and the summary says so."""
+    """Bring public.restaurant_photo up to date. Every restaurant in the
+    database with a Google place gets the photos stage 1 downloaded for that
+    place (PHOTO_CACHE_FILE, keyed by Google place): a new one is added, one
+    with another download time is replaced, one no longer listed is deleted.
+    A place stage 1 has not asked yet leaves the restaurant's photos as they
+    are. A submitted restaurant gets its business's storefront photo as photo
+    1 (migration 029), made ready by storefront_image(); it is replaced when
+    the business uploads another one. Photos from a source the restaurant no
+    longer has (its Google match changed or went, its submission was deleted)
+    are deleted. Photos are not in the graph, so nothing goes on the stage 8
+    to-do list. Without the table (migration 026 not run yet) nothing is done
+    and the summary says so; without migration 029 the storefront photos are
+    left out and the summary says so."""
     cur.execute("SELECT to_regclass('public.restaurant_photo')")
     if cur.fetchone()[0] is None:
         changes.counts["photos table missing"] = 1
@@ -1099,22 +1197,50 @@ def sync_photos(cur, changes):
         with open(PHOTO_CACHE_FILE, "r", encoding="utf-8") as f:
             cache = json.load(f)
 
+    # Where each restaurant's photos come from: ("google", place_id) or ("submission", submission_id)
     cur.execute("SELECT restaurant_id, google_place_id FROM restaurant WHERE google_place_id IS NOT NULL")
-    place_of = dict(cur.fetchall())
-    cur.execute("SELECT restaurant_id, position, google_place_id, fetched_at FROM restaurant_photo")
-    have = {(rid, pos): (place_id, fetched_at) for rid, pos, place_id, fetched_at in cur.fetchall()}
+    source_of = {rid: ("google", place_id) for rid, place_id in cur.fetchall()}
+    # Migration 029: a photo may come from a business submission instead of a Google place
+    cur.execute("SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' "
+                "AND table_name = 'restaurant_photo' AND column_name = 'submission_id')")
+    has_storefronts = cur.fetchone()[0]
+    storefronts = {}
+    if has_storefronts:
+        # restaurant_id is set once stage 7 has added the submitted restaurant (this load included)
+        cur.execute("SELECT s.restaurant_id, s.submission_id, s.name, d.uploaded_at "
+                    "FROM public.business_submission s JOIN public.submission_document d "
+                    "ON d.submission_id = s.submission_id AND d.kind = %s "
+                    "WHERE s.restaurant_id IS NOT NULL", (STOREFRONT_KIND,))
+        for rid, submission_id, name, uploaded_at in cur.fetchall():
+            if rid not in source_of:
+                source_of[rid] = ("submission", submission_id)
+                storefronts[rid] = (name, uploaded_at)
+    else:
+        cur.execute("SELECT to_regclass('public.business_submission') IS NOT NULL")
+        if cur.fetchone()[0]:
+            cur.execute("SELECT count(*) FROM public.business_submission WHERE restaurant_id IS NOT NULL")
+            changes.counts["storefront photos waiting"] = cur.fetchone()[0]
+
+    cur.execute("SELECT restaurant_id, position, google_place_id, "
+                + ("submission_id" if has_storefronts else "NULL") + ", fetched_at FROM restaurant_photo")
+    have = {(rid, pos): (("google", place_id) if place_id else ("submission", submission_id), fetched_at)
+            for rid, pos, place_id, submission_id, fetched_at in cur.fetchall()}
 
     def delete(rid, pos):
         cur.execute("DELETE FROM restaurant_photo WHERE restaurant_id = %s AND position = %s", (rid, pos))
         changes.counts["photos deleted"] += 1
 
-    # Photos of a place the restaurant no longer has
-    for (rid, pos), (place_id, _) in list(have.items()):
-        if place_of.get(rid) != place_id:
+    # Photos from a source the restaurant no longer has
+    for (rid, pos), (source, _) in list(have.items()):
+        if source_of.get(rid) != source:
             delete(rid, pos)
             del have[(rid, pos)]
 
-    for rid, place_id in place_of.items():
+    for rid, (kind, key) in source_of.items():
+        if kind == "submission":
+            sync_storefront(cur, changes, rid, key, *storefronts[rid], have, delete)
+            continue
+        place_id = key
         entry = cache.get(place_id)
         if entry is None:
             continue  # not asked yet in stage 1
@@ -1145,6 +1271,41 @@ def sync_photos(cur, changes):
                  photo.get("height_px"), photo.get("author_name"), photo.get("author_uri"), fetched_at),
             )
             changes.counts["photos replaced" if current else "photos added"] += 1
+
+
+def sync_storefront(cur, changes, rid, submission_id, name, uploaded_at, have, delete):
+    """A submitted restaurant's one photo: its storefront photo as photo 1,
+    with the business name as its author and the upload time as fetched_at
+    (the same upload time means the same photo)."""
+    for pos in [pos for (r, pos) in have if r == rid and pos != 1]:
+        delete(rid, pos)
+    current = have.get((rid, 1))
+    if current and current[1] == uploaded_at:
+        changes.counts["photos unchanged"] += 1
+        return
+    cur.execute("SELECT content FROM public.submission_document WHERE submission_id = %s AND kind = %s",
+                (submission_id, STOREFRONT_KIND))
+    try:
+        image, content_type, width, height = storefront_image(bytes(cur.fetchone()[0]))
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as e:
+        # The backend checks only the file's first bytes, so a broken picture can get this far
+        print(f"  WARNING: the storefront photo of submission {submission_id} ({name}) could not be read "
+              f"({e}); it is left out")
+        changes.counts["storefront photos unreadable"] += 1
+        return
+    cur.execute(
+        """INSERT INTO restaurant_photo (restaurant_id, position, google_place_id, submission_id, image,
+                                         content_type, width_px, height_px, author_name, author_uri, fetched_at)
+           VALUES (%s, 1, NULL, %s, %s, %s, %s, %s, %s, NULL, %s)
+           ON CONFLICT (restaurant_id, position) DO UPDATE SET
+               google_place_id = NULL, submission_id = EXCLUDED.submission_id, image = EXCLUDED.image,
+               content_type = EXCLUDED.content_type, width_px = EXCLUDED.width_px,
+               height_px = EXCLUDED.height_px, author_name = EXCLUDED.author_name,
+               author_uri = NULL, fetched_at = EXCLUDED.fetched_at""",
+        (rid, submission_id, psycopg2.Binary(image), content_type, width, height, name, uploaded_at),
+    )
+    changes.counts["photos replaced" if current else "photos added"] += 1
+    changes.counts["storefront photos copied"] += 1
 
 
 # ---------------------------------------------------------------------------
@@ -1185,13 +1346,17 @@ def main(input_file=INPUT_FILE, dry_run=False):
         cur = conn.cursor()
         db = read_database(cur)
         print(f"Database: {len(db.restaurants)} restaurants before this load")
+        submitted_skipped = 0
+        if not db.has_submissions:
+            submitted_skipped = sum((r.get("source") or EXTRACTED) == SUBMITTED for r in restaurants)
+            restaurants = [r for r in restaurants if (r.get("source") or EXTRACTED) != SUBMITTED]
 
         ctx = SimpleNamespace()
         city_id = sync_city(cur, city_data, changes)
         ctx.area_name_to_id, gone_areas = sync_areas(cur, areas, city_id, changes)
 
         held = take_over_moved_rows(cur, restaurants, db, changes)
-        restaurants = [r for r in restaurants if _str(r.get("osm_id")) not in held]
+        restaurants = [r for r in restaurants if restaurant_key(r) not in held]
 
         # Restaurants gone from OSM: your decisions; the undecided ones are listed
         in_osm = osm_ids_in_osm()
@@ -1199,8 +1364,8 @@ def main(input_file=INPUT_FILE, dry_run=False):
         if in_osm is not None:
             undecided, no_longer_needed = apply_removed(cur, db, in_osm, load_decisions(), changes)
 
-        in_file = {_str(r.get("osm_id")) for r in restaurants}
-        in_file_ids = {row["restaurant_id"] for osm_id, row in db.restaurants.items() if osm_id in in_file}
+        in_file = {restaurant_key(r) for r in restaurants}
+        in_file_ids = {row["restaurant_id"] for key, row in db.restaurants.items() if key in in_file}
 
         ctx.place_ids, ctx.place_keys, lost_link = sync_nearby_places(cur, nearby_places, in_file_ids, changes)
         ctx.cluster_ids = replace_clusters(cur, clusters)
@@ -1211,17 +1376,17 @@ def main(input_file=INPUT_FILE, dry_run=False):
 
         # Restaurants already in the database first (one may free a Google
         # place a new restaurant takes), then the new ones
-        existing = [r for r in restaurants if _str(r.get("osm_id")) in db.restaurants]
-        new = [r for r in restaurants if _str(r.get("osm_id")) not in db.restaurants]
+        existing = [r for r in restaurants if restaurant_key(r) in db.restaurants]
+        new = [r for r in restaurants if restaurant_key(r) not in db.restaurants]
         total = len(restaurants)
         for idx, r in enumerate(existing + new, start=1):
             try:
-                if _str(r.get("osm_id")) in db.restaurants:
+                if restaurant_key(r) in db.restaurants:
                     update_restaurant(cur, r, ctx, db, changes)
                 else:
                     add_restaurant(cur, r, ctx, db, changes)
             except Exception:
-                print(f"\nERROR at restaurant '{_str(r.get('name'))}' (osm_id={r.get('osm_id')})")
+                print(f"\nERROR at restaurant '{_str(r.get('name'))}' ({restaurant_label(r)})")
                 raise
             if idx % 200 == 0 or idx == total:
                 print(f"  Compared {idx}/{total} restaurants...")
@@ -1230,7 +1395,7 @@ def main(input_file=INPUT_FILE, dry_run=False):
         delete_gone_cuisines(cur, ctx.cuisine_ids, changes)
         recount_not_in_file(cur, lost_link, changes)
         sync_photos(cur, changes)
-        not_in_file = [row for osm_id, row in db.restaurants.items() if osm_id not in in_file]
+        not_in_file = [row for key, row in db.restaurants.items() if key not in in_file]
 
         if dry_run:
             conn.rollback()
@@ -1268,6 +1433,11 @@ def main(input_file=INPUT_FILE, dry_run=False):
           + (f", {c['moved to new osm_id']} moved to a new osm_id" if c["moved to new osm_id"] else ""))
     if changes.fields:
         print("    changed         : " + ", ".join(f"{f} {n}" for f, n in changes.fields.most_common(8)))
+    if c["submissions now live"]:
+        print(f"  submissions       : {c['submissions now live']} now live (added from an approved business submission)")
+    if submitted_skipped:
+        print(f"  submissions       : {submitted_skipped} submitted restaurants NOT loaded: the table "
+              f"business_submission does not exist yet (run {SUBMISSION_MIGRATION})")
     print(f"  ratings           : {c['rating updated']} updated")
     print(f"  reviews           : {c['reviews added']} added, {c['sentiments filled']} sentiments filled")
     print(f"  nearby counts     : {c['nearby counts updated']} restaurants updated; links "
@@ -1281,6 +1451,13 @@ def main(input_file=INPUT_FILE, dry_run=False):
               f"{c['photos deleted']} deleted, {c['photos unchanged']} unchanged"
               + (f"; {c['photo files missing']} files missing in data/cache/photos/"
                  if c["photo files missing"] else ""))
+        if c["storefront photos copied"] or c["storefront photos unreadable"]:
+            print(f"    storefront      : {c['storefront photos copied']} copied from business submissions"
+                  + (f", {c['storefront photos unreadable']} could not be read (see the warnings above)"
+                     if c["storefront photos unreadable"] else ""))
+        if c["storefront photos waiting"]:
+            print(f"    storefront      : not copied for {c['storefront photos waiting']} submitted restaurants: "
+                  f"run {STOREFRONT_MIGRATION}, then run_7_loading.py again")
     if not_in_file:
         print(f"  not in this data  : {len(not_in_file)} restaurants in the database, left as they are"
               + (f" ({c['recounted']} recounted)" if c["recounted"] else ""))

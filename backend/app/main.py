@@ -13,6 +13,8 @@ from app import config
 from app.admin.routes import router as admin_router
 from app.auth.cleanup import run_token_cleanup
 from app.auth.routes import router as auth_router
+from app.business.admin_routes import router as business_admin_router
+from app.business.routes import router as business_router
 from app.database import auth_engine
 from app.errors import handle_unexpected_errors
 from app.routes.chat import router as chat_router
@@ -73,6 +75,8 @@ router.include_router(chat_router)
 router.include_router(narration_router)
 router.include_router(preferences_router)
 router.include_router(admin_router)
+router.include_router(business_router)
+router.include_router(business_admin_router)
 app.include_router(router)
 
 threading.Thread(target=warm_up, daemon=True).start()

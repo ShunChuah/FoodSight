@@ -3,7 +3,7 @@
   "legend": {
     "meaning": "The one question this column answers.",
     "rules": "Only where picking needs guidance: how to choose between values and how to combine them. The AI is given these together with the list.",
-    "filled_by": "Where the value comes from. osm = OpenStreetMap. google = Google Places. ai = picked by the AI profiler from the list here. lookup = not picked; it follows from another value (a cuisine's category follows from its name; a price tier follows from the average meal price).",
+    "filled_by": "Where the value comes from. osm = OpenStreetMap. google = Google Places. ai = picked by the AI profiler from the list here. lookup = not picked; it follows from another value (a cuisine's category follows from its name; a price tier follows from the average meal price). app = set by the website and the pipeline as a business submission moves on. For a submitted restaurant (restaurant.source) the business gives the values marked osm, google and ai on the Register Business form, from the same lists.",
     "pick": "one = exactly one value. many = several values per restaurant. Cuisines and facilities are stored one per row in their link table; target_segment and ambiance are stored in the same column as plain text, separated by a comma and a space (families, students).",
     "max": "Only when pick is many: the most values allowed. At least one is always required.",
     "counted_as_open": "Only for restaurant.business_status: the values of restaurants that may still be trading. Only these are put in food clusters (run_6_clustering.py) and can have competitors (COMPETES_WITH).",
@@ -82,6 +82,27 @@
         "PERMANENTLY_CLOSED": "Closed for good.",
         "FUTURE_OPENING": "Listed on Google but not open yet.",
         "UNKNOWN": "Not known: Google has no match for the place (it may be open or closed), or gave no status."
+      }
+    },
+    "restaurant.source": {
+      "meaning": "Where the restaurant came from. A submitted restaurant has no OpenStreetMap object (osm_id and osm_type empty); its values are the business's own, checked by an admin, and the pipeline never asks the AI about it.",
+      "filled_by": "lookup",
+      "pick": "one",
+      "values": {
+        "extracted": "Collected by the pipeline from OpenStreetMap, with Google's details when it has a Google match.",
+        "submitted": "Registered by its business on the Register Business form and approved by an admin."
+      }
+    },
+    "business_submission.status": {
+      "meaning": "Where a business submission is in its review. The backend sets it as the user and the admin act on it; the pipeline adds an approved one at the next nightly run (stage 3 reads approved and live submissions, stage 7 sets live).",
+      "filled_by": "app",
+      "pick": "one",
+      "values": {
+        "waiting": "Submitted or resubmitted; no admin has started checking it.",
+        "under_review": "An admin has started checking it (saved the first mark).",
+        "rejected": "The admin flagged at least one field. The user can fix every flagged field and resubmit.",
+        "approved": "Every field checked. Added to FoodSight at the next nightly update.",
+        "live": "Loaded by the pipeline: on FoodSight's map and in the chatbot."
       }
     },
     "area.type": {
@@ -1033,13 +1054,14 @@
       }
     },
     "business_profile.evidence_level": {
-      "meaning": "How much the AI had to work with when it wrote the profile, so the profile, cuisines and price estimate can be trusted accordingly. Set by profile_data.py when the AI is asked, never by the AI, and saved with its answer.",
+      "meaning": "Where the profile came from and, for one the AI wrote, how much it had to work with, so the profile, cuisines and price estimate can be trusted accordingly. Set by profile_data.py, never by the AI, and saved with its answer.",
       "filled_by": "lookup",
       "pick": "one",
       "values": {
         "high": "Matched on Google, and the AI read 3 to 5 reviews.",
         "medium": "Matched on Google, but the AI read fewer than 3 reviews. It still had Google's type, price and rating.",
-        "low": "No Google match. The AI had only OpenStreetMap's name and tags."
+        "low": "No Google match. The AI had only OpenStreetMap's name and tags.",
+        "submitted": "No AI: the business gave these values in its submission, and an admin checked them."
       }
     },
     "business_profile.restaurant_type": {

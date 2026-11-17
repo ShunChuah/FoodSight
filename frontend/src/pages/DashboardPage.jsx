@@ -7,8 +7,8 @@ import Profile from "../components/modals/Profile";
 import ChangePassword from "../components/modals/ChangePassword";
 import MySubmissions from "../components/business/MySubmissions";
 import RegisterBusiness from "../components/business/RegisterBusiness";
-import { emptyBusinessForm, formForEditing, sectionStep } from "../services/businessForm";
-import { MOCK_MY_SUBMISSIONS } from "../../data/mockMySubmissions";
+import { asFlags, emptyBusinessForm, formForEditing, loadBusinessOptions, sectionStep } from "../services/businessForm";
+import { getMySubmissions, sendSubmission } from "../api/businessApi";
 import { deleteChatBatch } from "../services/deleteChatBatch";
 import { loadShowGraphEvidence, saveShowGraphEvidence } from "../services/detailsPresentation";
 import { pendingGraphs, waitForGraph, withGraphEvidence } from "../services/pendingGraphs";
@@ -48,9 +48,16 @@ function DashboardPage() {
   const [mainView, setMainView] = useState("chat");
   const [businessForm, setBusinessForm] = useState(emptyBusinessForm);
   const [businessStep, setBusinessStep] = useState(0);
-  // Mock until the submissions API exists.
-  const [mySubmissions, setMySubmissions] = useState(MOCK_MY_SUBMISSIONS);
+  // The user's own submissions (GET /business/submissions), read when Submissions opens.
+  // Each opening of Submissions (or Try again) is a new request; the page shows loading until it answers
+  const [submissionsRequest, setSubmissionsRequest] = useState(0);
+  const [submissionsLoaded, setSubmissionsLoaded] = useState({ request: -1, state: "loading", list: [] });
+  const submissionsState = submissionsLoaded.request === submissionsRequest ? submissionsLoaded.state : "loading";
+  const mySubmissions = submissionsLoaded.list;
+  // The rejected submission being fixed, with its flags as the form shows them (asFlags)
   const [resubmitting, setResubmitting] = useState(null);
+  // True once a registration was sent: the next Register Business starts an empty form
+  const businessSentRef = useRef(false);
   // Bumped on Resubmit so the form remounts with the saved answers.
   const [businessKey, setBusinessKey] = useState(0);
   const [chats, setChats] = useState([]);
@@ -272,21 +279,47 @@ function DashboardPage() {
     setRetryingMessageId(messageId);
   };
 
-  const handleResubmit = (submission) => {
+  useEffect(() => {
+    if (submissionsRequest === 0) return undefined;
+    let alive = true;
+    // The lists name facility groups in the flags
+    Promise.all([getMySubmissions(), loadBusinessOptions().catch(() => null)]).then(
+      ([found]) => { if (alive) setSubmissionsLoaded({ request: submissionsRequest, state: "ready", list: found }); },
+      () => { if (alive) setSubmissionsLoaded((previous) => ({ ...previous, request: submissionsRequest, state: "error" })); },
+    );
+    return () => { alive = false; };
+  }, [submissionsRequest]);
+
+  const openSubmissions = () => {
+    setSubmissionsRequest((previous) => previous + 1);
+    setMainView("submissions");
+  };
+
+  const openRegisterBusiness = () => {
+    if (businessSentRef.current) {
+      businessSentRef.current = false;
+      setBusinessForm(emptyBusinessForm());
+      setBusinessStep(0);
+      setResubmitting(null);
+      setBusinessKey((previous) => previous + 1);
+    }
+    setMainView("register-business");
+  };
+
+  const handleResubmit = async (submission) => {
+    await loadBusinessOptions().catch(() => null);
+    const flags = asFlags(submission.issues);
+    businessSentRef.current = false;
     setBusinessForm(formForEditing(submission.form));
-    setBusinessStep(Math.min(...submission.issues.map((issue) => sectionStep(issue.section))));
-    setResubmitting(submission);
+    setBusinessStep(flags.length ? Math.min(...flags.map((flag) => sectionStep(flag.section))) : 0);
+    setResubmitting({ id: submission.id, flags });
     setBusinessKey((previous) => previous + 1);
     setMainView("register-business");
   };
 
-  const handleBusinessSubmitted = (form) => {
-    const now = new Date().toISOString();
-    const sent = { status: "waiting", submittedAt: now, reviewStartedAt: null, decidedAt: null, form, issues: [] };
-    setMySubmissions((previous) => (resubmitting
-      ? previous.map((submission) => (submission.id === resubmitting.id ? { ...submission, ...sent } : submission))
-      : [{ id: `SUB-${Date.now()}`, ...sent }, ...previous]));
-    setResubmitting(null);
+  // The form stays on its "Submitted" notice; the next Register Business starts afresh.
+  const handleBusinessSubmitted = () => {
+    businessSentRef.current = true;
   };
 
   const handleNewChat = () => {
@@ -384,9 +417,9 @@ function DashboardPage() {
           onCloseSidebar={() => setSidebarOpen(false)}
           onSettingsOpen={() => setOpenDialog("settings")}
           onProfileOpen={() => setOpenDialog("profile")}
-          onRegisterBusiness={() => setMainView("register-business")}
+          onRegisterBusiness={openRegisterBusiness}
           registerBusinessActive={mainView === "register-business"}
-          onSubmissions={() => setMainView("submissions")}
+          onSubmissions={openSubmissions}
           submissionsActive={mainView === "submissions"}
         />
       ) : (
@@ -396,9 +429,9 @@ function DashboardPage() {
           onSearchOpen={handleSearchOpen}
           onSettingsOpen={() => setOpenDialog("settings")}
           onProfileOpen={() => setOpenDialog("profile")}
-          onRegisterBusiness={() => setMainView("register-business")}
+          onRegisterBusiness={openRegisterBusiness}
           registerBusinessActive={mainView === "register-business"}
-          onSubmissions={() => setMainView("submissions")}
+          onSubmissions={openSubmissions}
           submissionsActive={mainView === "submissions"}
         />
       )}
@@ -411,14 +444,17 @@ function DashboardPage() {
           step={businessStep}
           setStep={setBusinessStep}
           darkMode={darkMode}
-          flags={resubmitting?.issues ?? []}
+          flags={resubmitting?.flags ?? []}
+          onSubmit={(form) => sendSubmission(form, resubmitting?.id)}
           onSubmitted={handleBusinessSubmitted}
         />
       ) : mainView === "submissions" ? (
         <MySubmissions
           submissions={mySubmissions}
+          state={submissionsState}
+          onRetry={() => setSubmissionsRequest((previous) => previous + 1)}
           onResubmit={handleResubmit}
-          onRegister={() => setMainView("register-business")}
+          onRegister={openRegisterBusiness}
           darkMode={darkMode}
         />
       ) : (

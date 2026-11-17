@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, ChevronDown, Store, X } from "lucide-react";
 import Logo from "../../assets/logo.svg";
 import DarkModeLogo from "../../assets/logo-dark.svg";
+import { asFlags } from "../../services/businessForm";
 import "../../styles/business.css";
 import "../../styles/submissions.css";
 
@@ -10,22 +11,31 @@ const formatWhen = (iso) => {
   return `${date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}, ${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 };
 
+// The steps of the current round (business_submission.status: waiting, under_review, rejected,
+// approved, live). A resubmission starts a new round.
 function progressSteps(submission) {
-  const steps = [{ key: "submitted", label: "Submitted", at: submission.submittedAt, state: "done", detail: "We received your registration." }];
-  if (submission.status === "waiting") {
+  const { status } = submission;
+  const resubmitted = submission.round > 1;
+  const steps = [{
+    key: "submitted", label: resubmitted ? `Resubmitted (round ${submission.round})` : "Submitted", at: submission.submittedAt,
+    state: "done", detail: resubmitted ? "We received your changes." : "We received your registration.",
+  }];
+  if (status === "waiting") {
     steps.push({ key: "review", label: "Under review", state: "pending", detail: "Waiting for an admin to start reviewing your details." });
     return steps;
   }
-  const decided = submission.status === "approved" || submission.status === "rejected";
   steps.push({
-    key: "review", label: "Under review", at: submission.reviewStartedAt, state: decided ? "done" : "current",
+    key: "review", label: "Under review", at: submission.reviewStartedAt, state: status === "under_review" ? "current" : "done",
     detail: "An admin is checking your details and documents.",
   });
-  if (submission.status === "approved") {
-    steps.push({ key: "approved", label: "Approved", at: submission.decidedAt, state: "approved", detail: "The restaurant was added to the knowledge graph successfully." });
+  if (status === "rejected") {
+    steps.push({ key: "rejected", label: "Changes needed", at: submission.decidedAt, state: "rejected", detail: "Fix each flagged item below, then resubmit." });
   }
-  if (submission.status === "rejected") {
-    steps.push({ key: "rejected", label: "Rejected", at: submission.decidedAt, state: "rejected", detail: "The issues below are flagged." });
+  if (status === "approved" || status === "live") {
+    steps.push({ key: "approved", label: "Approved", at: submission.decidedAt, state: "approved", detail: "Your registration was approved." });
+    steps.push(status === "live"
+      ? { key: "live", label: "On FoodSight", at: submission.liveAt, state: "approved", detail: "Your restaurant is on FoodSight's map and chatbot." }
+      : { key: "live", label: "On FoodSight", state: "current", detail: "It appears after tonight's update." });
   }
   return steps;
 }
@@ -78,9 +88,9 @@ function SubmissionCard({ submission, defaultOpen, onResubmit }) {
               >
                 {step.key === "rejected" && (
                   <>
-                    {submission.issues.map((issue) => (
+                    {asFlags(submission.issues).map((issue) => (
                       <div key={issue.label} className="my-sub-issue">
-                        <strong>{issue.label}</strong>
+                        <strong>{issue.section} · {issue.label}</strong>
                         <p>{issue.note}</p>
                       </div>
                     ))}
@@ -98,14 +108,24 @@ function SubmissionCard({ submission, defaultOpen, onResubmit }) {
   );
 }
 
-export default function MySubmissions({ submissions, onResubmit, onRegister, darkMode = false }) {
+// state: "loading", "ready" or "error" (GET /business/submissions); onRetry asks again.
+export default function MySubmissions({ submissions, state = "ready", onRetry, onResubmit, onRegister, darkMode = false }) {
   return (
     <main className="business-area">
       <div className="business-card">
         <header className="business-header my-sub-header">
           <img src={darkMode ? DarkModeLogo : Logo} alt="FoodSight" className="business-logo" />
         </header>
-        {submissions.length ? (
+        {state !== "ready" ? (
+          <section className="business-section my-sub-empty" role="status">
+            {state === "loading" ? <p>Loading your submissions…</p> : (
+              <>
+                <p>We could not load your submissions. Check your connection and try again.</p>
+                <button type="button" className="business-next-btn" onClick={onRetry}>Try again</button>
+              </>
+            )}
+          </section>
+        ) : submissions.length ? (
           <div className="business-form">
             {submissions.map((submission, index) => (
               <SubmissionCard key={submission.id} submission={submission} defaultOpen={index === 0} onResubmit={onResubmit} />

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Check, Clock, Undo2, X } from "lucide-react";
 import { GOOGLE_COLOR, OSM_COLOR, formatDateTime } from "../../services/adminFormat.js";
 import AdminMap from "./AdminMap.jsx";
-import { ActionButton, Badge, Card, ErrorBox, Notice, TextInput } from "./AdminUi.jsx";
+import { ActionButton, Badge, ErrorBox, Notice, Section, TextInput } from "./AdminUi.jsx";
 import { Comparison, LetterChip, PinChoice } from "./MatchParts.jsx";
 
 // One page for a Google place that two or more OpenStreetMap restaurants matched (reason
@@ -79,7 +79,7 @@ export default function SharedPlaceDetail({ group, details, note, onNote, pin, o
   }, [details, location]);
 
   return (
-    <div className="mx-auto flex max-w-[64rem] flex-col gap-4 p-8">
+    <div className="flex flex-col gap-4 p-6">
       <div>
         <h2 className="text-[1.375rem] font-bold">
           {members.map((m, index) => (
@@ -97,12 +97,11 @@ export default function SharedPlaceDetail({ group, details, note, onNote, pin, o
       </div>
       <Notice>{notice}</Notice>
       <ErrorBox error={error} />
-      <Card>
+      <Section title={decided ? null : "Which restaurant is this Google place?"}>
         {decided ? (
           <DecidedBox members={members} busy={busy} onDecide={onDecide} onUndo={onUndo} />
         ) : (
-          <div className="flex flex-col gap-2">
-            <p className="text-[0.875rem] font-semibold">Which restaurant is this Google place?</p>
+          <div className="flex flex-col gap-3">
             <TextInput value={note} maxLength={300} onChange={(event) => onNote(event.target.value)}
               placeholder="Note (optional): why you decided, e.g. checked the shop names on Google Maps" />
             <div className="flex flex-wrap gap-2">
@@ -123,7 +122,7 @@ export default function SharedPlaceDetail({ group, details, note, onNote, pin, o
             )}
           </div>
         )}
-      </Card>
+      </Section>
       <AdminMap {...map} satellite fitLabel="Show all pins" className="h-[20rem]" />
       <Comparison
         osmSides={details.map((item, index) => ({

@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { ArrowRight, ArrowUp, Check, Clock3, Loader, Utensils, X } from "lucide-react";
 import { Dropdown } from "../business/BusinessFields";
-import { decidedWithin, reviewStatus, weekStarts } from "../../services/adminSubmissions";
-import { MOCK_GRAPH_RESTAURANTS, MOCK_WEEKLY_SUBMISSIONS } from "../../../data/mockAdminSubmissions";
+import { decidedWithin, reviewStatus, tabOf, weekStarts, weeklyCounts } from "../../services/adminSubmissions";
+
+const WEEKS_SHOWN = 8;
 
 const RANGES = [
   { value: 7, label: "Last 7 days" },
@@ -74,16 +75,17 @@ function WeeklyChart({ counts }) {
 }
 
 export default function AdminOverview() {
-  const { submissions } = useOutletContext();
+  const { submissions, submissionsInfo } = useOutletContext();
   const navigate = useNavigate();
   const [range, setRange] = useState(30);
   const rangeLabel = RANGES.find((option) => option.value === range).label;
 
-  const waiting = submissions.filter((submission) => submission.status === "waiting");
+  const waiting = submissions.filter((submission) => tabOf(submission.status) === "waiting");
   const notStarted = waiting.filter((submission) => reviewStatus(submission) === "not_started").length;
   const approved = decidedWithin(submissions, "approved", range);
   const rejected = decidedWithin(submissions, "rejected", range);
-  const oldest = [...waiting].sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt))[0];
+  // The id is read here, not in the click handler: with nothing waiting there is no oldest
+  const oldestId = [...waiting].sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt))[0]?.id;
 
   return (
     <div className="admin-card admin-panel admin-overview">
@@ -95,8 +97,8 @@ export default function AdminOverview() {
             value={range} options={RANGES} onChange={setRange}
           />
           <button
-            type="button" className="admin-btn admin-btn-primary" disabled={!oldest}
-            onClick={() => navigate(`/admin/submissions/${oldest.id}`)}
+            type="button" className="admin-btn admin-btn-primary" disabled={oldestId == null}
+            onClick={() => navigate(`/admin/submissions/${oldestId}`)}
           >
             Start reviewing <ArrowRight aria-hidden="true" />
           </button>
@@ -113,17 +115,18 @@ export default function AdminOverview() {
       <div className="admin-card admin-graph-total">
         <span className="admin-stat-icon is-brand" aria-hidden="true"><Utensils /></span>
         <div>
-          <p className="admin-stat-label">Total restaurants in knowledge graph</p>
+          <p className="admin-stat-label">Restaurants on FoodSight</p>
           <p className="admin-stat-value">
-            {MOCK_GRAPH_RESTAURANTS.toLocaleString("en-US")} <small>Restaurant nodes</small>
+            {submissionsInfo?.restaurants != null ? submissionsInfo.restaurants.toLocaleString("en-US") : "–"}{" "}
+            <small>{submissionsInfo?.submittedRestaurants ? `${submissionsInfo.submittedRestaurants} from submissions` : "in the database"}</small>
           </p>
         </div>
         <span className="admin-growth">
-          <ArrowUp aria-hidden="true" /> +{approved} in the {rangeLabel.toLowerCase()}
+          <ArrowUp aria-hidden="true" /> +{approved} approved in the {rangeLabel.toLowerCase()}
         </span>
       </div>
 
-      <WeeklyChart counts={MOCK_WEEKLY_SUBMISSIONS} />
+      <WeeklyChart counts={weeklyCounts(submissions, WEEKS_SHOWN)} />
     </div>
   );
 }

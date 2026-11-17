@@ -27,6 +27,10 @@ only (stage 3). No AI is used here.
     with their distance; the top-level nearby_places lists every place once
   - Attaches reviews and facilities. Every choice and its reason goes to
     merge_log.
+  - Adds the restaurants registered by their business and approved by an
+    admin (submissions.py, read from PostgreSQL): source "submitted", with
+    the business's own values, the section and nearby counts from their pin.
+    Every other record has source "extracted".
   - Writes data/3_merged/pj_merged.json
 
 Usage:
@@ -716,6 +720,8 @@ def build_record(osm, google, resolved, merge_log, conflicts, reviews, facilitie
     ]
 
     record = {
+        # extracted (OpenStreetMap + Google) or submitted (submissions.py)
+        "source": "extracted",
         "osm_id": _s(osm.get("osm_id")),
         # node (a point) or way (an outline, such as a building; its pin is the
         # outline's centre). OSM numbers each kind separately, so osm_id needs
@@ -798,6 +804,7 @@ def main():
         "with_nearby": 0,
         "nearby_links": 0,
         "reviews_attached": 0,
+        "submitted": 0,
     }
 
     restaurants = []
@@ -867,6 +874,22 @@ def main():
 
     save_cache(nominatim_cache, NOMINATIM_CACHE_FILE)
 
+    # Restaurants registered by their business and approved by an admin
+    from src.s3_mergers.submissions import load_submissions, submission_record
+    submissions = load_submissions()
+    if submissions is None:
+        print("  Business submissions: none (the table business_submission does not exist yet: "
+              "run db/migrations/028_business_submission.sql)")
+    for sub in submissions or []:
+        record, has_area = submission_record(sub, polygons, nearby, city)
+        restaurants.append(record)
+        stats["submitted"] += 1
+        stats["with_area"] += has_area
+        stats["with_nearby"] += record["nearby_context"] is not None
+        stats["nearby_links"] += len(record["nearby_places"])
+        print(f"  [submitted] {record['name'][:28]:30} -> business submission {record['submission_id']}"
+              + ("" if has_area else " (WARNING: its pin is in no section)"))
+
     # Build areas reference block
     areas_out = [
         {
@@ -889,6 +912,7 @@ def main():
             "total_restaurants": len(restaurants),
             "google_matched": stats["google_matched"],
             "osm_only": stats["osm_only"],
+            "submitted_restaurants": stats["submitted"],
             "restaurants_with_conflicts": stats["with_conflicts"],
             "conflict_fields": stats["conflict_fields"],
             "nominatim_calls_made": stats["nominatim_made"],
@@ -922,6 +946,7 @@ def main():
     print(f"  Total restaurants:        {m['total_restaurants']}")
     print(f"  Google matched:           {m['google_matched']}")
     print(f"  OSM only (no match):      {m['osm_only']}")
+    print(f"  Submitted by a business:  {m['submitted_restaurants']} (approved or live business submissions)")
     print(f"  Sources disagree:         {m['restaurants_with_conflicts']} restaurants, "
           f"{m['conflict_fields']} fields (the AI chooses in run_4_profiling.py)")
     print(f"  Nominatim lookups made:   {m['nominatim_calls_made']} "

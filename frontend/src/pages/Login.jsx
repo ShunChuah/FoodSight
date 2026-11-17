@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, errorCode } from '../api/client.js'
 import AuthLayout from '../components/AuthLayout.jsx'
+import { homeFor } from '../roles.js'
 import { PasswordField, TextField } from '../components/fields.jsx'
 import { Alert, Button, FooterNote, GoogleButton, TextLink } from '../components/ui.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
@@ -31,8 +32,8 @@ export default function Login() {
     try {
       // The login endpoint takes a form body and calls the email field "username".
       await api.post('/auth/login', new URLSearchParams({ username: email, password }))
-      await refresh()
-      navigate('/chat', { replace: true })
+      const account = await refresh()
+      navigate(homeFor(account), { replace: true })
     } catch (requestError) {
       const code = errorCode(requestError)
       if (code === 'LOGIN_USER_NOT_VERIFIED') setUnverified(true)
